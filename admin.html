@@ -55,9 +55,10 @@
   .gate input { width:100%; margin-bottom:8px; }
 
   /* ── 일별 차트 ──
-     색은 눈대중이 아니라 검증기로 통과시킨 값이다 (골드↔블루 CVD ΔE 27.5).
+     색은 눈대중이 아니라 검증기를 돌려 통과시킨 값이다
+     (골드↔초록 CVD ΔE 9.0 protan · 일반 18.3, 둘 다 표면 대비 3:1 이상).
      계열 색은 막대에만 쓰고 글자에는 쓰지 않는다 — 옆의 색 점이 정체를 나타낸다. */
-  .viz { --surface:#ffffff; --sent:#B78A22; --blocked:#2a78d6;
+  .viz { --surface:#ffffff; --sent:#B78A22; --replied:#158a61; --blocked:#2a78d6;
          --grid:#eceae3; --ink:#1d1d1f; --ink2:#6b6b6b; }
   .vizwrap { overflow-x:auto; padding:2px 0 4px; position:relative; }
   .viz svg { display:block; }
@@ -275,16 +276,28 @@ function fillStaffPicker(accounts){
 function renderSummary(d){
   const t = d.totals || {};
   let h = truncNote(d) +
+    // 회신은 받은편지함을 훑어야 알 수 있다. 서버리스에는 상주 프로세스가 없어
+    // 자동으로 돌지 않으므로, 눌러서 갱신하고 마지막 갱신 시각을 밝힌다.
+    '<div class="filters" style="margin:-2px 0 12px">' +
+      '<button class="btn dark" id="syncBtn" onclick="syncReplies()">📥 회신 수집 (전원)</button>' +
+      '<span class="muted" id="syncMsg">받은편지함을 훑어 크리에이터 회신을 세어 둡니다. ' +
+      '누르기 전까지 회신 수는 갱신되지 않습니다.</span>' +
+    '</div>' +
     '<div class="cards">' +
     '<div class="card"><div class="l">발송</div><div class="n mono">'+(t.sent||0)+'</div></div>' +
     '<div class="card"><div class="l">접촉한 크리에이터</div><div class="n mono">'+(t.people||0)+'</div></div>' +
+    '<div class="card"><div class="l">회신</div><div class="n mono">'+(t.replied||0)+
+      '</div><div class="l" style="margin-top:2px">'+pct(t.replied||0, t.sent||0)+' 회신율</div></div>' +
     '<div class="card"><div class="l">중복으로 막힌 시도</div><div class="n mono">'+(t.blocked||0)+'</div></div>' +
     '</div>';
 
-  h += '<div class="scroll"><table><thead><tr><th>담당자</th><th>발송</th><th>중복 시도</th><th>마지막 발송</th></tr></thead><tbody>' +
+  h += '<div class="scroll"><table><thead><tr><th>담당자</th><th>발송</th><th>회신</th><th>회신율</th>' +
+    '<th>중복 시도</th><th>마지막 발송</th></tr></thead><tbody>' +
     (d.staff||[]).map(s =>
       '<tr><td><b>'+esc(s.name||s.email)+'</b><div class="muted">'+esc(s.email)+'</div></td>' +
       '<td class="mono">'+(s.sent || '<span class="muted">0</span>')+'</td>' +
+      '<td class="mono">'+(s.replied ? '<b style="color:#158a61">'+s.replied+'</b>' : '<span class="muted">0</span>')+'</td>' +
+      '<td class="mono muted">'+pct(s.replied||0, s.sent||0)+'</td>' +
       '<td class="mono">'+(s.blocked ? '<span class="tag hold">'+s.blocked+'</span>' : '<span class="muted">0</span>')+'</td>' +
       '<td class="mono muted">'+esc(fmt(s.lastAt))+'</td></tr>').join("") +
     '</tbody></table></div>';
@@ -307,6 +320,9 @@ function barPath(x, y, w, h, r){
          " L"+(x+w-rr)+","+y+" Q"+(x+w)+","+y+" "+(x+w)+","+(y+rr)+" L"+(x+w)+","+(y+h)+" Z";
 }
 
+// 비율 표기 — 분모가 0이면 숫자 대신 줄표를 낸다 (0% 는 거짓말이다)
+function pct(a, b){ return b ? Math.round(a/b*100) + "%" : "—"; }
+
 function niceMax(n){
   if(n <= 4) return Math.max(n, 4);
   const p = Math.pow(10, Math.floor(Math.log10(n)));
@@ -323,9 +339,10 @@ function renderDaily(d){
 
   const totalSent = rows.reduce((s,r)=>s+r.sent,0);
   const totalBlocked = rows.reduce((s,r)=>s+r.blocked,0);
+  const totalReplied = rows.reduce((s,r)=>s+(r.replied||0),0);
   const busiest = rows.reduce((a,b)=> b.sent > a.sent ? b : a, rows[0]);
   const activeDays = rows.filter(r=>r.sent>0).length;
-  const max = niceMax(Math.max(1, ...rows.map(r=>Math.max(r.sent, r.blocked))));
+  const max = niceMax(Math.max(1, ...rows.map(r=>Math.max(r.sent, r.replied||0))));
 
   const W = PADL + rows.length * BAND + 8;
   const plotH = H - PADT - PADB;
@@ -347,7 +364,7 @@ function renderDaily(d){
     const x0 = PADL + i * BAND;
     const bx = x0 + (BAND - (BARW*2 + GAP)) / 2;
     if(r.sent)    bars += '<path d="'+barPath(bx, y(r.sent), BARW, PADT+plotH-y(r.sent), 4)+'" fill="var(--sent)" />';
-    if(r.blocked) bars += '<path d="'+barPath(bx+BARW+GAP, y(r.blocked), BARW, PADT+plotH-y(r.blocked), 4)+'" fill="var(--blocked)" />';
+    if(r.replied) bars += '<path d="'+barPath(bx+BARW+GAP, y(r.replied), BARW, PADT+plotH-y(r.replied), 4)+'" fill="var(--replied)" />';
 
     if(i % every === 0){
       bars += '<text class="tick" x="'+(x0+BAND/2)+'" y="'+(H-8)+'" text-anchor="middle">'+
@@ -363,13 +380,15 @@ function renderDaily(d){
     '<div class="cards">' +
       '<div class="card"><div class="l">기간 내 발송</div><div class="n mono">'+totalSent+'</div></div>' +
       '<div class="card"><div class="l">발송한 날</div><div class="n mono">'+activeDays+'<span style="font-size:14px;color:#999">일</span></div></div>' +
+      '<div class="card"><div class="l">회신</div><div class="n mono">'+totalReplied+
+        '</div><div class="l" style="margin-top:2px">'+pct(totalReplied, totalSent)+' 회신율</div></div>' +
       '<div class="card"><div class="l">가장 많은 날</div><div class="n mono">'+busiest.sent+
         '</div><div class="l" style="margin-top:2px">'+esc(busiest.date)+'</div></div>' +
       '<div class="card"><div class="l">중복으로 막힘</div><div class="n mono">'+totalBlocked+'</div></div>' +
     '</div>' +
     '<div class="viz">' +
       '<div class="legend"><span><i style="background:var(--sent)"></i>발송</span>' +
-      '<span><i style="background:var(--blocked)"></i>중복 시도 (막힘)</span>' +
+      '<span><i style="background:var(--replied)"></i>회신</span>' +
       '<span class="muted" style="margin-left:auto">막대에 마우스를 올리면 그날 내역이 보입니다</span></div>' +
       '<div class="vizwrap" id="vizWrap">' +
         '<svg width="'+W+'" height="'+H+'" role="img" aria-label="일별 아웃리치 발송 건수">' +
@@ -379,11 +398,12 @@ function renderDaily(d){
     '</div>' +
     // 차트로 못 읽는 값은 표로 읽는다
     '<div class="scroll" style="margin-top:6px"><table><thead><tr>' +
-      '<th>날짜</th><th>발송</th><th>중복 시도</th><th>담당자별</th>' +
+      '<th>날짜</th><th>발송</th><th>회신</th><th>중복 시도</th><th>담당자별</th>' +
     '</tr></thead><tbody>' +
-    rows.slice().reverse().filter(r=>r.sent||r.blocked).map(r =>
+    rows.slice().reverse().filter(r=>r.sent||r.blocked||r.replied).map(r =>
       '<tr><td class="mono">'+esc(r.date)+'</td>' +
       '<td class="mono">'+r.sent+'</td>' +
+      '<td class="mono">'+(r.replied ? '<b style="color:#158a61">'+r.replied+'</b>' : '<span class="muted">0</span>')+'</td>' +
       '<td class="mono">'+(r.blocked ? '<span class="tag hold">'+r.blocked+'</span>' : '<span class="muted">0</span>')+'</td>' +
       '<td>'+esc(Object.keys(r.by||{}).map(k => k+" "+r.by[k]).join(" · "))+'</td></tr>').join("") +
     '</tbody></table></div>';
@@ -401,6 +421,7 @@ function wireTips(rows){
       const who = Object.keys(r.by||{});
       tip.innerHTML = '<b>'+esc(r.date)+'</b><br />' +
         '<span class="k">발송</span> <b>'+r.sent+'</b>건' +
+        (r.replied ? '<br /><span class="k">회신</span> <b>'+r.replied+'</b>건' : '') +
         (r.blocked ? '<br /><span class="k">중복으로 막힘</span> <b>'+r.blocked+'</b>건' : '') +
         (who.length ? '<br />'+who.map(k => '<span class="k">'+esc(k)+'</span> '+r.by[k]).join('<br />') : '');
       tip.classList.add("on");
@@ -514,6 +535,41 @@ async function loadMail(){
       (rows.length ? "" : '<div class="muted" style="padding:20px 0">메일이 없습니다.</div>');
   }
   return rows.length + "건";
+}
+
+/* ── 회신 수집 ──
+   담당자 전원의 받은편지함을 훑어 "우리가 보낸 적 있는 주소에서 온 메일" 만 기록한다.
+   화면을 열 때마다 IMAP 을 뒤지면 담당자가 10명일 때 못 견디므로, 세어서 남겨 둔다. */
+async function syncReplies(){
+  const btn = $("syncBtn"), msg = $("syncMsg");
+  if(!btn) return;
+  btn.disabled = true;
+  msg.textContent = "받은편지함을 훑는 중… (인원에 따라 30초 이상 걸릴 수 있습니다)";
+  try {
+    const days = $("days").value === "0" ? 90 : Number($("days").value);
+    const r = await fetch("/api/replies", {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, headers()),
+      body: JSON.stringify({ all:true, days })
+    });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+
+    const x = d.totals || {};
+    const failed = (d.results||[]).filter(v => v.error);
+    msg.innerHTML = '새 회신 <b>'+(x.found||0)+'</b>건' +
+      (x.duplicate ? ' · 이미 센 것 '+x.duplicate+'건' : '') +
+      ' · 대조 대상 '+d.contacted+'명' +
+      (d.skipped ? ' · <span style="color:#a23b2e">시간이 모자라 '+d.skipped.length+'명은 못 훑었습니다 (다시 누르세요)</span>' : '') +
+      (failed.length ? '<br /><span style="color:#a23b2e">실패: ' +
+        failed.map(v => esc(v.user)+' — '+esc(v.error)).join(' / ') + '</span>' : '');
+    load();   // 집계 갱신
+  } catch(e){
+    msg.innerHTML = '<span style="color:#a23b2e">'+esc(String(e.message||e))+'</span>';
+  } finally {
+    if($("syncBtn")) $("syncBtn").disabled = false;
+  }
 }
 
 /* ── 지난 발송 가져오기 ──

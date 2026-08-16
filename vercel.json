@@ -9,6 +9,9 @@
     "api/mailbox.js": {
       "maxDuration": 60
     },
+    "api/replies.js": {
+      "maxDuration": 60
+    },
     "api/backfill.js": {
       "maxDuration": 60
     },

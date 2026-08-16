@@ -6,6 +6,7 @@
 //   GET /api/admin?view=daily&tz=-540  → 일별 발송 건수 (tz 는 브라우저 시차, 분)
 //   GET /api/admin?view=sent&by=…      → 발송 이력 (담당자로 거르기)
 //   GET /api/admin?view=blocked        → 중복이라 보류된 시도
+//   GET /api/admin?view=replies        → 크리에이터 회신 기록
 //   GET /api/admin?view=people         → 접촉한 크리에이터 단위로 묶어서
 //   공통 파라미터: limit(기본 500), q(주소·이름·핸들·캠페인 검색), days(최근 N일)
 //
@@ -24,10 +25,11 @@ function isAdmin(user) {
   return Boolean(user && ADMIN_EMAILS.includes(String(user.email).toLowerCase()));
 }
 
-// 검색어는 주소·이름·핸들·캠페인·담당자 어디에 걸려도 잡히게 한다
+// 검색어는 주소·이름·핸들·캠페인·담당자 어디에 걸려도 잡히게 한다.
+// 회신 기록은 상대가 to 가 아니라 from 이므로 그쪽도 함께 본다.
 function matches(r, q) {
   if (!q) return true;
-  const hay = [r.to, r.name, r.handle, r.campaign, r.by, r.byName]
+  const hay = [r.to, r.from, r.name, r.fromName, r.handle, r.subject, r.campaign, r.by, r.byName]
     .filter(Boolean).join(" ").toLowerCase();
   return hay.indexOf(q) >= 0;
 }
@@ -100,16 +102,16 @@ function fillDays(map, days, tzMin, maxFill) {
   const out = [];
   for (let ms = firstMs; ms <= Date.parse(today + "T00:00:00Z"); ms += 86400e3) {
     const k = new Date(ms).toISOString().slice(0, 10);
-    out.push(map.get(k) || { date: k, sent: 0, blocked: 0, by: {} });
+    out.push(map.get(k) || { date: k, sent: 0, blocked: 0, replied: 0, by: {} });
   }
   return out;
 }
 
-function daily(sent, blocked, tzMin, days) {
+function daily(sent, blocked, replies, tzMin, days) {
   const m = new Map();
   const touch = k => {
     let cur = m.get(k);
-    if (!cur) { cur = { date: k, sent: 0, blocked: 0, by: {} }; m.set(k, cur); }
+    if (!cur) { cur = { date: k, sent: 0, blocked: 0, replied: 0, by: {} }; m.set(k, cur); }
     return cur;
   };
 
@@ -124,6 +126,11 @@ function daily(sent, blocked, tzMin, days) {
   blocked.forEach(r => {
     const k = dayKey(r.at, tzMin);
     if (k) touch(k).blocked++;
+  });
+  // 회신은 **받은 날**에 센다 — 언제 보냈는지가 아니라 언제 답이 왔는지가 궁금한 것이다
+  replies.forEach(r => {
+    const k = dayKey(r.at, tzMin);
+    if (k) touch(k).replied++;
   });
 
   return fillDays(m, days, tzMin, 180);
@@ -140,15 +147,15 @@ function roster() {
   }));
 }
 
-function summarize(sent, blocked) {
+function summarize(sent, blocked, replies) {
   const byPerson = new Map();
   // 아직 한 건도 안 보낸 담당자도 0 으로 보여준다 — 누가 놀고 있는지도 현황이다
   roster().forEach(a => byPerson.set(a.email, {
-    email: a.email, name: a.name, sent: 0, blocked: 0, lastAt: ""
+    email: a.email, name: a.name, sent: 0, blocked: 0, replied: 0, lastAt: ""
   }));
   sent.forEach(r => {
     const k = r.by || "(알 수 없음)";
-    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, lastAt: "" };
+    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, replied: 0, lastAt: "" };
     cur.sent++;
     if (!cur.name && r.byName) cur.name = r.byName;
     if (String(r.at || "") > cur.lastAt) cur.lastAt = r.at || "";
@@ -156,14 +163,22 @@ function summarize(sent, blocked) {
   });
   blocked.forEach(r => {
     const k = r.by || "(알 수 없음)";
-    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, lastAt: "" };
+    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, replied: 0, lastAt: "" };
     cur.blocked++;
+    byPerson.set(k, cur);
+  });
+
+  // 회신은 **보낸 사람** 앞으로 단다 — 누구의 아웃리치가 답을 받았는지가 성과다
+  replies.forEach(r => {
+    const k = r.by || "(알 수 없음)";
+    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, replied: 0, lastAt: "" };
+    cur.replied++;
     byPerson.set(k, cur);
   });
 
   const uniq = new Set(sent.map(r => H.normEmail(r.to)).filter(Boolean));
   return {
-    totals: { sent: sent.length, people: uniq.size, blocked: blocked.length },
+    totals: { sent: sent.length, people: uniq.size, blocked: blocked.length, replied: replies.length },
     // 많이 보낸 순, 같으면 이름순 — 0건인 사람은 자연히 아래로 모인다
     staff: [...byPerson.values()].sort((a, b) => b.sent - a.sent || String(a.name).localeCompare(String(b.name)))
   };
@@ -204,9 +219,10 @@ module.exports = async (req, res) => {
     const needle = String(q.q || "").trim().toLowerCase();
     const by = String(q.by || "").trim().toLowerCase();
 
-    const [sentAll, blockedAll] = await Promise.all([
+    const [sentAll, blockedAll, replyAll] = await Promise.all([
       H.recent(limit),
-      H.recentBlocked(Math.min(limit, H.BLOCK_MAX))
+      H.recentBlocked(Math.min(limit, H.BLOCK_MAX)),
+      H.recentReplies(Math.min(limit, H.REPLY_MAX))
     ]);
 
     const keep = r => withinDays(r, days) && matches(r, needle) &&
@@ -217,6 +233,7 @@ module.exports = async (req, res) => {
     const byTime = (a, b) => String(b.at || "").localeCompare(String(a.at || ""));
     const sent = sentAll.filter(keep).sort(byTime);
     const blocked = blockedAll.filter(keep).sort(byTime);
+    const replies = replyAll.filter(keep).sort(byTime);
 
     const base = {
       historyEnabled: true,
@@ -232,7 +249,7 @@ module.exports = async (req, res) => {
       // tz 는 브라우저의 getTimezoneOffset() (KST 는 -540). 없으면 UTC 기준이 된다.
       const tzMin = Number.isFinite(Number(q.tz)) ? Number(q.tz) : 0;
       res.status(200).json(Object.assign(base, {
-        rows: daily(sent, blocked, tzMin, days),
+        rows: daily(sent, blocked, replies, tzMin, days),
         staff: [...new Set(sent.map(r => r.byName || r.by).filter(Boolean))]
       }));
       return;
@@ -244,7 +261,9 @@ module.exports = async (req, res) => {
       return;
     }
 
-    res.status(200).json(Object.assign(base, summarize(sent, blocked), {
+    if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
+
+    res.status(200).json(Object.assign(base, summarize(sent, blocked, replies), {
       recentSent: sent.slice(0, 20),
       recentBlocked: blocked.slice(0, 20)
     }));

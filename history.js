@@ -29,8 +29,10 @@ const TTL_SEC = Math.round(WINDOW_DAYS * 86400);
 
 const LOG_KEY = "outreach:log";          // 성공한 발송
 const BLOCK_KEY = "outreach:blocked";    // 중복이라 보류된 시도
+const REPLY_KEY = "outreach:replies";    // 크리에이터에게서 온 회신
 const LOG_MAX = 5000;
 const BLOCK_MAX = 2000;
+const REPLY_MAX = 5000;
 
 function conf() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
@@ -256,9 +258,27 @@ async function readList(key, max, n) {
 
 function recent(n) { return readList(LOG_KEY, LOG_MAX, n); }
 function recentBlocked(n) { return readList(BLOCK_KEY, BLOCK_MAX, n); }
+function recentReplies(n) { return readList(REPLY_KEY, REPLY_MAX, n); }
+
+// ─── 회신 기록 ───────────────────────────────────────────────────
+// 받은편지함을 볼 때마다 IMAP 을 뒤지면 담당자가 10명일 때 화면이 못 견딘다.
+// 그래서 회신을 한 번 훑어 여기 남기고, 집계는 이 기록만 읽는다.
+// 같은 메일을 두 번 세지 않도록 messageId(없으면 계정+발신자+시각)로 판별한다.
+async function recordReply(rec, dedupeId) {
+  if (!enabled()) return { skipped: true };
+  if (dedupeId) {
+    const seen = await cmd(["SISMEMBER", IMPORTED_KEY, "r:" + dedupeId]);
+    if (seen === 1) return { duplicate: true };
+  }
+  const tail = [["LPUSH", REPLY_KEY, JSON.stringify(rec)], ["LTRIM", REPLY_KEY, "0", String(REPLY_MAX - 1)]];
+  if (dedupeId) tail.unshift(["SADD", IMPORTED_KEY, "r:" + dedupeId]);
+  await pipeline(tail);
+  return { recorded: true };
+}
 
 module.exports = {
-  enabled, lookup, reserve, release, log, logBlocked, importSend, recent, recentBlocked,
+  enabled, lookup, reserve, release, log, logBlocked, importSend,
+  recordReply, recent, recentBlocked, recentReplies,
   normEmail, normHandle,
-  WINDOW_DAYS, LOG_MAX, BLOCK_MAX
+  WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };
