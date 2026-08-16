@@ -883,7 +883,8 @@ function campaign(){
     stepsIntro: val("stepsIntro"),
     steps: ["s1","s2","s3","s4"].map(val).filter(Boolean),
     applyUrl: val("applyUrl"), applyLabel: val("applyLabel"), notes: val("notes"),
-    senderName: a.name || "", senderEmail: a.email || "", senderTitle: a.title || ""
+    senderName: a.name || "", senderEmail: a.email || "", senderTitle: a.title || "",
+    logoUrl: (CFG && CFG.logoUrl) || ""   // 미리보기가 실제 발송과 같은 로고를 쓰도록
   };
 }
 function recipients(){

@@ -151,6 +151,7 @@ module.exports = async (req, res) => {
         bcc: Boolean(process.env.NW_BCC),
         history: { enabled: H.enabled(), windowDays: H.WINDOW_DAYS },
         admin: isAdmin(me),          // 관리자 화면 버튼을 띄울지
+        logoUrl: process.env.LOGO_URL || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
         me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;
@@ -181,7 +182,9 @@ module.exports = async (req, res) => {
     const compose = r => Object.assign({}, campaign, r, {
       senderName: account ? account.name : (campaign.senderName || ""),
       senderEmail: account ? account.email : (campaign.senderEmail || ""),
-      senderTitle: (account && account.title) || campaign.senderTitle || ""
+      senderTitle: (account && account.title) || campaign.senderTitle || "",
+      // 로고 이미지 주소는 환경변수로 둔다 — 없으면 템플릿이 텍스트 워드마크로 그린다
+      logoUrl: campaign.logoUrl || process.env.LOGO_URL || ""
     });
 
     // ─── dryRun: 발송 없이 렌더 결과만 확인 ──────────────────────
