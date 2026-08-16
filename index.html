@@ -464,6 +464,14 @@ async function loadProducts(force){
   }
 }
 
+/* jpeg 변형이 없는 CDN 템플릿이면 원본(webp) URL 로 한 번 더 시도하고,
+   그것도 실패해야 "이미지 없음" 으로 바꾼다. */
+function thumbFail(img){
+  const alt = img.getAttribute("data-alt");
+  if(alt && img.src !== alt){ img.removeAttribute("data-alt"); img.src = alt; return; }
+  img.outerHTML = '<div class="noimg">이미지 없음</div>';
+}
+
 function renderPicker(){
   if(!PRODUCTS) return;
   const q = ($("pickSearch").value || "").trim().toLowerCase();
@@ -471,7 +479,8 @@ function renderPicker(){
   $("pickGrid").innerHTML = list.slice(0, 120).map((p,i) =>
     '<button type="button" class="pcard" onclick="choose('+PRODUCTS.indexOf(p)+')">' +
     (p.image
-      ? '<img class="thumb" src="'+esc(p.image)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;noimg&quot;>이미지 없음</div>\'" />'
+      ? '<img class="thumb" src="'+esc(p.image)+'" alt="" loading="lazy"' +
+        ' data-alt="'+esc(p.imageOrig||"")+'" onerror="thumbFail(this)" />'
       : '<div class="noimg">이미지 없음</div>') +
     '<div class="nm">'+esc(p.title)+'</div>' +
     '<div class="mt">'+esc(p.currency+" "+p.price)+
