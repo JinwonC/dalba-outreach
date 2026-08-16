@@ -3,10 +3,11 @@
 // TikTok Shop 상품 목록을 가져와 아웃리치 화면의 상품 선택기에 넘긴다.
 // 상품명 · 썸네일 · 가격 · 재고 · 판매상태(status) 를 반환한다.
 //
-//   GET /api/products            → 판매중(ACTIVATE) 상품만
-//   GET /api/products?all=1      → 전체 상태 포함
-//   GET /api/products?fresh=1    → 캐시 무시하고 다시 조회
-//   GET /api/products?debug=1    → 진단용. 원본 응답의 필드 구조를 함께 반환
+//   GET /api/products             → 판매중(ACTIVATE) 상품만
+//   GET /api/products?all=1       → 전체 상태 포함
+//   GET /api/products?fresh=1     → 목록 캐시 무시하고 다시 조회
+//   GET /api/products?debug=1     → 목록 응답의 원본 구조를 함께 반환
+//   GET /api/products?debugDetail=1 → 상세 응답의 원본 구조를 함께 반환
 //
 // ─── 왜 CRUVA 가 아니라 TikTok Shop 직접인가 ─────────────────────
 // CRUVA API 에는 상품 이미지 필드가 아예 없고, 상태도 의미가 문서화되지 않은
@@ -82,6 +83,55 @@ async function refreshAccessToken() {
 async function getAccessToken() {
   if (tokenCache.value && Date.now() < tokenCache.expiresAt) return tokenCache.value;
   return refreshAccessToken();
+}
+
+// ─── 상품 상세 (썸네일은 여기에만 있다) ──────────────────────────
+// products/search 응답 필드는 create_time/id/recommended_categories/sales_regions/
+// skus/status/title/update_time 뿐이고 이미지가 없다. 이미지는 상품 상세 API 에만
+// 들어 있어 상품마다 한 번씩 더 불러야 한다. 카탈로그는 자주 바뀌지 않으므로
+// 상품 ID 별로 오래 캐시해 재조회를 피한다.
+const DETAIL_TTL = 24 * 3600e3;
+const imageCache = new Map();   // id -> { url, at }
+
+async function fetchDetailImage(id, token) {
+  const hit = imageCache.get(id);
+  if (hit && Date.now() - hit.at < DETAIL_TTL) return hit.url;
+
+  const path = `/product/202309/products/${id}`;
+  const params = {
+    app_key: APP_KEY,
+    shop_cipher: SHOP_CIPHER,
+    timestamp: String(Math.floor(Date.now() / 1000))
+  };
+  params.sign = sign(path, params, "");
+
+  let url = "";
+  try {
+    const r = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
+      headers: { "x-tts-access-token": token }
+    });
+    const d = await r.json();
+    if (d.code === 0) url = rawImage(d.data || {});
+  } catch (_) { /* 개별 실패는 무시 */ }
+
+  // 실패해도 빈 값을 캐시한다 — 한 상품 때문에 매 요청마다 재시도하지 않도록
+  imageCache.set(id, { url, at: Date.now() });
+  return url;
+}
+
+// 상품이 100개가 넘어 순차로 돌면 함수 제한시간을 넘긴다. 동시 8개로 묶고,
+// 마감시간을 넘기면 거기까지만 채운다(다음 요청이 캐시 위에서 이어받는다).
+async function enrichImages(items, token, deadline) {
+  const queue = items.filter(p => p.id && !p.image);
+  let i = 0;
+  const worker = async () => {
+    while (i < queue.length && Date.now() < deadline) {
+      const p = queue[i++];
+      const url = await fetchDetailImage(p.id, token);
+      if (url) { p.imageOrig = url; p.image = toJpeg(url); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, queue.length) }, worker));
 }
 
 // ─── 상품 검색 1페이지 ───────────────────────────────────────────
@@ -177,11 +227,11 @@ function pickStock(p) {
 
 function normalize(p) {
   const { price, currency } = pickPrice(p);
-  const orig = rawImage(p);
+  const orig = rawImage(p);   // 목록 응답에는 보통 없다. 상세에서 채운다.
   return {
     id: String(p.id || ""),
     title: p.title || p.product_name || "",
-    status: String(p.status || ""),          // ACTIVATE / SELLER_DEACTIVATED / DRAFT …
+    status: String(p.status || ""),          // ACTIVATE / SELLER_DEACTIVATED / DELETED / FREEZE
     image: toJpeg(orig),                     // 메일용 (jpeg 우선)
     imageOrig: orig,                         // 화면용 대체 — jpeg 변형이 없는 템플릿 대비
     price, currency,
@@ -267,14 +317,32 @@ module.exports = async (req, res) => {
     items = items.slice().sort((a, b) =>
       (b.stock > 0) - (a.stock > 0) || a.title.localeCompare(b.title));
 
+    // 썸네일은 상세 API 에서만 오므로 반환할 목록에 대해서만 채운다.
+    // (전체가 아니라 실제로 보여줄 것만 — 불필요한 호출을 줄인다)
+    await enrichImages(items, await getAccessToken(), Date.now() + 40e3);
+
+    // 진단용: 상세 응답이 실제로 어떤 모양인지 확인
+    let debugDetail;
+    if (q.debugDetail === "1" && items[0]) {
+      const path = `/product/202309/products/${items[0].id}`;
+      const dp = { app_key: APP_KEY, shop_cipher: SHOP_CIPHER, timestamp: String(Math.floor(Date.now() / 1000)) };
+      dp.sign = sign(path, dp, "");
+      const rr = await fetch(`${BASE}${path}?${new URLSearchParams(dp)}`, {
+        headers: { "x-tts-access-token": await getAccessToken() }
+      });
+      const dd = await rr.json();
+      debugDetail = { code: dd.code, message: dd.message, keys: Object.keys(dd.data || {}), data: dd.data };
+    }
+
     res.setHeader("Cache-Control", "no-store");
     res.status(200).json({
       updated: new Date(listCache.at).toISOString(),
       total: listCache.items.length,
       returned: items.length,
       statuses: [...new Set(listCache.items.map(p => p.status))],
-      withImage: listCache.items.filter(p => p.image).length,   // 썸네일 진단용
+      withImage: items.filter(p => p.image).length,   // 썸네일 진단용
       products: items,
+      ...(debugDetail ? { debugDetail } : {}),
       ...(q.debug === "1" ? { debugFirstRawKeys: Object.keys(listCache.raw || {}), debugFirstRaw: listCache.raw } : {})
     });
   } catch (e) {
