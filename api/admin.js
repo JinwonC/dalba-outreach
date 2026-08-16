@@ -118,8 +118,10 @@ module.exports = async (req, res) => {
     if (!isAdmin(me)) { res.status(403).json({ error: "관리자만 볼 수 있습니다" }); return; }
 
     if (!H.enabled()) {
+      // 화면이 "누가 로그인했는지" 는 계속 보여줄 수 있어야 하므로 me 도 함께 준다
       res.status(200).json({
         historyEnabled: false,
+        me: A.publicUser(me),
         error: "발송 이력 저장소가 연결되지 않아 보여줄 기록이 없습니다 (Vercel → Storage → Upstash Redis)"
       });
       return;
