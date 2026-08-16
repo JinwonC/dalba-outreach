@@ -10,7 +10,7 @@
 //
 // ─── 왜 CRUVA 가 아니라 TikTok Shop 직접인가 ─────────────────────
 // CRUVA API 에는 상품 이미지 필드가 아예 없고, 상태도 의미가 문서화되지 않은
-// 숫자 코드(1/3/4/6)로만 온다. TikTok Shop 원본 API 는 main_images 와
+// 숫자 코드(1/3/4/6)로만 온다. TikTok Shop 원본 API 는 상품 이미지와
 // 문자열 status("ACTIVATE" 등)를 함께 주므로 썸네일·판매중 판별이 한 번에 해결된다.
 //
 // ─── 환경변수 (Vercel) ───────────────────────────────────────────
@@ -108,18 +108,50 @@ async function searchPage(pageToken, token) {
 // ─── 응답 정규화 ─────────────────────────────────────────────────
 // 상품 하나에서 화면에 필요한 것만 뽑는다. API 필드 모양이 조금씩 달라도
 // 깨지지 않도록 방어적으로 접근한다.
-function pickImage(p) {
-  const imgs = p.main_images || p.images || [];
-  for (const im of imgs) {
-    const urls = im && (im.urls || im.url_list) || [];
-    const u = Array.isArray(urls) ? urls[0] : urls;
-    if (u) {
-      // TikTok CDN 은 같은 경로에서 .webp / .jpeg 를 모두 제공한다.
-      // 메일 클라이언트 호환(Outlook 등은 webp 미지원)을 위해 jpeg 를 우선한다.
-      return String(u).replace(/\.webp(\?|$)/i, ".jpeg$1");
+//
+// 이미지 필드 이름은 API 버전마다 다르고(main_images / images / product_images …),
+// 그 안의 URL 배열 키도 urls / url_list 등으로 갈린다. 이름을 하나로 가정하면
+// 어긋나는 순간 썸네일이 통째로 비므로, ① 알려진 경로를 먼저 보고
+// ② 못 찾으면 응답 객체를 훑어 이미지처럼 생긴 CDN URL 을 집는다.
+function looksLikeImageUrl(u) {
+  if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return false;
+  return /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(u) ||
+         /tplv-|\/tos-|ibyteimg|ttcdn|tiktokcdn|byteimg/i.test(u);
+}
+
+function deepFindImage(o, depth) {
+  if (!o || depth > 8) return "";
+  if (typeof o === "string") return looksLikeImageUrl(o) ? o : "";
+  if (Array.isArray(o)) {
+    for (const x of o) { const r = deepFindImage(x, depth + 1); if (r) return r; }
+    return "";
+  }
+  if (typeof o === "object") {
+    // 이미지로 보이는 키를 먼저 훑어 엉뚱한 URL 을 집을 확률을 낮춘다
+    const score = k => (/image|img|thumb|cover|pic|url/i.test(k) ? 0 : 1);
+    for (const k of Object.keys(o).sort((a, b) => score(a) - score(b))) {
+      const r = deepFindImage(o[k], depth + 1);
+      if (r) return r;
     }
   }
   return "";
+}
+
+function rawImage(p) {
+  for (const key of ["main_images", "images", "product_images", "main_image", "cover_image"]) {
+    const v = p[key];
+    if (!v) continue;
+    const r = deepFindImage(v, 0);
+    if (r) return r;
+  }
+  return deepFindImage(p, 0);
+}
+
+// TikTok CDN 은 같은 경로에서 .webp / .jpeg 를 모두 내주는 경우가 많다.
+// 메일 클라이언트 호환(Outlook 등은 webp 미지원)을 위해 jpeg 를 우선하되,
+// 그 변형이 없는 템플릿도 있으므로 원본 URL 을 함께 돌려주고 화면에서 대체하게 한다.
+function toJpeg(u) {
+  return u ? String(u).replace(/\.webp(\?|$)/i, ".jpeg$1") : "";
 }
 
 function pickPrice(p) {
@@ -145,11 +177,13 @@ function pickStock(p) {
 
 function normalize(p) {
   const { price, currency } = pickPrice(p);
+  const orig = rawImage(p);
   return {
     id: String(p.id || ""),
     title: p.title || p.product_name || "",
     status: String(p.status || ""),          // ACTIVATE / SELLER_DEACTIVATED / DRAFT …
-    image: pickImage(p),
+    image: toJpeg(orig),                     // 메일용 (jpeg 우선)
+    imageOrig: orig,                         // 화면용 대체 — jpeg 변형이 없는 템플릿 대비
     price, currency,
     stock: pickStock(p),
     url: p.id ? `https://shop.tiktok.com/view/product/${p.id}` : ""
@@ -239,6 +273,7 @@ module.exports = async (req, res) => {
       total: listCache.items.length,
       returned: items.length,
       statuses: [...new Set(listCache.items.map(p => p.status))],
+      withImage: listCache.items.filter(p => p.image).length,   // 썸네일 진단용
       products: items,
       ...(q.debug === "1" ? { debugFirstRawKeys: Object.keys(listCache.raw || {}), debugFirstRaw: listCache.raw } : {})
     });
