@@ -3,38 +3,38 @@
 // 크리에이터 아웃리치 메일을 **네이버웍스 SMTP** 로 실제 발송한다.
 // 템플릿은 루트의 email-template.js 한 곳에서만 만든다(미리보기 = 실제 발송본 보장).
 //
-//   GET  /api/outreach-send        → 설정 상태 조회 (SMTP 호스트·허용 도메인·배치 상한)
+//   GET  /api/outreach-send        → 설정 상태 조회 (모드·SMTP·허용 도메인·로그인한 사람)
 //   POST /api/outreach-send        → 단건/대량 발송
 //
-// ─── 담당자 10명 이상을 어떻게 다루나 ─────────────────────────────
-// 담당자마다 환경변수를 두면 사람이 늘 때마다 Vercel 설정 + 재배포가 필요해 관리가 안 된다.
-// 그래서 **각 담당자가 자기 네이버웍스 계정/앱 비밀번호를 브라우저에 한 번 입력**하고,
-// 그 자격증명을 요청마다 함께 보내 자기 주소로 발송하는 방식(BYO credential)을 기본으로 한다.
-//   · 신규 담당자 온보딩 = 앱 비밀번호 발급 후 입력. 코드 변경·재배포 없음.
-//   · 각자 자기 주소로 나가고 답장도 자기에게 온다.
-//   · 자격증명은 서버에 저장하지 않는다 (요청 처리 중에만 메모리에 존재).
+// ─── 발신 계정을 정하는 두 가지 방식 ──────────────────────────────
+// 1) 로그인 방식 (권장) — 환경변수 NW_ACCOUNTS 에 직원 목록을 등록한 경우.
+//    로그인한 직원의 계정을 서버가 꺼내 쓴다. 앱 비밀번호가 브라우저로 나가지 않고,
+//    요청 본문이 다른 주소를 지정해도 무시되므로 남의 이름으로 보낼 수 없다.
+//    직원 등록·세션 처리는 ../auth.js 참고.
+// 2) BYO 방식 — 직원 목록을 등록하지 않은 배포. 담당자가 자기 네이버웍스 계정과
+//    앱 비밀번호를 브라우저에 넣고, 그 자격증명이 요청마다 함께 온다.
+//    이때는 회사 도메인인지 검사한다. 자격증명은 서버에 저장하지 않는다.
 //
 // ─── 오픈 릴레이 방지 ─────────────────────────────────────────────
-// 클라이언트가 임의의 SMTP 서버·주소로 보내지 못하도록 두 겹을 잠근다.
 //   1) SMTP 호스트/포트는 **서버에서 고정** — 요청으로 바꿀 수 없다.
-//   2) 발신 주소는 ALLOWED_DOMAINS 에 속한 회사 도메인만 허용.
+//   2) BYO 방식의 발신 주소는 ALLOWED_DOMAINS 에 속한 회사 도메인만 허용.
 //
-// ─── 네이버웍스 준비 (담당자 1인당 1회) ──────────────────────────
+// ─── 네이버웍스 준비 (계정 1개당 1회) ────────────────────────────
 //   1) 관리자센터에서 POP3/IMAP/SMTP 사용 **허용** (조직 관리자가 1회)
 //   2) [설정 > 보안 > 외부 앱 비밀번호] 에서 앱 비밀번호 발급
 //      ※ 로그인 비밀번호로는 SMTP 인증이 안 된다.
 //
-// ─── 환경변수 (전부 선택 — 없어도 동작) ──────────────────────────
+// ─── 환경변수 ────────────────────────────────────────────────────
+//   NW_ACCOUNTS        직원 목록 (설정하면 로그인 방식). 형식은 ../auth.js 주석 참고
 //   NW_DOMAIN          발신 허용 도메인. 콤마로 여러 개. 기본 "dalbausa.com,dalba.com"
 //   NW_SMTP_HOST       기본 smtp.worksmobile.com
 //   NW_SMTP_PORT       기본 465 (SSL). 587 이면 STARTTLS 로 자동 전환
 //   NW_BCC             발송 사본을 받을 주소 — 팀 공용 발송 이력 보관용
-//   DASHBOARD_PASSWORD 설정 시 x-dashboard-password 헤더 또는 ?pw= 필요 (**강력 권장**)
-//   NW_ACCOUNTS        (선택) 공용 계정을 서버에 심어두고 싶을 때만.
-//                      JSON 배열: [{"name":"Hannie","email":"...","password":"...","title":"..."}]
+//   DASHBOARD_PASSWORD BYO 방식일 때의 공용 비밀번호. 로그인 방식에서는 쓰이지 않는다
 
 const nodemailer = require("nodemailer");
 const T = require("../email-template.js");
+const A = require("../auth.js");
 
 // 서버 고정값 — 클라이언트가 바꿀 수 없다
 const SMTP_HOST = process.env.NW_SMTP_HOST || "smtp.worksmobile.com";
@@ -56,51 +56,43 @@ function domainAllowed(email) { return ALLOWED_DOMAINS.includes(domainOf(email))
 // 헤더 인젝션 방지: 표시 이름/주소에 개행이 섞이면 제거
 function cleanHeader(s) { return String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim(); }
 
-// 서버에 심어둔 공용 계정 (선택 기능 — 없으면 빈 객체)
-function envAccounts() {
-  const out = {};
-  if (!process.env.NW_ACCOUNTS) return out;
-  try {
-    JSON.parse(process.env.NW_ACCOUNTS).forEach(a => {
-      if (!a || !a.email || !a.password) return;
-      const name = a.name || String(a.email).split("@")[0];
-      out[String(a.email).toLowerCase()] = {
-        name, email: String(a.email).toLowerCase(), password: a.password, title: a.title || ""
-      };
-    });
-  } catch (_) { /* JSON 오류는 무시 — BYO 방식으로 계속 동작 */ }
-  return out;
-}
-
 // 이번 요청에 쓸 발신 계정 확정
-//   우선순위: 요청이 보낸 자격증명 → 서버 공용 계정
-function resolveAccount(body) {
-  const a = body.auth || {};
-  const email = String(a.email || "").trim().toLowerCase();
-  const shared = envAccounts();
-
-  if (email && a.password) {
-    if (!EMAIL_RE.test(email)) return { error: "발신 이메일 형식이 올바르지 않습니다: " + email };
-    if (!domainAllowed(email)) {
-      return { error: `발신 주소는 ${ALLOWED_DOMAINS.map(d => "@" + d).join(" 또는 ")} 만 허용됩니다 (요청: ${email})` };
-    }
+//
+// 두 가지 방식이 있고, 직원 계정(NW_ACCOUNTS)이 설정돼 있으면 그쪽이 우선이다.
+//   1) 로그인 방식 — 로그인한 직원의 계정을 서버에서 꺼내 쓴다.
+//      앱 비밀번호가 브라우저로 나가지 않고, 남의 주소로 보낼 수도 없다.
+//   2) BYO 방식  — 직원 계정을 등록하지 않은 배포용. 브라우저가 보낸 자격증명을 쓰고,
+//      대신 회사 도메인인지 검사한다.
+function resolveAccount(req, body) {
+  if (A.enabled()) {
+    const u = A.currentUser(req);
+    if (!u) return { error: "로그인이 필요합니다", unauthorized: true };
     return {
       account: {
-        name: cleanHeader(a.name) || email.split("@")[0],
-        email,
-        password: String(a.password),
-        title: cleanHeader(a.title || "")
+        name: cleanHeader(u.name) || u.email.split("@")[0],
+        email: u.email,
+        password: u.appPassword,
+        title: cleanHeader(u.title || "")
       }
     };
   }
 
-  if (email && shared[email]) return { account: shared[email] };
-  const list = Object.values(shared);
-  if (!email && list.length === 1) return { account: list[0] };
-
+  const a = body.auth || {};
+  const email = String(a.email || "").trim().toLowerCase();
+  if (!email || !a.password) {
+    return { error: "발신 계정이 없습니다. 화면 오른쪽 위 [내 발신 계정] 에서 네이버웍스 주소와 외부 앱 비밀번호를 등록하세요." };
+  }
+  if (!EMAIL_RE.test(email)) return { error: "발신 이메일 형식이 올바르지 않습니다: " + email };
+  if (!domainAllowed(email)) {
+    return { error: `발신 주소는 ${ALLOWED_DOMAINS.map(d => "@" + d).join(" 또는 ")} 만 허용됩니다 (요청: ${email})` };
+  }
   return {
-    error: "발신 계정이 없습니다. 화면 오른쪽 위 [내 발신 계정] 에서 네이버웍스 주소와 " +
-           "외부 앱 비밀번호를 등록하세요."
+    account: {
+      name: cleanHeader(a.name) || email.split("@")[0],
+      email,
+      password: String(a.password),
+      title: cleanHeader(a.title || "")
+    }
   };
 }
 
@@ -114,8 +106,9 @@ function readBody(req) {
 module.exports = async (req, res) => {
   try {
     // ─── 접근 보호 ───────────────────────────────────────────────
-    // 이 엔드포인트는 **실제로 메일을 보낸다**. 반드시 비밀번호를 걸어 두는 걸 권장.
-    const PW = process.env.DASHBOARD_PASSWORD;
+    // 이 엔드포인트는 **실제로 메일을 보낸다**.
+    // 직원 계정을 쓰는 배포에서는 로그인 세션이 그 역할을 하므로 공용 비밀번호를 요구하지 않는다.
+    const PW = A.enabled() ? "" : process.env.DASHBOARD_PASSWORD;
     if (PW) {
       const given = req.headers["x-dashboard-password"] || (req.query && req.query.pw) || "";
       if (given !== PW) { res.status(401).json({ error: "unauthorized" }); return; }
@@ -123,15 +116,16 @@ module.exports = async (req, res) => {
 
     // ─── GET: 설정 상태 (비밀번호류는 절대 반환하지 않는다) ───────
     if (req.method === "GET") {
-      const shared = Object.values(envAccounts()).map(a => ({ name: a.name, email: a.email, title: a.title }));
       res.setHeader("Cache-Control", "no-store");
+      const me = A.enabled() ? A.currentUser(req) : null;
       res.status(200).json({
+        mode: A.enabled() ? "accounts" : "byo",
         smtp: { host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465 },
         allowedDomains: ALLOWED_DOMAINS,
         maxPerRequest: MAX_PER_REQUEST,
-        protected: Boolean(PW),
+        protected: Boolean(PW) || A.enabled(),
         bcc: Boolean(process.env.NW_BCC),
-        sharedAccounts: shared
+        me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;
     }
@@ -150,7 +144,8 @@ module.exports = async (req, res) => {
     }
 
     // ─── 발신 계정 확정 ──────────────────────────────────────────
-    const resolved = resolveAccount(body);
+    const resolved = resolveAccount(req, body);
+    if (resolved.unauthorized) { res.status(401).json({ error: resolved.error }); return; }
     if (resolved.error && !dryRun) { res.status(400).json({ error: resolved.error }); return; }
     const account = resolved.account || null;
 
