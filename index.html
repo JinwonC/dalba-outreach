@@ -75,6 +75,10 @@
   iframe.pv { width:100%; height:640px; border:1px solid #ececec; border-radius:14px; background:#f2ede1; display:block; }
 
   .err { background:#fdecea; border:1px solid #f3c4bf; color:#a23b2e; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
+  .ok { background:#eef7ed; border:1px solid #cfe4cb; color:#2b6b33; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
+  /* 보류 — 실패(빨강)도 성공(초록)도 아니다. 담당자가 판단할 거리라는 뜻의 호박색 */
+  .hold { background:#fdf6e3; border:1px solid #ecdcae; color:#8a6d1f; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
+  .holdtag { color:#a8801f; font-weight:700; white-space:nowrap; }
   .ok  { background:#eaf7ef; border:1px solid #bfe3cd; color:#256b43; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
 
   /* 대량 */
@@ -343,7 +347,13 @@
             <button class="btn" onclick="renderPreview()">미리보기 갱신</button>
             <span class="muted" id="sendHint"></span>
           </div>
+          <!-- 이력 확인이 켜진 배포에서만 보인다 -->
+          <label class="sendbar" id="forceWrap" style="display:none;font-size:12.5px;color:#666;cursor:pointer">
+            <input type="checkbox" id="forceSend" style="width:auto;margin:0" />
+            <span>이미 보낸 사람에게도 <b>강제 발송</b></span>
+          </label>
           <div class="progress" id="progWrap" style="display:none"><div class="fill" id="progFill"></div></div>
+          <div id="dupInfo"></div>
           <div id="sendResult"></div>
         </div>
 
@@ -700,7 +710,10 @@ function renderBulkTable(){
 
   let h = '<table class="rcp"><thead><tr><th>#</th><th>이메일</th><th>이름</th><th>핸들</th><th>금액</th><th>커미션</th><th>개인화</th></tr></thead><tbody>';
   rows.forEach((r,i) => {
-    h += '<tr><td>'+(i+1)+'</td><td>'+esc(r.to)+'</td><td>'+esc(r.creatorName||'')+'</td><td>'+esc(r.handle||'')+
+    const p = priorOf(r.to);
+    h += '<tr'+(p ? ' style="background:#fffaf0"' : '')+'><td>'+(i+1)+'</td><td>'+esc(r.to)+
+         (p ? ' <span class="holdtag" title="'+esc(priorText(p))+'">⏸ 보류</span>' : '') +
+         '</td><td>'+esc(r.creatorName||'')+'</td><td>'+esc(r.handle||'')+
          '</td><td>'+esc(r.amount||'')+'</td><td>'+esc(r.commission||'')+'</td><td>'+esc((r.whyYou||'').slice(0,40))+'</td></tr>';
   });
   bad.forEach(b => {
@@ -747,6 +760,7 @@ function schedulePreview(){ clearTimeout(pvTimer); pvTimer = setTimeout(renderPr
 function renderPreview(){
   saveDraft();
   if(MODE === "bulk") renderBulkTable();
+  scheduleDupCheck();
 
   const list = recipients();
   const sample = list[0] || { to:"", creatorName:"", handle:"", whyYou:"" };
@@ -800,6 +814,74 @@ function loadDraft(){
   setDeal(localStorage.getItem("outreach_deal") || "paid");
 }
 
+/* ── 중복 발송 확인 ──
+   담당자가 10명이면 명단이 겹치는 건 시간 문제라, 명단을 넣는 즉시 이미 보낸 사람을
+   표시한다. 실제 차단은 서버가 발송 직전에 다시 한다 — 확인과 발송 사이에 다른
+   담당자가 먼저 보낼 수 있고, 그 경합은 서버에서만 막을 수 있기 때문. */
+let DUP = {};            // 정규화한 주소 → 이전 발송 기록
+let dupTimer = null;
+const dupKey = e => {
+  const s = String(e||"").trim().toLowerCase();
+  const at = s.lastIndexOf("@");
+  if(at < 1) return s;
+  let loc = s.slice(0,at); const dom = s.slice(at+1);
+  const plus = loc.indexOf("+");            // a+tag@x 는 같은 편지함
+  if(plus > 0) loc = loc.slice(0,plus);
+  return loc + "@" + dom;
+};
+function priorOf(to){ return DUP[dupKey(to)] || null; }
+
+function scheduleDupCheck(){
+  if(!(CFG.history && CFG.history.enabled)) return;
+  clearTimeout(dupTimer);
+  dupTimer = setTimeout(checkDup, 600);
+}
+
+async function checkDup(){
+  if(!(CFG.history && CFG.history.enabled)) return;
+  const list = recipients();
+  if(!list.length){ $("dupInfo").innerHTML = ""; return; }
+  try {
+    const r = await fetch("/api/history", {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+      body: JSON.stringify({ recipients: list.map(x => ({ to:x.to, handle:x.handle||"" })) })
+    });
+    if(r.status === 401) return;
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    DUP = {};
+    (d.results||[]).forEach(x => { if(x.prior) DUP[dupKey(x.to)] = x.prior; });
+    paintDup();
+    if(MODE === "bulk") renderBulkTable();
+  } catch(e){
+    $("dupInfo").innerHTML = '<div class="muted" style="margin-top:8px">이력 확인 실패 — '+esc(String(e.message||e))+'</div>';
+  }
+}
+
+function priorText(p){
+  if(!p) return "";
+  const who = p.byName || p.by || "다른 담당자";
+  const when = p.at ? String(p.at).slice(0,10) : "";
+  return who + (when ? " · " + when : "") + (p.campaign ? " · " + p.campaign : "");
+}
+
+function paintDup(){
+  const list = recipients();
+  const held = list.filter(r => priorOf(r.to));
+  if(!held.length){ $("dupInfo").innerHTML = ""; return; }
+  const forced = $("forceSend").checked;
+  $("dupInfo").innerHTML =
+    '<div class="' + (forced ? "err" : "hold") + '" style="margin-top:10px">' +
+      (forced
+        ? '⚠️ 이미 보낸 <b>'+held.length+'명</b> 에게도 <b>강제 발송</b>합니다.'
+        : '⏸ 이미 보낸 <b>'+held.length+'명</b> 은 보류됩니다 (나머지만 발송).') +
+    '</div>' +
+    '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
+    held.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td>'+esc(priorText(priorOf(r.to)))+'</td></tr>').join("") +
+    '</tbody></table></div>';
+}
+
 /* ── 발송 ── */
 let confirmAction = null;
 function closeConfirm(){ $("confirmModal").style.display="none"; confirmAction = null; }
@@ -810,8 +892,16 @@ function startSend(){
   const d = Object.assign({}, campaign(), list[0]);
   const built = T.build(d);
 
+  const forced = $("forceSend").checked;
+  const held = forced ? [] : list.filter(r => priorOf(r.to));
+  const going = list.length - held.length;
+
   $("confirmBody").innerHTML =
-    '<b>' + esc(a.email) + '</b> 에서 <b>' + list.length + '명</b> 에게 보냅니다.<br /><br />' +
+    '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
+    (held.length ? ' <span style="color:#a8801f">(이미 보낸 '+held.length+'명 보류)</span>' : '') +
+    (forced && list.some(r => priorOf(r.to))
+      ? '<br /><span style="color:#a23b2e">⚠️ 이미 보낸 사람에게도 강제 발송합니다.</span>' : '') +
+    '<br /><br />' +
     '<span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +
     '<span style="color:#999">받는 사람</span><br />' +
     esc(list.slice(0,3).map(r => r.to).join(", ")) + (list.length > 3 ? ' 외 ' + (list.length-3) + '명' : '');
@@ -839,7 +929,7 @@ async function doSend(list){
         method: "POST",
         headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
         body: JSON.stringify(Object.assign(
-          { campaign: camp, recipients: chunk },
+          { campaign: camp, recipients: chunk, force: $("forceSend").checked },
           // accounts 모드에서는 서버가 로그인 세션으로 발신 계정을 정한다.
           // 앱 비밀번호가 브라우저에 없으므로 보낼 것도 없다.
           AUTH_MODE === "accounts" ? {}
@@ -863,22 +953,35 @@ async function doSend(list){
 
   paintResults(all, list.length, true);
   $("sendBtn").disabled = false;
+  checkDup();   // 방금 보낸 사람들이 이력에 잡히도록 다시 조회
 }
 
 function paintResults(results, total, final){
   const ok = results.filter(r => r.ok).length;
-  const bad = results.filter(r => !r.ok);
+  const held = results.filter(r => !r.ok && r.held);   // 보류 — 실패가 아니라 의도된 차단
+  const bad = results.filter(r => !r.ok && !r.held);
   let h = "";
   if(final){
-    h += bad.length
-      ? '<div class="err"><b>'+ok+'/'+total+'</b> 발송 완료 · <b>'+bad.length+'건 실패</b></div>'
-      : '<div class="ok">✅ <b>'+ok+'명</b> 발송 완료</div>';
+    if(bad.length){
+      h += '<div class="err"><b>'+ok+'/'+total+'</b> 발송 완료 · <b>'+bad.length+'건 실패</b>' +
+           (held.length ? ' · '+held.length+'건 보류' : '') + '</div>';
+    } else if(held.length){
+      h += '<div class="hold">✅ <b>'+ok+'명</b> 발송 완료 · ⏸ <b>'+held.length+'명</b> 은 이미 발송돼 보류했습니다.</div>';
+    } else {
+      h += '<div class="ok">✅ <b>'+ok+'명</b> 발송 완료</div>';
+    }
   } else {
     h += '<div class="muted" style="margin:6px 0">'+results.length+'/'+total+' 처리 중…</div>';
   }
   if(bad.length){
     h += '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>사유</th></tr></thead><tbody>' +
       bad.map(b => '<tr><td>'+esc(b.to)+'</td><td class="bad">'+esc(b.error||"")+'</td></tr>').join("") +
+      '</tbody></table></div>';
+  }
+  if(held.length && final){
+    h += '<div class="muted" style="margin-top:10px">보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.</div>' +
+      '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
+      held.map(b => '<tr><td>'+esc(b.to)+'</td><td>'+esc(priorText(b.prior) || b.error || "")+'</td></tr>').join("") +
       '</tbody></table></div>';
   }
   $("sendResult").innerHTML = h;
@@ -925,6 +1028,15 @@ async function boot(){
     loadDraft();
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
     $("currency").addEventListener("change", schedulePreview);
+    $("forceSend").addEventListener("change", paintDup);
+  }
+
+  // 이력 저장소가 붙어 있을 때만 중복 확인·강제 발송이 의미가 있다
+  if(CFG.history && CFG.history.enabled){
+    $("forceWrap").style.display = "flex";
+    $("forceWrap").title = CFG.history.windowDays + "일 안에 이미 보낸 주소는 자동 보류됩니다";
+  } else {
+    $("forceWrap").style.display = "none";
   }
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.

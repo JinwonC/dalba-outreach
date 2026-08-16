@@ -1,0 +1,205 @@
+// 발송 이력 (팀 공용) — 같은 크리에이터에게 두 번 나가는 걸 막는다
+//
+// 담당자가 10명이면 명단이 겹치는 건 시간 문제다. 누가 이미 보냈는지 알 곳이 없으면
+// 같은 사람이 d'Alba 메일을 두세 번 받게 되고, 그건 브랜드 인상에 직접 흠이 난다.
+// 그래서 발송 직전에 **공용 저장소**를 조회하고, 이력이 있으면 그 건만 보류한다.
+//
+// ─── 왜 Redis 인가 ───────────────────────────────────────────────
+// 서버리스 함수는 인스턴스마다 메모리가 따로 놀고 디스크도 없다. 담당자 A 가 보낸 걸
+// 담당자 B 의 요청이 보려면 함수 밖의 공용 저장소가 있어야 한다. Upstash Redis 는
+// Vercel 마켓플레이스에서 클릭 몇 번으로 붙고, REST 라 추가 패키지도 필요 없다.
+//
+// ─── 경합 ────────────────────────────────────────────────────────
+// 두 명이 같은 크리에이터에게 동시에 누르면 "조회 → 없음 → 둘 다 발송" 이 된다.
+// 그래서 조회가 아니라 **SET NX (없을 때만 쓰기)** 로 자리를 먼저 잡는다.
+// 자리를 못 잡으면 이미 누가 가져간 것이므로 보류. 발송이 실패하면 자리를 반납한다.
+//
+// ─── 환경변수 ────────────────────────────────────────────────────
+//   KV_REST_API_URL / KV_REST_API_TOKEN            (Vercel 마켓플레이스가 자동 주입)
+//   또는 UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+//   HISTORY_DAYS   (선택) 재발송 차단 기간, 기본 90일
+//
+// 저장소를 **아예 설정하지 않은** 배포에서는 이 모듈이 조용히 꺼지고 발송은 그대로 된다
+// (기능을 켜기 전과 똑같이 동작). 반대로 **설정은 했는데 저장소가 죽은** 경우는 다르다 —
+// 중복인지 알 수 없는 상태이므로 기본적으로 보내지 않고, 담당자가 [강제 발송] 으로만
+// 넘어갈 수 있다. 켜 놓고 조용히 중복이 나가는 것이 가장 나쁜 결과이기 때문이다.
+
+const WINDOW_DAYS = Math.max(1, Number(process.env.HISTORY_DAYS || 90));
+const TTL_SEC = Math.round(WINDOW_DAYS * 86400);
+
+const LOG_KEY = "outreach:log";
+const LOG_MAX = 5000;
+
+function conf() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
+  return url && token ? { url: url.replace(/\/+$/, ""), token } : null;
+}
+
+function enabled() { return Boolean(conf()); }
+
+// ─── Redis REST ──────────────────────────────────────────────────
+async function cmd(args) {
+  const c = conf();
+  if (!c) return null;
+  const r = await fetch(c.url, {
+    method: "POST",
+    headers: { authorization: "Bearer " + c.token, "content-type": "application/json" },
+    body: JSON.stringify(args)
+  });
+  const d = await r.json();
+  if (d && d.error) throw new Error("이력 저장소 오류: " + d.error);
+  return d ? d.result : null;
+}
+
+async function pipeline(cmds) {
+  const c = conf();
+  if (!c || !cmds.length) return [];
+  const r = await fetch(c.url + "/pipeline", {
+    method: "POST",
+    headers: { authorization: "Bearer " + c.token, "content-type": "application/json" },
+    body: JSON.stringify(cmds)
+  });
+  const d = await r.json();
+  if (!Array.isArray(d)) throw new Error("이력 저장소 오류: " + ((d && d.error) || "예상 밖 응답"));
+  return d.map(x => (x && x.error ? null : x && x.result));
+}
+
+// ─── 키 정규화 ───────────────────────────────────────────────────
+// a+tag@gmail.com 과 a@gmail.com 은 같은 편지함이다. 태그만 다른 주소로 두 번
+// 나가는 걸 막기 위해 + 뒤를 떼고 본다. (점 제거는 Gmail 전용 규칙이라 하지 않는다)
+function normEmail(e) {
+  const s = String(e == null ? "" : e).trim().toLowerCase();
+  const at = s.lastIndexOf("@");
+  if (at < 1) return s;
+  let local = s.slice(0, at);
+  const dom = s.slice(at + 1);
+  const plus = local.indexOf("+");
+  if (plus > 0) local = local.slice(0, plus);
+  return local + "@" + dom;
+}
+
+function normHandle(h) {
+  return String(h == null ? "" : h).trim().toLowerCase().replace(/^@+/, "").replace(/\s+/g, "");
+}
+
+const emailKey = e => "outreach:sent:e:" + normEmail(e);
+const handleKey = h => "outreach:sent:h:" + normHandle(h);
+
+// 한 수신자를 가리키는 키들. 주소가 달라도 핸들이 같으면 같은 사람이므로 둘 다 본다.
+function keysOf(r) {
+  const ks = [];
+  const e = normEmail(r && (r.to || r.email));
+  if (e) ks.push(emailKey(e));
+  const h = normHandle(r && (r.handle || r.creatorHandle));
+  if (h) ks.push(handleKey(h));
+  return ks;
+}
+
+function parseRec(s) {
+  if (!s) return null;
+  if (typeof s === "object") return s;
+  try { return JSON.parse(s); } catch (_) { return null; }
+}
+
+// ─── 조회 ────────────────────────────────────────────────────────
+// 수신자 목록을 받아 같은 순서로 [이전 발송기록 | null] 을 돌려준다.
+async function lookup(list) {
+  const items = Array.isArray(list) ? list : [];
+  if (!enabled()) return items.map(() => null);
+
+  // 수신자마다 키 개수가 달라서 인덱스가 밀리지 않도록 위치를 기록해 둔다
+  const cmds = [];
+  const spans = items.map(r => {
+    const ks = keysOf(r);
+    const at = cmds.length;
+    ks.forEach(k => cmds.push(["GET", k]));
+    return { at, n: ks.length };
+  });
+
+  const out = await pipeline(cmds);
+  return spans.map(s => {
+    for (let i = 0; i < s.n; i++) {
+      const rec = parseRec(out[s.at + i]);
+      if (rec) return rec;
+    }
+    return null;
+  });
+}
+
+// ─── 자리 잡기 ───────────────────────────────────────────────────
+// 성공하면 { ok:true }, 이미 누가 가져갔으면 { ok:false, prior }.
+// force 면 기존 기록을 덮어쓰고 보낸다 (기록에 forced 표시가 남는다).
+async function reserve(r, meta, force) {
+  if (!enabled()) return { ok: true, skipped: true };
+
+  const keys = keysOf(r);
+  if (!keys.length) return { ok: true, skipped: true };
+
+  const rec = {
+    to: String((r && r.to) || ""),
+    handle: normHandle(r && r.handle) || undefined,
+    name: (r && r.creatorName) || undefined,
+    at: new Date().toISOString(),
+    by: (meta && meta.by) || "",
+    byName: (meta && meta.byName) || "",
+    campaign: (meta && meta.campaign) || "",
+    forced: force ? true : undefined
+  };
+  const val = JSON.stringify(rec);
+
+  if (force) {
+    await pipeline(keys.map(k => ["SET", k, val, "EX", String(TTL_SEC)]));
+    return { ok: true, forced: true, record: rec };
+  }
+
+  // 첫 키를 NX 로 잡아본다. 실패면 이미 보낸 사람이다.
+  const got = await cmd(["SET", keys[0], val, "NX", "EX", String(TTL_SEC)]);
+  if (!got) {
+    const prior = parseRec(await cmd(["GET", keys[0]]));
+    return { ok: false, prior };
+  }
+
+  // 나머지 키(핸들)도 잡는다. 하나라도 남이 갖고 있으면 방금 잡은 걸 반납한다 —
+  // 주소는 새 주소지만 핸들이 같은, 즉 이미 접촉한 크리에이터인 경우다.
+  for (let i = 1; i < keys.length; i++) {
+    const ok2 = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
+    if (!ok2) {
+      const prior = parseRec(await cmd(["GET", keys[i]]));
+      await pipeline(keys.slice(0, i).map(k => ["DEL", k]));
+      return { ok: false, prior };
+    }
+  }
+
+  return { ok: true, record: rec };
+}
+
+// 발송이 실패했으면 자리를 반납한다 — 실패한 주소가 90일간 막히면 안 된다
+async function release(r) {
+  if (!enabled()) return;
+  const keys = keysOf(r);
+  if (keys.length) await pipeline(keys.map(k => ["DEL", k]));
+}
+
+// 성공한 발송을 시간순 로그에도 남긴다 (조회용, 실패해도 발송에는 영향 없음)
+async function log(rec) {
+  if (!enabled()) return;
+  try {
+    await pipeline([
+      ["LPUSH", LOG_KEY, JSON.stringify(rec)],
+      ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]
+    ]);
+  } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
+}
+
+async function recent(n) {
+  if (!enabled()) return [];
+  const out = await cmd(["LRANGE", LOG_KEY, "0", String(Math.max(1, Math.min(Number(n) || 200, LOG_MAX)) - 1)]);
+  return (out || []).map(parseRec).filter(Boolean);
+}
+
+module.exports = {
+  enabled, lookup, reserve, release, log, recent,
+  normEmail, normHandle,
+  WINDOW_DAYS
+};

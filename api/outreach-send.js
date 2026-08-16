@@ -31,10 +31,16 @@
 //   NW_SMTP_PORT       기본 465 (SSL). 587 이면 STARTTLS 로 자동 전환
 //   NW_BCC             발송 사본을 받을 주소 — 팀 공용 발송 이력 보관용
 //   DASHBOARD_PASSWORD BYO 방식일 때의 공용 비밀번호. 로그인 방식에서는 쓰이지 않는다
+//
+// ─── 중복 발송 차단 ──────────────────────────────────────────────
+// 공용 이력 저장소가 설정돼 있으면(../history.js) 발송 직전에 수신자별로 자리를 잡고,
+// 이미 보낸 주소·핸들이면 그 건만 보류한다. body.force 가 true 면 덮어쓰고 보낸다.
+// 저장소가 없으면 이 검사는 통째로 건너뛴다 — 안전장치이지 발송의 전제가 아니다.
 
 const nodemailer = require("nodemailer");
 const T = require("../email-template.js");
 const A = require("../auth.js");
+const H = require("../history.js");
 
 // 서버 고정값 — 클라이언트가 바꿀 수 없다
 const SMTP_HOST = process.env.NW_SMTP_HOST || "smtp.worksmobile.com";
@@ -58,6 +64,15 @@ function domainAllowed(email) { return ALLOWED_DOMAINS.includes(domainOf(email))
 
 // 헤더 인젝션 방지: 표시 이름/주소에 개행이 섞이면 제거
 function cleanHeader(s) { return String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim(); }
+
+// 보류 사유는 담당자가 바로 판단할 수 있게 "누가 언제" 를 담는다
+function heldReason(prior) {
+  if (!prior) return "이미 발송된 주소입니다 (보류)";
+  const who = prior.byName || prior.by || "다른 담당자";
+  const when = prior.at ? String(prior.at).slice(0, 10) : "";
+  return `이미 ${who} 님이${when ? " " + when + " 에" : ""} 발송했습니다 (보류)` +
+         (prior.campaign ? ` — ${prior.campaign}` : "");
+}
 
 // 이번 요청에 쓸 발신 계정 확정
 //
@@ -128,6 +143,7 @@ module.exports = async (req, res) => {
         maxPerRequest: MAX_PER_REQUEST,
         protected: Boolean(PW) || A.enabled(),
         bcc: Boolean(process.env.NW_BCC),
+        history: { enabled: H.enabled(), windowDays: H.WINDOW_DAYS },
         me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;
@@ -139,6 +155,7 @@ module.exports = async (req, res) => {
     const campaign = body.campaign || {};
     const recipients = Array.isArray(body.recipients) ? body.recipients : [];
     const dryRun = Boolean(body.dryRun);
+    const force = Boolean(body.force);   // 이미 보낸 사람도 보내겠다고 담당자가 명시한 경우
 
     if (!recipients.length) { res.status(400).json({ error: "recipients 가 비어 있습니다" }); return; }
     if (recipients.length > MAX_PER_REQUEST) {
@@ -220,6 +237,34 @@ module.exports = async (req, res) => {
         continue;
       }
 
+      // ─── 중복 발송 차단 ────────────────────────────────────────
+      // 화면에서 미리 확인했더라도 여기서 다시 잡는다. 미리보기와 발송 사이에
+      // 다른 담당자가 먼저 보냈을 수 있고, 그 경합은 여기서만 막을 수 있다.
+      let reserved = false;
+      try {
+        const rv = await H.reserve(d, {
+          by: account.email, byName: account.name, campaign: d.campaignTitle || ""
+        }, force);
+        if (!rv.ok) {
+          results.push({ to, ok: false, held: true, prior: rv.prior || null, error: heldReason(rv.prior) });
+          continue;
+        }
+        reserved = !rv.skipped;
+      } catch (e) {
+        // 저장소가 죽으면 이미 보낸 사람인지 알 수 없다. 이럴 때 그냥 보내면
+        // 중복 발송이 나가므로 기본은 **보내지 않는다**. 다만 담당자가 [강제 발송] 을
+        // 켰다면 중복 위험을 감수하겠다고 밝힌 것이므로 그대로 진행한다 —
+        // 저장소 장애 때 아웃리치가 통째로 멈추는 걸 막는 탈출구.
+        if (!force) {
+          results.push({
+            to, ok: false,
+            error: "이력 확인 실패로 보내지 않았습니다 (중복 방지). 잠시 후 다시 시도하거나, " +
+                   "그래도 보내려면 [강제 발송] 을 켜세요 — " + String((e && e.message) || e)
+          });
+          continue;
+        }
+      }
+
       if (lastAt) {
         const wait = SEND_GAP_MS - (Date.now() - lastAt);
         if (wait > 0) await sleep(wait);
@@ -239,7 +284,14 @@ module.exports = async (req, res) => {
           html: built.html
         });
         results.push({ to, ok: true, messageId: info.messageId, subject: built.subject });
+        H.log({
+          to, handle: d.handle || "", name: d.creatorName || "",
+          at: new Date().toISOString(), by: account.email, byName: account.name,
+          campaign: d.campaignTitle || "", forced: force || undefined
+        });
       } catch (e) {
+        // 못 보냈으면 잡아둔 자리를 반납한다 — 실패한 주소가 계속 막히면 안 된다
+        if (reserved) { try { await H.release(d); } catch (_) {} }
         results.push({ to, ok: false, error: String((e && e.message) || e) });
       }
     }
@@ -247,11 +299,12 @@ module.exports = async (req, res) => {
     transporter.close();
 
     const sent = results.filter(r => r.ok).length;
+    const held = results.filter(r => r.held).length;
     res.setHeader("Cache-Control", "no-store");
     res.status(200).json({
       sentAt: new Date().toISOString(),
       sender: { name: account.name, email: account.email },
-      totals: { requested: recipients.length, sent, failed: recipients.length - sent },
+      totals: { requested: recipients.length, sent, held, failed: recipients.length - sent - held },
       results
     });
   } catch (e) {
