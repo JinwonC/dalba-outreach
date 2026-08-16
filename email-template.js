@@ -308,13 +308,21 @@
     const title = has(d.campaignTitle) ? d.campaignTitle : "Paid Collab Invitation";
 
     // 로고 — 호스팅한 로고 이미지(logoUrl)가 있으면 그걸 쓰고,
-    // 없으면 브랜드명을 검정 워드마크로 그린다. 이미지는 차단·미표시가 흔해서
-    // 텍스트 워드마크를 기본으로 두면 어떤 클라이언트에서도 브랜드가 반드시 보인다.
+    // 없으면 d'Alba 워드마크를 텍스트로 그린다. 실제 로고를 본뜬 세리프체 "d'Alba" +
+    // 자간을 넓힌 "piedmont" 태그라인이다. 이메일은 이미지를 기본으로 막거나 안 띄우는
+    // 클라이언트가 많아, 텍스트로 두면 어떤 클라이언트에서도 로고가 반드시 보인다.
+    // (이미지 로고가 필요하면 logoUrl 에 절대주소를 넣으면 그 이미지로 바뀐다.)
+    const SERIF = "Georgia,'Times New Roman','Nanum Myeongjo',serif";
+    const isDalba = /d[’']?\s*alba/i.test(brand);
     const logoUrl = safeUrl(d.logoUrl);
-    const logoBlock = logoUrl
-      ? '<div style="padding:0 0 16px;line-height:0;"><img src="' + logoUrl + '" alt="' + esc(brand) +
-        '" height="36" style="height:36px;max-width:220px;width:auto;border:0;outline:none;display:inline-block;" /></div>'
-      : '<div style="font:800 40px/1 ' + FONT + ";letter-spacing:-.5px;color:" + C.ink + ';padding:0 0 16px;">' + esc(brand) + "</div>";
+    const wordmark = isDalba
+      ? '<div style="font:400 44px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">d’Alba</div>' +
+        '<div style="font:400 12px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.62em;padding:9px 0 0 .62em;">piedmont</div>'
+      : '<div style="font:400 40px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">' + esc(brand) + "</div>";
+    const logoBlock = '<div style="padding:0 0 18px;">' + (logoUrl
+      ? '<img src="' + logoUrl + '" alt="' + esc(brand) +
+        '" height="40" style="height:40px;max-width:240px;width:auto;border:0;outline:none;display:inline-block;" />'
+      : wordmark) + "</div>";
 
     let body = "";
 
