@@ -57,26 +57,38 @@ async function read(account, opts) {
 
   if (o.pingOnly) { await client.logout(); return { path: "", rows: [], truncated: false }; }
 
+  // ⚠️ 여기서 fetch({since}) 로 곧장 훑으면 **조건에 걸리는 메일을 전부 내려받는다.**
+  //    보낸편지함은 수백 통이라 견디지만 받은편지함은 수천 통이라 함수 제한시간을 넘긴다.
+  //    그래서 ① 번호(uid)만 먼저 검색해 두고 ② 최신 limit 개만 실제로 받아온다.
   let rows = [];
   let path = "";
+  let total = 0;
+  const deadline = Date.now() + Math.max(5000, Number(o.budgetMs) || 35000);
+
   try {
     path = await findMailbox(client, kind);
     const lock = await client.getMailboxLock(path);
     try {
-      for await (const msg of client.fetch({ since }, { envelope: true, uid: true })) {
-        const env = msg.envelope || {};
-        rows.push({
-          uid: msg.uid,
-          messageId: env.messageId || "",
-          at: env.date,
-          subject: env.subject || "(제목 없음)",
-          from: one(env.from),
-          to: one(env.to),
-          toAll: all(env.to),
-          ccAll: all(env.cc)
-        });
-        // 오래된 것부터 오므로, 상한을 넘으면 앞쪽을 버리고 최신을 남긴다
-        if (rows.length > limit) rows.shift();
+      const uids = await client.search({ since }, { uid: true }) || [];
+      total = uids.length;
+      const take = uids.slice(-limit);   // 검색 결과는 오름차순이므로 뒤쪽이 최신
+
+      if (take.length) {
+        for await (const msg of client.fetch(take, { envelope: true }, { uid: true })) {
+          const env = msg.envelope || {};
+          rows.push({
+            uid: msg.uid,
+            messageId: env.messageId || "",
+            at: env.date,
+            subject: env.subject || "(제목 없음)",
+            from: one(env.from),
+            to: one(env.to),
+            toAll: all(env.to),
+            ccAll: all(env.cc)
+          });
+          // 그래도 오래 걸리면 거기까지만 — 통째로 실패하는 것보다 낫다
+          if (Date.now() > deadline) break;
+        }
       }
     } finally {
       lock.release();
@@ -86,7 +98,8 @@ async function read(account, opts) {
   }
 
   rows.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
-  return { path, rows, truncated: rows.length >= limit };
+  // total 은 조건에 걸린 전체 통수. 몇 통 중 몇 통을 봤는지 알려야 "이게 전부" 로 오해하지 않는다
+  return { path, rows, total, truncated: total > rows.length };
 }
 
 module.exports = { read, IMAP_HOST, IMAP_PORT };

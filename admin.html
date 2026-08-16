@@ -487,16 +487,26 @@ async function syncAll(){
   const people = [...$("by").options].slice(1).map(o => ({ email:o.value, name:o.textContent }));
   if(!people.length){ msg.textContent = "등록된 담당자가 없습니다 (NW_ACCOUNTS)."; btn.disabled = false; return; }
 
-  const call = (url, body) => fetch(url, {
-    method:"POST", cache:"no-store",
-    headers: Object.assign({ "content-type":"application/json" }, headers()),
-    body: JSON.stringify(body)
-  }).then(async r => {
+  // 함수가 시간을 넘기면 Vercel 이 JSON 이 아니라 오류 **페이지**를 돌려준다.
+  // 그걸 그대로 JSON 으로 읽으면 "Unexpected token 'A'" 같은 쓸모없는 말이 뜬다 —
+  // 무엇이 잘못됐는지 사람이 알아볼 수 있게 상태 코드로 풀어서 알려준다.
+  const call = async (url, body) => {
+    const r = await fetch(url, {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, headers()),
+      body: JSON.stringify(body)
+    });
     if(r.status === 401){ showGate("다시 로그인해 주세요."); throw new Error("로그인이 필요합니다"); }
-    const d = await r.json();
+    const text = await r.text();
+    let d = null;
+    try { d = JSON.parse(text); } catch(_) {
+      if(r.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(text))
+        throw new Error("시간 초과 — 메일이 많아 한 번에 못 끝냈습니다. 다시 누르면 이어서 처리됩니다.");
+      throw new Error("서버 오류 (HTTP "+r.status+")");
+    }
     if(d.error) throw new Error(d.error);
     return d;
-  });
+  };
 
   let sent = 0, replies = 0;
   const failed = [];
@@ -516,7 +526,8 @@ async function syncAll(){
     }
   }
 
-  SYNC_RESULT = '동기화 완료 · 새 발송 <b>'+sent+'</b>건 · 새 회신 <b>'+replies+'</b>건' +
+  SYNC_RESULT = (failed.length ? '동기화 끝 (일부 실패)' : '동기화 완료') +
+    ' · 새 발송 <b>'+sent+'</b>건 · 새 회신 <b>'+replies+'</b>건' +
     ' <span class="muted">(2026-07-01 이후, 이미 있던 건 건너뜀)</span>' +
     (failed.length ? '<br /><span style="color:#a23b2e">실패: '+esc(failed.join(" / "))+'</span>' : '');
   msg.innerHTML = SYNC_RESULT;
