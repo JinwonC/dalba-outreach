@@ -44,7 +44,10 @@ const ALLOWED_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
   .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
 
 const MAX_PER_REQUEST = 25;   // Vercel 60s 안에서 안전한 배치 크기 (프론트가 청크로 쪼개 호출)
-const SEND_GAP_MS = 400;      // 연속 발송 간격 — 스팸 판정·유량 제한 회피
+
+// 연속 발송 간격 — 네이버웍스는 **분당 60회**를 넘기면 최대 1분간 차단한다.
+// 1100ms 면 분당 약 54회로 한도 아래에 머문다. 25명 배치가 약 26초 걸려 60초 제한 안에도 든다.
+const SEND_GAP_MS = 1100;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -202,16 +205,26 @@ module.exports = async (req, res) => {
     }
 
     // ─── 순차 발송 ───────────────────────────────────────────────
+    // 간격은 **발송에 걸린 시간을 뺀 나머지**만 쉰다. 발송마다 SMTP 왕복이 1초 가까이
+    // 걸릴 수 있는데 거기에 고정 대기를 더하면 25명 배치가 Vercel 60초 제한을 넘긴다.
     const results = [];
+    let lastAt = 0;
     for (let i = 0; i < recipients.length; i++) {
       const d = compose(recipients[i]);
       const to = cleanHeader(d.to);
 
       const errs = T.validate(d);
       if (errs.length) {
+        // 보내지 않았으니 간격도 소비하지 않는다
         results.push({ to, ok: false, error: errs.join(" / ") });
         continue;
       }
+
+      if (lastAt) {
+        const wait = SEND_GAP_MS - (Date.now() - lastAt);
+        if (wait > 0) await sleep(wait);
+      }
+      lastAt = Date.now();
 
       try {
         const built = T.build(d);
@@ -229,8 +242,6 @@ module.exports = async (req, res) => {
       } catch (e) {
         results.push({ to, ok: false, error: String((e && e.message) || e) });
       }
-
-      if (i < recipients.length - 1) await sleep(SEND_GAP_MS);
     }
 
     transporter.close();
