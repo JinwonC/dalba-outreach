@@ -2,6 +2,9 @@
   "functions": {
     "api/outreach-send.js": {
       "maxDuration": 60
+    },
+    "api/products.js": {
+      "maxDuration": 60
     }
   }
 }
