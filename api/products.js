@@ -20,12 +20,13 @@
 //   TTS_SHOP_CIPHER    샵별 식별자
 //   TTS_REFRESH_TOKEN  샵 인증으로 발급받은 refresh token
 //   (선택) TTS_ACCESS_TOKEN  있으면 첫 갱신 한 번을 아낀다
-//   (선택) DASHBOARD_PASSWORD  설정 시 x-dashboard-password 헤더 또는 ?pw= 필요
+//   (선택) DASHBOARD_PASSWORD  직원 계정을 안 쓰는 배포의 공용 비밀번호
 //
 // 네 값이 모두 없으면 이 엔드포인트는 501 을 돌려주고, 화면은 상품 선택기를
 // 조용히 감춘다 — 자격증명 없이도 나머지 기능은 그대로 동작해야 하므로.
 
 const crypto = require("crypto");
+const A = require("../auth.js");
 
 const BASE = "https://open-api.tiktokglobalshop.com";
 const AUTH_BASE = "https://auth.tiktok-shops.com";
@@ -276,10 +277,15 @@ async function fetchAll() {
 
 module.exports = async (req, res) => {
   try {
-    const PW = process.env.DASHBOARD_PASSWORD;
-    if (PW) {
-      const given = req.headers["x-dashboard-password"] || (req.query && req.query.pw) || "";
-      if (given !== PW) { res.status(401).json({ error: "unauthorized" }); return; }
+    // 직원 계정을 쓰는 배포에서는 로그인 세션으로, 아니면 공용 비밀번호로 보호한다.
+    if (A.enabled()) {
+      if (!A.currentUser(req)) { res.status(401).json({ error: "로그인이 필요합니다" }); return; }
+    } else {
+      const PW = process.env.DASHBOARD_PASSWORD;
+      if (PW) {
+        const given = req.headers["x-dashboard-password"] || (req.query && req.query.pw) || "";
+        if (given !== PW) { res.status(401).json({ error: "unauthorized" }); return; }
+      }
     }
 
     // 자격증명이 없으면 기능만 꺼진다 — 화면의 나머지는 그대로 써야 하므로 에러로 죽이지 않는다.
