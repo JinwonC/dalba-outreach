@@ -111,14 +111,18 @@
 </head>
 <body>
 
-<!-- 비밀번호 게이트 -->
+<!-- 로그인 게이트 -->
+<!-- 직원 계정을 등록한 배포에서는 아이디+비번, 아니면 공용 비밀번호 한 칸만 보인다 -->
 <div class="veil" id="gate" style="display:none">
-  <div class="card">
+  <div class="card" style="max-width:400px">
     <h2>🔒 크리에이터 아웃리치 발송</h2>
-    <p>비밀번호를 입력하세요</p>
+    <p id="gateHelp">비밀번호를 입력하세요</p>
     <div class="gate-err" id="gateErr"></div>
-    <input id="gatePw" type="password" placeholder="비밀번호" onkeydown="if(event.key==='Enter')submitPw()" />
-    <div class="actions"><button class="btn dark" onclick="submitPw()">들어가기</button></div>
+    <input id="gateId" type="text" placeholder="아이디" autocomplete="username"
+           style="display:none" onkeydown="if(event.key==='Enter')document.getElementById('gatePw').focus()" />
+    <input id="gatePw" type="password" placeholder="비밀번호" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')submitPw()" />
+    <div class="actions"><button class="btn dark" id="gateBtn" onclick="submitPw()">들어가기</button></div>
   </div>
 </div>
 
@@ -378,16 +382,72 @@ const $ = id => document.getElementById(id);
 const val = id => ($(id) ? $(id).value.trim() : "");
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
-/* ── 비밀번호 게이트 ── */
+/* ── 인증 ──
+   두 방식을 지원한다.
+     accounts : 직원별 아이디/비번으로 로그인. 앱 비밀번호는 서버에만 있다.
+     byo      : 직원 계정을 등록하지 않은 배포. 공용 비밀번호 + 각자 브라우저에 앱 비밀번호.
+   어느 쪽인지는 /api/login 이 알려준다. */
+let AUTH_MODE = "byo";
+let ME = null;   // accounts 모드에서 로그인한 직원
+
 function pw(){ return localStorage.getItem("dpw") || ""; }
-function showGate(m){ $("gateErr").textContent = m||""; $("gate").style.display="flex"; $("gatePw").focus(); }
-function hideGate(){ $("gate").style.display="none"; }
-function submitPw(){ localStorage.setItem("dpw", $("gatePw").value); hideGate(); boot(); }
-function logout(){ localStorage.removeItem("dpw"); showGate(); }
+function token(){ return localStorage.getItem("nwtoken") || ""; }
+
+/* 모든 API 호출에 붙일 인증 헤더 */
+function authHeaders(){
+  return AUTH_MODE === "accounts"
+    ? { "authorization": "Bearer " + token() }
+    : { "x-dashboard-password": pw() };
+}
+
+function showGate(m){
+  $("gateErr").textContent = m || "";
+  const acc = AUTH_MODE === "accounts";
+  $("gateId").style.display = acc ? "" : "none";
+  $("gateHelp").textContent = acc ? "아이디와 비밀번호를 입력하세요" : "비밀번호를 입력하세요";
+  $("gate").style.display = "flex";
+  (acc ? $("gateId") : $("gatePw")).focus();
+}
+function hideGate(){ $("gate").style.display = "none"; }
+
+async function submitPw(){
+  if(AUTH_MODE !== "accounts"){
+    localStorage.setItem("dpw", $("gatePw").value);
+    hideGate(); boot(); return;
+  }
+  const btn = $("gateBtn");
+  btn.disabled = true; $("gateErr").textContent = "";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: $("gateId").value.trim(), pw: $("gatePw").value })
+    });
+    const d = await r.json();
+    if(!r.ok || !d.token){ $("gateErr").textContent = d.error || "로그인에 실패했습니다."; return; }
+    localStorage.setItem("nwtoken", d.token);
+    ME = d.user;
+    $("gatePw").value = "";
+    hideGate(); boot();
+  } catch(e){
+    $("gateErr").textContent = "서버에 연결하지 못했습니다: " + (e.message || e);
+  } finally { btn.disabled = false; }
+}
+
+function logout(){
+  localStorage.removeItem("dpw");
+  localStorage.removeItem("nwtoken");
+  ME = null; PRODUCTS = null;
+  paintWho(); showGate();
+}
 
 /* ── 내 발신 계정 (이 브라우저에만 저장) ── */
-function acct(){ try { return JSON.parse(localStorage.getItem("nwacct")||"null"); } catch(e){ return null; } }
+function acct(){
+  // accounts 모드에서는 발신 계정을 서버가 정한다 — 브라우저에는 앱 비밀번호가 없다
+  if(AUTH_MODE === "accounts") return ME;
+  try { return JSON.parse(localStorage.getItem("nwacct")||"null"); } catch(e){ return null; }
+}
 function openAcct(){
+  if(AUTH_MODE === "accounts") return;   // 로그인 계정이 곧 발신 계정
   const a = acct() || {};
   $("acctName").value = a.name||""; $("acctTitle").value = a.title||"";
   $("acctEmail").value = a.email||""; $("acctPass").value = a.password||"";
@@ -414,8 +474,15 @@ function saveAcct(){
 function clearAcct(){ localStorage.removeItem("nwacct"); closeAcct(); paintWho(); renderPreview(); }
 function paintWho(){
   const a = acct(); const b = $("whoBtn");
-  if(a && a.email){ b.textContent = "✉️ " + a.email; b.classList.remove("unset"); }
-  else { b.textContent = "발신 계정 미설정"; b.classList.add("unset"); }
+  if(a && a.email){
+    b.textContent = "✉️ " + a.email;
+    b.classList.remove("unset");
+    b.style.cursor = AUTH_MODE === "accounts" ? "default" : "pointer";
+    b.title = AUTH_MODE === "accounts" ? "로그인 계정으로 발송됩니다" : "클릭해서 발신 계정 변경";
+  } else {
+    b.textContent = AUTH_MODE === "accounts" ? "로그인 필요" : "발신 계정 미설정";
+    b.classList.add("unset");
+  }
 }
 
 /* ── 모드 / 협업 유형 ── */
@@ -448,8 +515,9 @@ async function loadProducts(force){
     if($("pickAll").checked) qs.push("all=1");
     if(force) qs.push("fresh=1");
     const r = await fetch("/api/products" + (qs.length ? "?"+qs.join("&") : ""),
-      { cache:"no-store", headers:{ "x-dashboard-password": pw() } });
+      { cache:"no-store", headers: authHeaders() });
     const data = await r.json();
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return false; }
     if(r.status === 501){ PRODUCTS = null; $("pickBar").style.display="none"; closePicker(); return false; }
     if(data.error) throw new Error(data.error + (data.hint ? "\n" + data.hint : ""));
     PRODUCTS = data.products || [];
@@ -658,7 +726,9 @@ function renderPreview(){
   const errs = T.validate(d);
   const a = acct();
   const warn = [];
-  if(!a || !a.email) warn.push("발신 계정이 설정되지 않았습니다 — 오른쪽 위 [발신 계정] 을 먼저 등록하세요.");
+  if(!a || !a.email) warn.push(AUTH_MODE === "accounts"
+    ? "로그인이 필요합니다."
+    : "발신 계정이 설정되지 않았습니다 — 오른쪽 위 [발신 계정] 을 먼저 등록하세요.");
   errs.forEach(e => warn.push(e));
   $("msg").innerHTML = warn.length ? '<div class="err">' + warn.map(esc).join("<br />") + '</div>' : "";
 
@@ -728,14 +798,16 @@ async function doSend(list){
     try {
       const r = await fetch("/api/outreach-send", {
         method: "POST",
-        headers: { "content-type":"application/json", "x-dashboard-password": pw() },
-        body: JSON.stringify({
-          auth: { email:a.email, password:a.password, name:a.name, title:a.title },
-          campaign: camp,
-          recipients: chunk
-        })
+        headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+        body: JSON.stringify(Object.assign(
+          { campaign: camp, recipients: chunk },
+          // accounts 모드에서는 서버가 로그인 세션으로 발신 계정을 정한다.
+          // 앱 비밀번호가 브라우저에 없으므로 보낼 것도 없다.
+          AUTH_MODE === "accounts" ? {}
+            : { auth: { email:a.email, password:a.password, name:a.name, title:a.title } }
+        ))
       });
-      if(r.status === 401){ showGate("비밀번호가 올바르지 않습니다."); break; }
+      if(r.status === 401){ showGate(AUTH_MODE === "accounts" ? "다시 로그인해 주세요." : "비밀번호가 올바르지 않습니다."); break; }
       const data = await r.json();
       if(data.error){
         chunk.forEach(c => all.push({ to:c.to, ok:false, error:data.error + (data.hint ? " — " + data.hint : "") }));
@@ -778,16 +850,28 @@ function paintResults(results, total, final){
 // DASHBOARD_PASSWORD 를 설정하지 않은 배포에서 존재하지도 않는 비밀번호를 묻지 않기 위함.
 let booted = false;
 async function boot(){
+  // 1) 이 배포가 어떤 인증 방식인지 서버에 물어본다 (직원 계정 등록 여부)
+  try {
+    const m = await (await fetch("/api/login", { cache:"no-store" })).json();
+    if(m && m.mode) AUTH_MODE = m.mode;
+  } catch(e){ /* 못 물어봐도 기본값(byo)으로 계속 */ }
+
+  // 2) 인증 상태 확인 + 설정값 수신
   let authed = true;
   try {
-    const r = await fetch("/api/outreach-send", { cache:"no-store", headers:{ "x-dashboard-password": pw() } });
+    const r = await fetch("/api/outreach-send", { cache:"no-store", headers: authHeaders() });
     if(r.status === 401){
       authed = false;
-      showGate(pw() ? "비밀번호가 올바르지 않습니다." : "");
+      ME = null;
+      const had = AUTH_MODE === "accounts" ? token() : pw();
+      showGate(had ? (AUTH_MODE === "accounts" ? "다시 로그인해 주세요." : "비밀번호가 올바르지 않습니다.") : "");
     } else {
       const data = await r.json();
       if(!data.error) CFG = Object.assign(CFG, data);
-      hideGate();
+      if(AUTH_MODE === "accounts") ME = data.me || null;
+      // 로그인 방식인데 아직 신원이 없으면 로그인 화면
+      if(AUTH_MODE === "accounts" && !ME){ authed = false; showGate(""); }
+      else hideGate();
     }
   } catch(e){ hideGate(); /* 설정 조회 실패해도 편집·미리보기는 계속 가능 */ }
 
@@ -807,14 +891,14 @@ async function boot(){
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.
   // probe 는 설정 여부만 확인하므로 페이지를 열 때마다 상품을 조회하지 않는다.
   if(authed){
-    fetch("/api/products?probe=1", { cache:"no-store", headers:{ "x-dashboard-password": pw() } })
+    fetch("/api/products?probe=1", { cache:"no-store", headers: authHeaders() })
       .then(r => r.json())
       .then(d => { if(d && d.ready) $("pickBar").style.display = "flex"; })
       .catch(() => {});
   }
   paintWho();
   renderPreview();
-  if(authed && !acct()) openAcct();
+  if(authed && AUTH_MODE !== "accounts" && !acct()) openAcct();
 }
 
 boot();
