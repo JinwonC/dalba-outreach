@@ -129,8 +129,23 @@ function daily(sent, blocked, tzMin, days) {
   return fillDays(m, days, tzMin, 180);
 }
 
+// 담당자 목록은 **등록된 직원 명단(NW_ACCOUNTS)** 에서 시작한다.
+// 발송 기록에서만 뽑으면 아직 이 도구로 안 보낸 사람이 목록에 없고, 그러면
+// 그 사람의 지난 발송을 가져오려 해도 고를 수가 없다 — 순환에 걸린다.
+function roster() {
+  return A.parseAccounts().map(a => ({
+    email: a.email,
+    name: a.name || a.email.split("@")[0],
+    title: a.title || ""
+  }));
+}
+
 function summarize(sent, blocked) {
   const byPerson = new Map();
+  // 아직 한 건도 안 보낸 담당자도 0 으로 보여준다 — 누가 놀고 있는지도 현황이다
+  roster().forEach(a => byPerson.set(a.email, {
+    email: a.email, name: a.name, sent: 0, blocked: 0, lastAt: ""
+  }));
   sent.forEach(r => {
     const k = r.by || "(알 수 없음)";
     const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, lastAt: "" };
@@ -149,7 +164,8 @@ function summarize(sent, blocked) {
   const uniq = new Set(sent.map(r => H.normEmail(r.to)).filter(Boolean));
   return {
     totals: { sent: sent.length, people: uniq.size, blocked: blocked.length },
-    staff: [...byPerson.values()].sort((a, b) => b.sent - a.sent)
+    // 많이 보낸 순, 같으면 이름순 — 0건인 사람은 자연히 아래로 모인다
+    staff: [...byPerson.values()].sort((a, b) => b.sent - a.sent || String(a.name).localeCompare(String(b.name)))
   };
 }
 
@@ -206,6 +222,8 @@ module.exports = async (req, res) => {
       historyEnabled: true,
       windowDays: H.WINDOW_DAYS,
       me: A.publicUser(me),
+      // 등록된 직원 명단. 어느 탭에서 시작하든 담당자 선택칸이 채워져 있어야 한다
+      accounts: roster(),
       // 목록 상한에 걸렸으면 숨기지 않고 알린다 — 전부라고 오해하면 판단이 틀어진다
       truncated: sentAll.length >= limit
     };

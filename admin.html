@@ -182,7 +182,7 @@ function go(v){
   const mail = v === "mail", imp = v === "import";
   $("mailOnly").style.display = mail ? "" : "none";
   // 메일함·가져오기 탭에서는 같은 드롭다운이 "누구 것을 볼지" 를 고르는 칸이 된다
-  $("by").options[0].textContent = (mail || imp) ? "내 메일함" : "담당자 전체";
+  if($("by").options.length) $("by").options[0].textContent = (mail || imp) ? "내 메일함" : "담당자 전체";
   $("q").style.display = (mail || imp) ? "none" : "";
   $("days").style.display = imp ? "none" : "";
   load();
@@ -259,13 +259,20 @@ function truncNote(d){
     : "";
 }
 
-function renderSummary(d){
-  // 담당자 목록을 필터 드롭다운에도 채운다
+/* 담당자 선택칸은 **등록된 직원 명단**으로 채운다.
+   발송 기록에서 뽑으면 아직 안 보낸 사람이 목록에 없어서, 그 사람의 지난 발송을
+   가져오려 해도 고를 수가 없다. 어느 탭에서 시작하든 채워져 있어야 하므로 boot 에서 한다. */
+function fillStaffPicker(accounts){
   const sel = $("by"), cur = sel.value;
   sel.innerHTML = '<option value="">담당자 전체</option>' +
-    (d.staff||[]).map(s => '<option value="'+esc(s.email)+'">'+esc(s.name||s.email)+'</option>').join("");
+    (accounts||[]).map(a => '<option value="'+esc(a.email)+'">'+esc(a.name||a.email)+'</option>').join("");
   sel.value = cur;
+  // 탭에 맞는 라벨을 유지한다 (go 가 먼저 돌았을 수 있다)
+  const mail = VIEW === "mail" || VIEW === "import";
+  sel.options[0].textContent = mail ? "내 메일함" : "담당자 전체";
+}
 
+function renderSummary(d){
   const t = d.totals || {};
   let h = truncNote(d) +
     '<div class="cards">' +
@@ -277,7 +284,7 @@ function renderSummary(d){
   h += '<div class="scroll"><table><thead><tr><th>담당자</th><th>발송</th><th>중복 시도</th><th>마지막 발송</th></tr></thead><tbody>' +
     (d.staff||[]).map(s =>
       '<tr><td><b>'+esc(s.name||s.email)+'</b><div class="muted">'+esc(s.email)+'</div></td>' +
-      '<td class="mono">'+s.sent+'</td>' +
+      '<td class="mono">'+(s.sent || '<span class="muted">0</span>')+'</td>' +
       '<td class="mono">'+(s.blocked ? '<span class="tag hold">'+s.blocked+'</span>' : '<span class="muted">0</span>')+'</td>' +
       '<td class="mono muted">'+esc(fmt(s.lastAt))+'</td></tr>').join("") +
     '</tbody></table></div>';
@@ -613,6 +620,7 @@ async function boot(){
     $("gate").style.display = "none";
     $("app").style.display = "";
     $("who").textContent = ME ? (ME.name || ME.email) + " · 관리자" : "";
+    fillStaffPicker(d.accounts);
     // 저장소 미연결은 본문에서 설명하므로 위에 빨간 띠를 겹쳐 띄우지 않는다
     if(d.error && d.historyEnabled !== false){ $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>'; }
     go("summary");
