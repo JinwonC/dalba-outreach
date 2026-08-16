@@ -168,17 +168,33 @@ function summarize(sent, blocked, replies) {
     byPerson.set(k, cur);
   });
 
-  // 회신은 **보낸 사람** 앞으로 단다 — 누구의 아웃리치가 답을 받았는지가 성과다
+  // 회신은 **보낸 사람** 앞으로 단다 — 누구의 아웃리치가 답을 받았는지가 성과다.
+  //
+  // 세는 단위는 "답장한 크리에이터 수" 다. 답장 통수로 세면 한 사람이 세 번 답할 때
+  // 3건이 되어 **회신율이 100%를 넘는다.** 회신율은 "보낸 사람 중 몇 명이 답했나" 이므로
+  // 사람 단위로 세야 말이 된다. (그날 몇 통 왔는지는 일별 화면이 통수로 보여준다)
+  const repliedBy = new Map();   // 담당자 → 답장한 크리에이터 집합
   replies.forEach(r => {
     const k = r.by || "(알 수 없음)";
-    const cur = byPerson.get(k) || { email: k, name: r.byName || "", sent: 0, blocked: 0, replied: 0, lastAt: "" };
-    cur.replied++;
+    const who = H.normEmail(r.from);
+    if (!who) return;
+    if (!repliedBy.has(k)) repliedBy.set(k, new Set());
+    repliedBy.get(k).add(who);
+  });
+  repliedBy.forEach((set, k) => {
+    const cur = byPerson.get(k) || { email: k, name: "", sent: 0, blocked: 0, replied: 0, lastAt: "" };
+    cur.replied = set.size;
     byPerson.set(k, cur);
   });
 
   const uniq = new Set(sent.map(r => H.normEmail(r.to)).filter(Boolean));
+  const repliedPeople = new Set(replies.map(r => H.normEmail(r.from)).filter(Boolean));
   return {
-    totals: { sent: sent.length, people: uniq.size, blocked: blocked.length, replied: replies.length },
+    totals: {
+      sent: sent.length, people: uniq.size, blocked: blocked.length,
+      replied: repliedPeople.size,      // 답장한 크리에이터 수 (회신율의 분자)
+      replyMessages: replies.length     // 받은 답장 통수 — 참고용
+    },
     // 많이 보낸 순, 같으면 이름순 — 0건인 사람은 자연히 아래로 모인다
     staff: [...byPerson.values()].sort((a, b) => b.sent - a.sent || String(a.name).localeCompare(String(b.name)))
   };

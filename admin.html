@@ -288,8 +288,10 @@ function renderSummary(d){
     '<div class="cards">' +
     '<div class="card"><div class="l">발송</div><div class="n mono">'+(t.sent||0)+'</div></div>' +
     '<div class="card"><div class="l">접촉한 크리에이터</div><div class="n mono">'+(t.people||0)+'</div></div>' +
-    '<div class="card"><div class="l">회신</div><div class="n mono">'+(t.replied||0)+
-      '</div><div class="l" style="margin-top:2px">'+pct(t.replied||0, t.sent||0)+' 회신율</div></div>' +
+    '<div class="card"><div class="l">회신한 크리에이터</div><div class="n mono">'+(t.replied||0)+
+      '</div><div class="l" style="margin-top:2px">'+pct(t.replied||0, t.people||0)+' 회신율' +
+      (t.replyMessages && t.replyMessages !== t.replied ? ' · 답장 '+t.replyMessages+'통' : '') +
+      '</div></div>' +
     '<div class="card"><div class="l">중복으로 막힌 시도</div><div class="n mono">'+(t.blocked||0)+'</div></div>' +
     '</div>';
 
