@@ -409,9 +409,7 @@
       '<td style="border:1px solid rgba(23,23,23,.32);border-radius:999px;padding:7px 18px;font:700 11px/1.2 ' + FONT +
       ";letter-spacing:.16em;color:" + C.inkSoft + ';">✉️ CAMPAIGN INVITATION</td>' +
       "</tr></table>" +
-      '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.ink + ';padding:16px 0 8px;">' + esc(title) + "</div>" +
-      '<div style="font:600 10.5px/1.5 ' + FONT + ";letter-spacing:.18em;color:" + C.inkSoft + ';text-transform:uppercase;">' +
-      "K-Beauty Creator Partnership</div>" +
+      '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.ink + ';padding:16px 0 0;">' + esc(title) + "</div>" +
       "</td></tr>" +
 
       // 본문 카드
