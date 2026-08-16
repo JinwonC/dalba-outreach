@@ -88,6 +88,21 @@
   .rowbad { color:#c0392b; font-weight:700; }
   .scroll { max-height:260px; overflow:auto; border:1px solid #f0f0ee; border-radius:10px; margin-top:8px; }
 
+  /* 상품 선택기 */
+  .pickbar { display:flex; gap:8px; align-items:center; margin-bottom:13px; flex-wrap:wrap; }
+  .picked { display:flex; align-items:center; gap:9px; font-size:12.5px; color:#666; min-width:0; flex:1; }
+  .picked img { width:34px; height:34px; object-fit:cover; border-radius:7px; border:1px solid #eee; flex:none; }
+  /* 상품명은 JS 로 자르지 않고 CSS 말줄임에 맡긴다 — 단어 중간에서 잘리지 않게 */
+  .picked span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; margin-top:14px; }
+  .pcard { border:1px solid #ececec; border-radius:12px; padding:10px; cursor:pointer; background:#fff; text-align:left; font-family:inherit; }
+  .pcard:hover { border-color:#b78a22; box-shadow:0 3px 12px rgba(183,138,34,.13); }
+  .pcard .thumb { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; background:#f4f2ec; display:block; }
+  .pcard .noimg { width:100%; aspect-ratio:1/1; border-radius:8px; background:#f4f2ec; display:flex; align-items:center; justify-content:center; color:#c3bda8; font-size:11px; }
+  .pcard .nm { font-size:12px; line-height:1.4; margin-top:8px; color:#1d1d1f; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .pcard .mt { font-size:11px; color:#999; margin-top:5px; }
+  .pcard .oos { color:#c0392b; }
+
   .progress { height:8px; background:#f0efe9; border-radius:99px; overflow:hidden; margin:12px 0 8px; }
   .progress .fill { height:100%; background:#B78A22; width:0; transition:width .25s; }
   .sendbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px; }
@@ -130,6 +145,25 @@
       <button class="btn" onclick="clearAcct()">지우기</button>
       <button class="btn" onclick="closeAcct()">닫기</button>
       <button class="btn dark" onclick="saveAcct()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 상품 선택기 -->
+<div class="veil" id="pickModal" style="display:none">
+  <div class="card" style="max-width:760px">
+    <h2>🛍 상품 선택</h2>
+    <p>선택하면 <b>제품명 · 이미지 · 제품 링크</b>가 자동으로 채워집니다.</p>
+    <input id="pickSearch" type="text" placeholder="상품명 검색…" oninput="renderPicker()" />
+    <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#777;margin:2px 0 6px">
+      <input type="checkbox" id="pickAll" style="width:auto;margin:0" onchange="loadProducts(true)" />
+      판매중이 아닌 상품도 보기
+    </label>
+    <div id="pickMsg" style="font-size:12.5px;color:#999;padding:6px 0"></div>
+    <div class="pgrid" id="pickGrid"></div>
+    <div class="actions" style="margin-top:16px">
+      <button class="btn" onclick="loadProducts(true)">새로고침</button>
+      <button class="btn" onclick="closePicker()">닫기</button>
     </div>
   </div>
 </div>
@@ -242,6 +276,11 @@
       <!-- 제품 -->
       <div class="panel">
         <h2>제품</h2>
+        <!-- TikTok Shop 자격증명이 없으면 이 줄은 나타나지 않고, 아래 칸을 직접 채우면 된다 -->
+        <div class="pickbar" id="pickBar" style="display:none">
+          <button type="button" class="btn dark" onclick="openPicker()">🛍 TikTok Shop에서 선택</button>
+          <span class="picked" id="pickedInfo"></span>
+        </div>
         <div class="grid2">
           <label class="f"><span>제품명</span><input id="product" type="text" placeholder="d'Alba White Truffle Vitamin C Serum" /></label>
           <label class="f"><span>제품 링크</span><input id="productUrl" type="text" placeholder="https://shop.tiktok.com/..." /></label>
@@ -394,6 +433,77 @@ function setDeal(d){
   localStorage.setItem("outreach_deal", d);
   renderPreview();
 }
+
+/* ── TikTok Shop 상품 선택기 ──
+   자격증명(TTS_*)이 없으면 /api/products 가 501 을 주고, 그때는 버튼 자체를 숨긴다.
+   상품 선택은 편의 기능일 뿐이라 없어도 나머지는 그대로 동작해야 한다. */
+let PRODUCTS = null;
+
+async function loadProducts(force){
+  const msg = $("pickMsg");
+  msg.textContent = "불러오는 중…";
+  $("pickGrid").innerHTML = "";
+  try {
+    const qs = [];
+    if($("pickAll").checked) qs.push("all=1");
+    if(force) qs.push("fresh=1");
+    const r = await fetch("/api/products" + (qs.length ? "?"+qs.join("&") : ""),
+      { cache:"no-store", headers:{ "x-dashboard-password": pw() } });
+    const data = await r.json();
+    if(r.status === 501){ PRODUCTS = null; $("pickBar").style.display="none"; closePicker(); return false; }
+    if(data.error) throw new Error(data.error + (data.hint ? "\n" + data.hint : ""));
+    PRODUCTS = data.products || [];
+    msg.textContent = PRODUCTS.length
+      ? PRODUCTS.length + "개" + ($("pickAll").checked ? "" : " (판매중)")
+      : "상품이 없습니다.";
+    renderPicker();
+    return true;
+  } catch(e){
+    msg.innerHTML = '<span style="color:#c0392b">'+esc(String(e.message||e)).replace(/\n/g,"<br />")+'</span>';
+    return false;
+  }
+}
+
+function renderPicker(){
+  if(!PRODUCTS) return;
+  const q = ($("pickSearch").value || "").trim().toLowerCase();
+  const list = q ? PRODUCTS.filter(p => p.title.toLowerCase().includes(q)) : PRODUCTS;
+  $("pickGrid").innerHTML = list.slice(0, 120).map((p,i) =>
+    '<button type="button" class="pcard" onclick="choose('+PRODUCTS.indexOf(p)+')">' +
+    (p.image
+      ? '<img class="thumb" src="'+esc(p.image)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;noimg&quot;>이미지 없음</div>\'" />'
+      : '<div class="noimg">이미지 없음</div>') +
+    '<div class="nm">'+esc(p.title)+'</div>' +
+    '<div class="mt">'+esc(p.currency+" "+p.price)+
+      (p.stock>0 ? ' · 재고 '+p.stock : ' · <span class="oos">품절</span>')+'</div>' +
+    '</button>'
+  ).join("") || '<div style="color:#999;font-size:12.5px">검색 결과가 없습니다.</div>';
+}
+
+function choose(i){
+  const p = PRODUCTS[i];
+  if(!p) return;
+  $("product").value = p.title;
+  $("productImage").value = p.image || "";
+  $("productUrl").value = p.url || "";
+  paintPicked(p);
+  closePicker();
+  renderPreview();
+}
+
+function paintPicked(p){
+  $("pickedInfo").innerHTML = p
+    ? (p.image ? '<img src="'+esc(p.image)+'" alt="" />' : '') +
+      '<span title="'+esc(p.title)+'">'+esc(p.title)+'</span>'
+    : "";
+}
+
+function openPicker(){
+  $("pickModal").style.display = "flex";
+  if(!PRODUCTS) loadProducts(false);
+  $("pickSearch").focus();
+}
+function closePicker(){ $("pickModal").style.display = "none"; }
 
 /* ── 명단 파싱 (탭 = 시트 붙여넣기, 콤마 = CSV) ── */
 /* 헤더 인식 — 실제 시트는 "E-Mail", "Creator Name", "TikTok Handle" 처럼 표기가 제각각이라
@@ -683,6 +793,15 @@ async function boot(){
     loadDraft();
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
     $("currency").addEventListener("change", schedulePreview);
+  }
+
+  // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.
+  // probe 는 설정 여부만 확인하므로 페이지를 열 때마다 상품을 조회하지 않는다.
+  if(authed){
+    fetch("/api/products?probe=1", { cache:"no-store", headers:{ "x-dashboard-password": pw() } })
+      .then(r => r.json())
+      .then(d => { if(d && d.ready) $("pickBar").style.display = "flex"; })
+      .catch(() => {});
   }
   paintWho();
   renderPreview();
