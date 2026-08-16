@@ -141,8 +141,12 @@ module.exports = async (req, res) => {
 
     const keep = r => withinDays(r, days) && matches(r, needle) &&
       (!by || String(r.by || "").toLowerCase() === by);
-    const sent = sentAll.filter(keep);
-    const blocked = blockedAll.filter(keep);
+
+    // 저장된 순서에 기대지 않고 항상 시각순으로 정렬한다.
+    // 보낸편지함에서 가져온 기록은 실제 발송 시각이 제각각이라 삽입 순서와 어긋난다.
+    const byTime = (a, b) => String(b.at || "").localeCompare(String(a.at || ""));
+    const sent = sentAll.filter(keep).sort(byTime);
+    const blocked = blockedAll.filter(keep).sort(byTime);
 
     const base = {
       historyEnabled: true,

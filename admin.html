@@ -74,6 +74,7 @@
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
     <button class="tab" data-v="mail" onclick="go('mail')">📬 메일함</button>
+    <button class="tab" data-v="import" onclick="go('import')">📥 지난 발송 가져오기</button>
   </div>
 
   <div class="panel">
@@ -156,11 +157,12 @@ function go(v){
   [...document.querySelectorAll(".tab")].forEach(t => {
     t.className = "tab" + (t.dataset.v === v ? " active" : "");
   });
-  const mail = v === "mail";
+  const mail = v === "mail", imp = v === "import";
   $("mailOnly").style.display = mail ? "" : "none";
-  // 메일함 탭에서는 같은 드롭다운이 "누구 메일함을 볼지" 를 고르는 칸이 된다
-  $("by").options[0].textContent = mail ? "내 메일함" : "담당자 전체";
-  $("q").style.display = mail ? "none" : "";
+  // 메일함·가져오기 탭에서는 같은 드롭다운이 "누구 것을 볼지" 를 고르는 칸이 된다
+  $("by").options[0].textContent = (mail || imp) ? "내 메일함" : "담당자 전체";
+  $("q").style.display = (mail || imp) ? "none" : "";
+  $("days").style.display = imp ? "none" : "";
   load();
 }
 
@@ -171,7 +173,9 @@ async function load(){
   $("body").innerHTML = '<div class="muted" style="padding:20px 0">불러오는 중…</div>';
   $("msg").innerHTML = "";
   try {
-    const r = VIEW === "mail" ? await loadMail() : await loadAdmin();
+    const r = VIEW === "mail" ? await loadMail()
+            : VIEW === "import" ? renderImport()
+            : await loadAdmin();
     if(r) $("count").textContent = r;
   } catch(e){
     $("body").innerHTML = "";
@@ -360,6 +364,92 @@ async function loadMail(){
       (rows.length ? "" : '<div class="muted" style="padding:20px 0">메일이 없습니다.</div>');
   }
   return rows.length + "건";
+}
+
+/* ── 지난 발송 가져오기 ──
+   보낸편지함에는 아웃리치가 아닌 메일이 섞여 있다. 그대로 밀어 넣으면 동료·거래처
+   주소가 크리에이터로 잡히고 그 주소로는 앞으로 발송이 막힌다. 되돌리기 어려우므로
+   **무엇이 들어갈지 먼저 보여주고** 확인한 뒤에만 쓴다. */
+function renderImport(){
+  $("body").innerHTML =
+    '<div class="note">보낸편지함을 읽어 <b>이 도구를 쓰기 전에 나간 메일</b>도 이력에 넣습니다. ' +
+    '그래야 예전에 접촉한 크리에이터에게 다시 나가는 걸 막을 수 있습니다.<br />' +
+    '<b>먼저 미리보기</b>로 무엇이 들어갈지 확인하세요 — 넣고 나면 되돌리기 번거롭습니다.</div>' +
+    '<div class="filters" style="margin-bottom:14px">' +
+      '<label>기간 <select id="impDays">' +
+        '<option value="90">최근 90일</option><option value="180" selected>최근 180일</option>' +
+        '<option value="365">최근 1년</option><option value="730">최근 2년</option>' +
+      '</select></label>' +
+      '<label>제목에 포함 <input id="impSubj" placeholder="예: Collab — 비우면 전부" style="min-width:210px" /></label>' +
+      '<button class="btn" onclick="runImport(true)">미리보기</button>' +
+      '<button class="btn dark" id="impGo" onclick="runImport(false)" disabled>가져오기</button>' +
+    '</div>' +
+    '<div id="impOut"></div>';
+  return "";
+}
+
+let IMP_READY = null;   // 미리보기를 통과한 조건만 실제로 실행한다
+
+async function runImport(dryRun){
+  const days = $("impDays").value;
+  const subject = $("impSubj").value.trim();
+  const user = $("by").value;
+  const cond = [user, days, subject].join("|");
+
+  if(!dryRun && IMP_READY !== cond){
+    $("impOut").innerHTML = '<div class="err">조건이 바뀌었습니다. 미리보기를 다시 눌러 확인해 주세요.</div>';
+    $("impGo").disabled = true;
+    return "";
+  }
+
+  $("impOut").innerHTML = '<div class="muted" style="padding:14px 0">' +
+    (dryRun ? "보낸편지함을 읽는 중… (기간이 길면 30초 이상 걸릴 수 있습니다)" : "이력에 넣는 중…") + '</div>';
+
+  try {
+    const r = await fetch("/api/backfill", {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, headers()),
+      body: JSON.stringify({ user, days:Number(days), subject, dryRun })
+    });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return ""; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
+
+    const sk = d.skipped || {};
+    const head = '<div class="note"><b>'+esc(d.user)+'</b> · 폴더 <b>'+esc(d.path)+'</b> · 최근 '+d.days+'일<br />' +
+      '메일 '+d.scanned+'통을 읽어 <b>'+d.candidates+'건</b>이 대상입니다.' +
+      (d.truncated ? ' <span class="muted">(많아서 최신 것부터 일부만)</span>' : '') +
+      '<br /><span class="muted">제외 — 사내 주소 '+(sk.internal||0)+' · 여러 명에게 보낸 메일 '+(sk.bulk||0)+
+      ' · 제목 불일치 '+(sk.subject||0)+'</span></div>';
+
+    if(dryRun){
+      IMP_READY = cond;
+      $("impGo").disabled = d.candidates === 0;
+      const rows = d.preview||[];
+      $("impOut").innerHTML = head +
+        (rows.length
+          ? '<div class="scroll"><table><thead><tr><th>보낸 시각</th><th>받는 사람</th><th>제목</th></tr></thead><tbody>' +
+            rows.map(r => '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+              '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
+              '<td>'+esc(r.campaign)+'</td></tr>').join("") +
+            '</tbody></table></div>' +
+            (d.candidates > rows.length ? '<div class="muted" style="padding:8px 2px">앞 '+rows.length+'건만 표시. 실제로는 '+d.candidates+'건이 들어갑니다.</div>' : '')
+          : '<div class="muted" style="padding:14px 0">가져올 것이 없습니다. 기간을 늘리거나 제목 조건을 비워 보세요.</div>');
+    } else {
+      IMP_READY = null;
+      $("impGo").disabled = true;
+      const x = d.result||{};
+      $("impOut").innerHTML = head +
+        '<div class="ok"><b>'+x.imported+'건</b>을 이력에 넣었습니다.' +
+        (x.duplicate ? ' <span class="muted">이미 들어와 있던 '+x.duplicate+'건은 건너뜀.</span>' : '') +
+        '<br /><b>'+x.blocking+'건</b>은 앞으로 중복 발송이 막힙니다.' +
+        (x.expired ? ' <span class="muted">'+x.expired+'건은 차단 기간('+ (d.windowDays||90) +'일)이 이미 지나 기록으로만 남습니다.</span>' : '') +
+        '</div>';
+    }
+  } catch(e){
+    $("impOut").innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
+  }
+  return "";
 }
 
 /* ── 시작 ── */

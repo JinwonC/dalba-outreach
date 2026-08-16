@@ -23,12 +23,9 @@
 //   NW_IMAP_PORT  기본 993 (SSL)
 //   ADMIN_EMAILS  다른 담당자 메일함을 볼 수 있는 관리자
 
-const { ImapFlow } = require("imapflow");
 const A = require("../auth.js");
 const H = require("../history.js");
-
-const IMAP_HOST = process.env.NW_IMAP_HOST || "imap.worksmobile.com";
-const IMAP_PORT = Number(process.env.NW_IMAP_PORT || 993);
+const M = require("../mail.js");   // IMAP 접속·폴더 탐색은 여기 한 곳에만 있다
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -39,30 +36,7 @@ function isAdmin(u) {
   return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase()));
 }
 
-// 보낸편지함 이름은 배포·언어 설정마다 다르다(Sent / 보낸메일함 / Sent Messages …).
-// IMAP 은 폴더에 용도 플래그(\Sent)를 붙이도록 돼 있으니 그것부터 보고,
-// 없을 때만 이름으로 추측한다 — 이름 목록에 의존하면 어느 계정에서 조용히 빈 목록이 된다.
-async function findMailbox(client, kind) {
-  if (kind === "inbox" || kind === "replies") return "INBOX";
-  const boxes = await client.list();
-  const flagged = boxes.find(b => b.specialUse === "\\Sent");
-  if (flagged) return flagged.path;
-  const guess = boxes.find(b => /^(sent|sent items|sent messages|보낸편지함|보낸메일함)$/i.test(b.name || ""));
-  return guess ? guess.path : "INBOX";
-}
-
-function addr(a) {
-  const x = (a && a[0]) || null;
-  if (!x) return { name: "", email: "" };
-  return { name: x.name || "", email: String(x.address || "").toLowerCase() };
-}
-
-function readAll(env, key) {
-  return (env[key] || []).map(x => String(x.address || "").toLowerCase()).filter(Boolean);
-}
-
 module.exports = async (req, res) => {
-  let client = null;
   try {
     res.setHeader("Cache-Control", "no-store");
 
@@ -87,18 +61,10 @@ module.exports = async (req, res) => {
     const kind = String(q.box || "sent").toLowerCase();
     const days = Math.max(1, Math.min(Number(q.days) || 30, 365));
     const limit = Math.max(1, Math.min(Number(q.limit) || 200, MAX_LIMIT));
-    const since = new Date(Date.now() - days * 86400e3);
 
-    client = new ImapFlow({
-      host: IMAP_HOST, port: IMAP_PORT, secure: IMAP_PORT === 993,
-      auth: { user: target.email, pass: target.appPassword },
-      logger: false,
-      // 함수 제한시간(60초) 안에서 끝나야 한다 — 매달리지 않고 일찍 실패시킨다
-      socketTimeout: 25000, greetingTimeout: 15000, connectionTimeout: 15000
-    });
-
+    let mail;
     try {
-      await client.connect();
+      mail = await M.read(target, { kind, days, limit, pingOnly: q.ping === "1" });
     } catch (e) {
       res.status(502).json({
         error: "네이버웍스 IMAP 연결/인증 실패: " + String((e && e.message) || e),
@@ -110,68 +76,42 @@ module.exports = async (req, res) => {
     }
 
     if (q.ping === "1") {
-      await client.logout();
-      res.status(200).json({ ok: true, user: target.email, host: IMAP_HOST });
+      res.status(200).json({ ok: true, user: target.email, host: M.IMAP_HOST });
       return;
     }
 
-    const path = await findMailbox(client, kind);
-    const lock = await client.getMailboxLock(path);
-
-    // 회신 보기는 "우리가 접촉한 크리에이터" 목록과 대조한다
-    let contacted = null;
+    let rows;
     if (kind === "replies") {
+      // 받은 메일 중 **우리가 아웃리치한 주소에서 온 것만** 추린다
       const log = H.enabled() ? await H.recent(H.LOG_MAX) : [];
-      contacted = new Map();
-      log.forEach(r => {
-        const k = H.normEmail(r.to);
-        if (k) contacted.set(k, r);
-      });
+      const contacted = new Map();
+      log.forEach(r => { const k = H.normEmail(r.to); if (k) contacted.set(k, r); });
+
+      rows = mail.rows.map(m => {
+        const hit = contacted.get(H.normEmail(m.from.email));
+        if (!hit) return null;
+        return {
+          uid: m.uid, at: m.at, subject: m.subject,
+          from: m.from.email, fromName: m.from.name,
+          outreach: { by: hit.by, byName: hit.byName, campaign: hit.campaign, sentAt: hit.at }
+        };
+      }).filter(Boolean);
+    } else {
+      rows = mail.rows.map(m => ({
+        uid: m.uid, at: m.at, subject: m.subject,
+        from: m.from.email, fromName: m.from.name,
+        to: m.to.email, toName: m.to.name,
+        recipients: m.toAll.concat(m.ccAll).map(x => x.email)
+      }));
     }
 
-    const rows = [];
-    try {
-      for await (const msg of client.fetch({ since }, { envelope: true, uid: true })) {
-        const env = msg.envelope || {};
-        const from = addr(env.from);
-        const to = addr(env.to);
-
-        if (kind === "replies") {
-          const hit = contacted.get(H.normEmail(from.email));
-          if (!hit) continue;
-          rows.push({
-            uid: msg.uid, at: env.date, subject: env.subject || "(제목 없음)",
-            from: from.email, fromName: from.name,
-            outreach: { by: hit.by, byName: hit.byName, campaign: hit.campaign, sentAt: hit.at }
-          });
-        } else {
-          rows.push({
-            uid: msg.uid, at: env.date, subject: env.subject || "(제목 없음)",
-            from: from.email, fromName: from.name,
-            to: to.email, toName: to.name,
-            recipients: readAll(env, "to").concat(readAll(env, "cc"))
-          });
-        }
-        // 오래된 것부터 오므로, 상한을 넘으면 앞쪽을 버리고 최신을 남긴다
-        if (rows.length > limit) rows.shift();
-      }
-    } finally {
-      lock.release();
-    }
-
-    await client.logout();
-    client = null;
-
-    rows.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     res.status(200).json({
-      user: target.email, box: kind, path, days, count: rows.length,
+      user: target.email, box: kind, path: mail.path, days, count: rows.length,
       // 상한에 걸렸는지 알려 준다 — 전부라고 오해하면 판단이 틀어진다
-      truncated: rows.length >= limit,
+      truncated: mail.truncated,
       rows
     });
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e) });
-  } finally {
-    if (client) { try { await client.logout(); } catch (_) { try { client.close(); } catch (_) {} } }
   }
 };

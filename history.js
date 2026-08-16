@@ -194,6 +194,47 @@ async function log(rec) {
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
+// ─── 지난 발송 가져오기 (보낸편지함 → 이력) ─────────────────────
+// 이 도구를 쓰기 전에 나간 메일도 중복 판정에 들어와야 한다. 안 그러면 툴을 켠 날
+// 이전에 접촉한 크리에이터에게 그대로 다시 나간다.
+const IMPORTED_KEY = "outreach:imported";   // 같은 메일을 두 번 가져오지 않도록
+
+// 차단 키는 **실제 보낸 날짜 기준**으로 남은 기간만 건다.
+// 지금부터 90일로 걸어 버리면 120일 전에 보낸 사람이 앞으로 90일 더 막힌다.
+function remainingTtl(at) {
+  const t = Date.parse(at || "");
+  if (!isFinite(t)) return TTL_SEC;
+  const left = TTL_SEC - Math.floor((Date.now() - t) / 1000);
+  return left;
+}
+
+async function importSend(rec, dedupeId) {
+  if (!enabled()) return { skipped: true };
+
+  if (dedupeId) {
+    const seen = await cmd(["SISMEMBER", IMPORTED_KEY, String(dedupeId)]);
+    if (seen === 1) return { duplicate: true };
+  }
+
+  const val = JSON.stringify(rec);
+  const ttl = remainingTtl(rec.at);
+
+  // 차단 기간이 이미 지난 메일은 목록에만 남긴다 — 기록으로는 보이되 발송을 막지는 않는다
+  let blocked = false;
+  if (ttl > 0) {
+    const keys = keysOf(rec);
+    // 이미 기록이 있으면 덮어쓰지 않는다(NX) — 도구로 보낸 정확한 기록이 우선
+    const out = await pipeline(keys.map(k => ["SET", k, val, "NX", "EX", String(ttl)]));
+    blocked = out.some(r => r === "OK");
+  }
+
+  const tail = [["LPUSH", LOG_KEY, val], ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]];
+  if (dedupeId) tail.unshift(["SADD", IMPORTED_KEY, String(dedupeId)]);
+  await pipeline(tail);
+
+  return { imported: true, blocking: blocked, expired: ttl <= 0 };
+}
+
 // 중복이라 막힌 시도도 남긴다. "누가 누구에게 보내려다 막혔는지" 가 보이면
 // 담당자끼리 명단이 얼마나 겹치는지, 배분을 어떻게 고쳐야 하는지가 드러난다.
 async function logBlocked(rec) {
@@ -217,7 +258,7 @@ function recent(n) { return readList(LOG_KEY, LOG_MAX, n); }
 function recentBlocked(n) { return readList(BLOCK_KEY, BLOCK_MAX, n); }
 
 module.exports = {
-  enabled, lookup, reserve, release, log, logBlocked, recent, recentBlocked,
+  enabled, lookup, reserve, release, log, logBlocked, importSend, recent, recentBlocked,
   normEmail, normHandle,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX
 };
