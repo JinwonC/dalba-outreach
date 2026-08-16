@@ -21,50 +21,18 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
-const M = require("../mail.js");
+const S = require("../sync.js");   // 메일함 → 이력 변환은 여기 한 곳에만 있다
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-const COMPANY_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
-  .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
-
-const MAX_RECIPIENTS = 5;   // 이보다 많으면 공지·회람으로 본다
-
-// 이력을 어느 날부터 채울지. 그 전 메일은 읽지 않는다.
-const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-07-01";
 
 function isAdmin(u) { return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase())); }
-function isInternal(email) {
-  return COMPANY_DOMAINS.includes(String(email || "").toLowerCase().split("@")[1] || "");
-}
 
 function readBody(req) {
   const b = req.body;
   if (!b) return {};
   if (typeof b === "string") { try { return JSON.parse(b); } catch (_) { return {}; } }
   return b;
-}
-
-// 보낸 메일 한 통 → 이력 후보들 (수신자 한 명당 한 건)
-function candidates(msg, account, needle) {
-  if (needle && String(msg.subject || "").toLowerCase().indexOf(needle) < 0) return [];
-
-  const people = (msg.toAll || []).concat(msg.ccAll || []);
-  if (!people.length || people.length > MAX_RECIPIENTS) return [];
-
-  return people
-    .filter(p => p.email && !isInternal(p.email))
-    .map(p => ({
-      to: p.email,
-      name: p.name || "",
-      handle: "",                       // 메일에는 TikTok 핸들이 없다
-      at: msg.at ? new Date(msg.at).toISOString() : "",
-      by: account.email,
-      byName: account.name || account.email.split("@")[0],
-      campaign: msg.subject || "",
-      source: "imap",                   // 도구로 보낸 기록과 구분
-      messageId: msg.messageId || ""
-    }));
 }
 
 module.exports = async (req, res) => {
@@ -99,14 +67,13 @@ module.exports = async (req, res) => {
 
     // 언제부터 가져올지. 기본은 HISTORY_SINCE(없으면 2026-07-01) — 이 도구를 쓰기 전
     // 기간까지 이력에 넣어야 중복 판정과 실적 집계가 그 날부터 맞는다.
-    const since = String(body.since || SINCE_DEFAULT);
+    const since = String(body.since || S.SINCE_DEFAULT);
     const limit = Math.max(1, Math.min(Number(body.limit) || 500, 2000));
-    const needle = String(body.subject || "").trim().toLowerCase();
     const dryRun = body.dryRun !== false;   // 기본은 미리보기 — 실수로 쓰지 않도록
 
-    let mail;
+    let read;
     try {
-      mail = await M.read(account, { kind: "sent", since, limit });
+      read = await S.readSent(account, { since, limit, subject: body.subject });
     } catch (e) {
       res.status(502).json({
         error: "네이버웍스 IMAP 연결/인증 실패: " + String((e && e.message) || e),
@@ -116,50 +83,24 @@ module.exports = async (req, res) => {
       return;
     }
 
-    const rows = [];
-    let skippedInternal = 0, skippedBulk = 0, skippedSubject = 0;
-    mail.rows.forEach(msg => {
-      const c = candidates(msg, account, needle);
-      if (!c.length) {
-        const people = (msg.toAll || []).concat(msg.ccAll || []);
-        if (needle && String(msg.subject || "").toLowerCase().indexOf(needle) < 0) skippedSubject++;
-        else if (people.length > MAX_RECIPIENTS) skippedBulk++;
-        else skippedInternal++;
-        return;
-      }
-      rows.push(...c);
-    });
-
     const base = {
-      user: account.email, path: mail.path, since,
+      user: account.email, path: read.path, since,
       windowDays: H.WINDOW_DAYS,
-      scanned: mail.rows.length,
-      truncated: mail.truncated,
-      candidates: rows.length,
-      skipped: { internal: skippedInternal, bulk: skippedBulk, subject: skippedSubject }
+      scanned: read.scanned,
+      truncated: read.truncated,
+      candidates: read.rows.length,
+      skipped: read.skipped
     };
 
     if (dryRun) {
-      res.status(200).json(Object.assign(base, { dryRun: true, preview: rows.slice(0, 100) }));
+      res.status(200).json(Object.assign(base, { dryRun: true, preview: read.rows.slice(0, 100) }));
       return;
     }
 
-    let imported = 0, duplicate = 0, blocking = 0, expired = 0;
-    for (const r of rows) {
-      // messageId 가 없는 서버도 있으므로 계정+주소+시각으로 대체 키를 만든다
-      const id = r.messageId || (account.email + "|" + r.to + "|" + r.at);
-      const out = await H.importSend(r, id);
-      if (out.duplicate) { duplicate++; continue; }
-      if (out.imported) {
-        imported++;
-        if (out.blocking) blocking++;
-        if (out.expired) expired++;
-      }
-    }
+    const result = await S.writeSent(account, read.rows);
 
     res.status(200).json(Object.assign(base, {
-      dryRun: false,
-      result: { imported, duplicate, blocking, expired }
+      dryRun: false, result
     }));
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e) });

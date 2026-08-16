@@ -10,7 +10,8 @@ dalba-outreach/
 ├─ email-template.js     ← 메일 템플릿 엔진 (브라우저·서버 공용)
 ├─ auth.js               ← 직원 계정 목록 · 로그인 세션
 ├─ history.js            ← 발송 이력 (팀 공용) · 중복 발송 차단
-├─ mail.js               ← 네이버웍스 IMAP 읽기 (조회·가져오기 공용)
+├─ mail.js               ← 네이버웍스 IMAP 읽기
+├─ sync.js               ← 메일함 → 이력 변환 (버튼·자동 실행 공용)
 ├─ api/
 │  ├─ login.js           ← 로그인 (아이디/비번 → 세션 토큰)
 │  ├─ outreach-send.js   ← 네이버웍스 SMTP 발송
@@ -18,6 +19,7 @@ dalba-outreach/
 │  ├─ admin.js           ← 팀 전체 집계 (관리자 전용)
 │  ├─ replies.js         ← 받은편지함을 훑어 크리에이터 회신 기록
 │  ├─ backfill.js        ← 보낸편지함을 이력으로 가져오기
+│  ├─ cron.js            ← 자동 동기화 (Vercel Cron 이 부른다)
 │  └─ products.js        ← TikTok Shop 상품 목록 (썸네일·판매상태)
 ├─ package.json
 └─ vercel.json
@@ -49,6 +51,7 @@ dalba-outreach/
 | `KV_REST_API_URL`<br />`KV_REST_API_TOKEN` | **권장** | 발송 이력 저장소. 중복 발송 차단이 여기에 달려 있다 (아래 참고). Vercel 마켓플레이스가 자동 주입 |
 | `HISTORY_DAYS` | 선택 | 재발송 차단 기간, 기본 `90` 일 |
 | `HISTORY_SINCE` | 선택 | 메일함에서 이력을 채울 시작일, 기본 `2026-07-01` |
+| `CRON_SECRET` | **권장** | 자동 동기화(`/api/cron`)를 아무나 못 부르게 하는 비밀값. Vercel 이 자동으로 헤더에 실어 보낸다 |
 | `ADMIN_EMAILS` | 선택 | 관리자 화면을 볼 수 있는 이메일, 콤마 구분. 비우면 **아무도 관리자가 아니다** |
 | `NW_IMAP_HOST` | 선택 | 기본 `imap.worksmobile.com` |
 | `NW_IMAP_PORT` | 선택 | 기본 `993` (SSL) |
@@ -207,8 +210,18 @@ quinn|Qu1nnX7!|Quinn|quinn@dalbausa.com|wxyz 1234 5678 9012|Creator Partnerships
 
 > ⚠️ 관리자센터에서 **IMAP/POP3 사용 허용**이 켜져 있어야 한다 (SMTP 와 같은 설정 화면).
 
-> ⚠️ 자동으로 돌지 않는다. 서버리스에는 상주 프로세스가 없어서, 버튼을 눌러야 갱신된다.
-> 주기 실행이 필요하면 Vercel Cron 으로 `POST /api/backfill` · `POST /api/replies` 를 부르면 된다.
+### ⏰ 자동 실행
+`vercel.json` 의 `crons` 가 **매일 07:00(KST)** 에 `/api/cron` 을 부른다. 버튼은 그 사이
+바로 채우고 싶을 때 쓴다 — 눌러도, 안 눌러도 다음 날 아침이면 최신이 된다.
+
+- 함수 제한시간(60초)은 담당자 10명의 메일함 20개를 열기엔 짧다. 그래서 **커서를 저장해
+  이어서 돈다** — 한 번에 도는 만큼만 처리하고 다음 실행이 그 다음 사람부터 이어받는다
+- 마지막 실행 시각은 담당자별 화면에 표시된다. 숫자가 낡았는지 화면에서 바로 알아야 하므로
+- `CRON_SECRET` 을 설정하면 그 값을 가진 요청만 부를 수 있다 (Vercel 이 자동으로 실어 보낸다).
+  로그인한 관리자도 `/api/cron` 을 직접 열어 상태를 확인할 수 있다
+
+> ⚠️ Vercel **Hobby 플랜은 Cron 이 하루 1회**로 제한된다. 더 자주 돌리려면 Pro 가 필요하고,
+> `vercel.json` 의 `schedule` 을 고치면 된다 (예: 4시간마다 `0 */4 * * *`).
 
 ---
 
@@ -394,7 +407,8 @@ Outlook 데스크톱(Word 엔진)은 `max-width` 를 무시해 본문이 창 너
 
 - 회신은 **개수만** 센다. "진행 중 / 성사 / 거절" 같은 **상태는 아직 없다** —
   자동 팔로업 시퀀스를 만들려면 그 상태 저장이 먼저 필요하다.
-- 회신 수집이 **자동으로 돌지 않는다.** 버튼을 눌러야 갱신된다 (Vercel Cron 을 붙이면 자동화 가능).
+- 자동 동기화는 **하루 1회**(Hobby 플랜 제한)라, 그날 중간의 회신은 다음 날 아침에 잡힌다.
+  급하면 버튼을 누르면 된다.
 - 메일함 조회·가져오기는 **실제 네이버웍스 IMAP 서버로는 검증하지 못했다** (개발 환경에서 접근 불가).
   가짜 IMAP 서버로 권한·폴더탐색·회신대조·필터·중복방지 로직만 확인했다.
   처음 켤 때 `GET /api/mailbox?ping=1` 로 연결부터 확인할 것.

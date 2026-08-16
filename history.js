@@ -276,8 +276,12 @@ async function recordReply(rec, dedupeId) {
   return { recorded: true };
 }
 
+// 작은 값 하나를 그대로 읽고 쓴다 (자동 실행의 커서·마지막 상태 보관용)
+async function readRaw(key) { return enabled() ? cmd(["GET", key]) : null; }
+async function writeRaw(key, val) { if (enabled()) await cmd(["SET", key, String(val)]); }
+
 module.exports = {
-  enabled, lookup, reserve, release, log, logBlocked, importSend,
+  enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
   recordReply, recent, recentBlocked, recentReplies,
   normEmail, normHandle,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX

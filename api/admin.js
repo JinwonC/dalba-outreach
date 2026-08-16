@@ -219,6 +219,9 @@ module.exports = async (req, res) => {
     const needle = String(q.q || "").trim().toLowerCase();
     const by = String(q.by || "").trim().toLowerCase();
 
+    let cronStatus = null;
+    try { cronStatus = JSON.parse(await H.readRaw("outreach:cron:status")); } catch (_) {}
+
     const [sentAll, blockedAll, replyAll] = await Promise.all([
       H.recent(limit),
       H.recentBlocked(Math.min(limit, H.BLOCK_MAX)),
@@ -241,6 +244,8 @@ module.exports = async (req, res) => {
       me: A.publicUser(me),
       // 등록된 직원 명단. 어느 탭에서 시작하든 담당자 선택칸이 채워져 있어야 한다
       accounts: roster(),
+      // 자동 동기화가 언제 돌았는지 — 숫자가 낡았는지 화면에서 바로 알 수 있어야 한다
+      cron: cronStatus,
       // 목록 상한에 걸렸으면 숨기지 않고 알린다 — 전부라고 오해하면 판단이 틀어진다
       truncated: sentAll.length >= limit
     };

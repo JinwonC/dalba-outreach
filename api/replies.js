@@ -19,10 +19,10 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
-const M = require("../mail.js");
+const S = require("../sync.js");
 
 // 회신도 발송 이력과 같은 날부터 본다 — 기준이 다르면 회신율이 말이 안 된다
-const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-07-01";
+
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -34,37 +34,6 @@ function readBody(req) {
   if (!b) return {};
   if (typeof b === "string") { try { return JSON.parse(b); } catch (_) { return {}; } }
   return b;
-}
-
-// 한 계정의 받은편지함을 훑는다. 반환은 집계용 숫자만.
-async function scan(account, contacted, since, limit) {
-  const mail = await M.read(account, { kind: "inbox", since, limit });
-  let found = 0, dup = 0;
-
-  for (const m of mail.rows) {
-    const hit = contacted.get(H.normEmail(m.from.email));
-    if (!hit) continue;
-
-    const at = m.at ? new Date(m.at).toISOString() : "";
-    const id = m.messageId || (account.email + "|" + m.from.email + "|" + at);
-    const out = await H.recordReply({
-      from: m.from.email,
-      fromName: m.from.name || "",
-      at,
-      subject: m.subject || "",
-      inbox: account.email,          // 누구 받은편지함에 들어왔는지
-      // 원래 누가 어느 캠페인으로 보냈는지 — 담당자별 회신율을 세려면 필요하다
-      by: hit.by || account.email,
-      byName: hit.byName || account.name || "",
-      campaign: hit.campaign || "",
-      sentAt: hit.at || ""
-    }, id);
-
-    if (out.duplicate) dup++;
-    else if (out.recorded) found++;
-  }
-
-  return { user: account.email, scanned: mail.rows.length, path: mail.path, found, duplicate: dup };
 }
 
 module.exports = async (req, res) => {
@@ -81,7 +50,7 @@ module.exports = async (req, res) => {
     }
 
     const body = readBody(req);
-    const since = String(body.since || SINCE_DEFAULT);
+    const since = String(body.since || S.SINCE_DEFAULT);
     const limit = Math.max(1, Math.min(Number(body.limit) || 400, 1000));
 
     // 대상 계정 정하기 — 기본은 본인, 남의 메일함이나 전원은 관리자만
@@ -101,16 +70,7 @@ module.exports = async (req, res) => {
       }
     }
 
-    // 우리가 보낸 적 있는 주소 — 이 목록에 없으면 회신이 아니다
-    const log = await H.recent(H.LOG_MAX);
-    const contacted = new Map();
-    log.forEach(r => {
-      const k = H.normEmail(r.to);
-      if (!k) return;
-      // 같은 사람에게 여러 번 보냈으면 가장 최근 발송을 기준으로 본다
-      const cur = contacted.get(k);
-      if (!cur || String(r.at || "") > String(cur.at || "")) contacted.set(k, r);
-    });
+    const contacted = await S.contactedMap();
 
     if (!contacted.size) {
       res.status(200).json({ contacted: 0, results: [], note: "발송 기록이 없어 대조할 대상이 없습니다" });
@@ -125,7 +85,7 @@ module.exports = async (req, res) => {
     for (const acc of targets) {
       if (Date.now() > deadline) { skipped.push(acc.email); continue; }
       try {
-        results.push(await scan(acc, contacted, since, limit));
+        results.push(await S.collectReplies(acc, contacted, { since, limit }));
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
       }

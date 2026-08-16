@@ -234,6 +234,28 @@ async function loadAdmin(){
   return "";
 }
 
+/* 기록이 하나도 없을 때. 동기화는 자동으로 돌지 않으므로, 빈 표만 보여주면
+   "고장인가" 와 "아직 안 눌렀나" 를 구분할 수 없다. 무엇을 하면 되는지 같이 띄운다. */
+/* 자동 동기화가 마지막으로 언제 돌았는지. 숫자가 낡았는지 화면에서 바로 알아야 한다 */
+function cronNote(d){
+  const c = d.cron;
+  if(!c) return '자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. ' +
+           '눌러서 <b>2026-07-01 이후</b> 발송·회신을 지금 바로 가져오세요.';
+  const when = fmt(c.at);
+  return '마지막 자동 동기화 <b>'+esc(when)+'</b>' +
+    (c.complete ? '' : ' <span style="color:#a8801f">(전원을 다 못 돌아 다음 실행이 이어받습니다)</span>') +
+    (c.totals && c.totals.failed ? ' <span style="color:#a23b2e">· 실패 '+c.totals.failed+'명</span>' : '') +
+    ' <span class="muted">· 매일 07:00(KST) 자동 실행</span>';
+}
+
+function emptyNote(d){
+  if((d.totals && d.totals.sent) || (d.rows && d.rows.length)) return "";
+  return '<div class="note"><b>아직 기록이 없습니다.</b><br />' +
+    '자동 동기화는 <b>매일 07:00(KST)</b>에 돕니다. 아직 한 번도 안 돌았다면, 담당자별 탭의 ' +
+    '<b>[🔄 메일함에서 동기화]</b> 로 <b>2026-07-01 이후</b> 발송·회신을 지금 바로 가져올 수 있습니다.<br />' +
+    '<span class="muted">담당자 수에 따라 몇 분 걸립니다. 이 도구로 새로 보내는 메일은 기다리지 않아도 바로 잡힙니다.</span></div>';
+}
+
 function truncNote(d){
   return d.truncated
     ? '<div class="note">기록이 많아 최근 것부터 일부만 불러왔습니다. 기간이나 검색어로 좁혀 보세요.</div>'
@@ -252,14 +274,14 @@ function fillStaffPicker(accounts){
 
 function renderSummary(d){
   const t = d.totals || {};
-  let h = truncNote(d) +
+  let h = truncNote(d) + emptyNote(d) +
     // 회신은 받은편지함을 훑어야 알 수 있다. 서버리스에는 상주 프로세스가 없어
     // 자동으로 돌지 않으므로, 눌러서 갱신하고 마지막 갱신 시각을 밝힌다.
     '<div class="filters" style="margin:-2px 0 12px">' +
       '<button class="btn dark" id="syncBtn" onclick="syncAll()">🔄 메일함에서 동기화</button>' +
       // 동기화가 끝나면 load() 가 이 패널을 다시 그린다. 결과를 여기 담아 두지 않으면
       // 방금 무슨 일이 있었는지가 그 순간 지워진다.
-      '<span class="muted" id="syncMsg">' + (SYNC_RESULT ||
+      '<span class="muted" id="syncMsg">' + (SYNC_RESULT || cronNote(d) ||
         '담당자 메일함을 훑어 <b>2026-07-01 이후</b> 발송·회신을 채웁니다. 누르기 전까지 갱신되지 않습니다.') +
       '</span>' +
     '</div>' +
@@ -282,7 +304,7 @@ function renderSummary(d){
       '<td class="mono muted">'+esc(fmt(s.lastAt))+'</td></tr>').join("") +
     '</tbody></table></div>';
 
-  if(!(d.staff||[]).length) h += '<div class="muted" style="padding:20px 0">아직 발송 기록이 없습니다.</div>';
+
   $("body").innerHTML = h;
   return "";
 }
@@ -311,11 +333,7 @@ function niceMax(n){
 
 function renderDaily(d){
   const rows = d.rows || [];
-  if(!rows.length){
-    $("body").innerHTML = '<div class="muted" style="padding:20px 0">아직 발송 기록이 없습니다. ' +
-      '한 통 보내고 나면 이 화면에 잡힙니다.</div>';
-    return "";
-  }
+  if(!rows.length){ $("body").innerHTML = emptyNote(d); return ""; }
 
   const totalSent = rows.reduce((s,r)=>s+r.sent,0);
   const totalBlocked = rows.reduce((s,r)=>s+r.blocked,0);
@@ -415,7 +433,7 @@ function wireTips(rows){
 
 function renderSent(d){
   const rows = d.rows||[];
-  $("body").innerHTML = truncNote(d) +
+  $("body").innerHTML = truncNote(d) + emptyNote(d) +
     '<div class="scroll"><table><thead><tr>' +
     '<th>보낸 시각</th><th>받는 사람</th><th>핸들</th><th>캠페인</th><th>담당자</th>' +
     '</tr></thead><tbody>' +
