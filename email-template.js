@@ -319,9 +319,12 @@
       ? '<div style="font:400 44px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">d’Alba</div>' +
         '<div style="font:400 12px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.62em;padding:9px 0 0 .62em;">piedmont</div>'
       : '<div style="font:400 40px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">' + esc(brand) + "</div>";
+    // 이미지가 막힌 클라이언트에서도 브랜드가 보이도록 alt 를 워드마크처럼 스타일링한다.
+    // (이미지가 뜨면 이 글꼴 스타일은 이미지에 가려 안 보이고, 막히면 alt 가 이 스타일로 뜬다.)
     const logoBlock = '<div style="padding:0 0 18px;">' + (logoUrl
       ? '<img src="' + logoUrl + '" alt="' + esc(brand) +
-        '" height="46" style="height:46px;max-width:70%;width:auto;border:0;outline:none;display:inline-block;" />'
+        '" height="46" style="height:46px;max-width:70%;width:auto;border:0;outline:none;display:inline-block;' +
+        "font:400 30px/46px " + SERIF + ";color:" + C.ink + ';" />'
       : wordmark) + "</div>";
 
     let body = "";
@@ -405,9 +408,11 @@
       ";background:linear-gradient(180deg," + C.heroTop + " 0%," + C.heroMid + " 46%," + C.heroBot + " 100%);" +
       'border-radius:14px;padding:36px 30px;text-align:center;">' +
       logoBlock +
-      '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>' +
-      '<td style="border:1px solid rgba(23,23,23,.32);border-radius:999px;padding:7px 18px;font:700 11px/1.2 ' + FONT +
-      ";letter-spacing:.16em;color:" + C.inkSoft + ';">✉️ CAMPAIGN INVITATION</td>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;"><tr>' +
+      // text-indent:.16em — 자간이 마지막 글자 뒤에도 공백을 남겨 글씨가 왼쪽으로 쏠리는 걸
+      // 한 칸만큼 밀어 상쇄한다. 그래야 알약 안에서 정중앙에 온다.
+      '<td style="border:1px solid rgba(23,23,23,.32);border-radius:999px;padding:7px 20px;font:700 11px/1.2 ' + FONT +
+      ";letter-spacing:.16em;text-indent:.16em;color:" + C.inkSoft + ';">✉️ CAMPAIGN INVITATION</td>' +
       "</tr></table>" +
       '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.ink + ';padding:16px 0 0;">' + esc(title) + "</div>" +
       "</td></tr>" +
