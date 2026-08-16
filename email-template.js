@@ -20,17 +20,25 @@
   "use strict";
 
   // ─── 디자인 토큰 ────────────────────────────────────────────────
+  // 브랜드 배너의 노랑→크림 그라데이션(위 노랑, 아래 크림)과 검정 로고에서 뽑았다.
   const C = {
-    page: "#f2ede1",      // 바깥 배경 (크림)
+    page: "#f6efdd",      // 바깥 배경 (배너 아래쪽 크림)
     card: "#ffffff",      // 본문 카드
-    dark: "#1a1a1a",      // 헤더 / CTA
-    onDark: "#f0e6d2",    // 헤더 위 텍스트
-    gold: "#b78a22",      // 강조
-    box: "#faf5e9",       // 안내 박스 배경
-    boxLine: "#dcc9a0",   // 안내 박스 테두리
+    dark: "#171717",      // CTA 버튼 · 검정 로고
+    onDark: "#ffffff",    // 검정 버튼 위 텍스트
+    gold: "#a9781a",      // 강조 (흰 카드 위에서 읽히도록 노랑보다 진한 앰버)
+    box: "#fbf4e2",       // 안내 박스 배경
+    boxLine: "#ecd9a6",   // 안내 박스 테두리
     text: "#1d1d1f",
     muted: "#6b6b6b",
-    line: "#ececec"
+    line: "#ececec",
+    // 헤더 그라데이션 — 지원 안 하는 클라이언트는 heroFallback(단색 노랑)으로 떨어진다
+    heroTop: "#f7d24e",
+    heroMid: "#f4c842",
+    heroBot: "#fbf1d3",
+    heroFallback: "#f4c842",
+    ink: "#171717",       // 노랑 위 검정 텍스트 (로고·제목)
+    inkSoft: "#6b551d"    // 노랑 위 보조 텍스트 (배지·부제) — 노랑에서도 읽히는 짙은 갈색
   };
   const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
   const WIDTH = 600;
@@ -299,6 +307,15 @@
     const brand = has(d.brand) ? d.brand : "d'Alba";
     const title = has(d.campaignTitle) ? d.campaignTitle : "Paid Collab Invitation";
 
+    // 로고 — 호스팅한 로고 이미지(logoUrl)가 있으면 그걸 쓰고,
+    // 없으면 브랜드명을 검정 워드마크로 그린다. 이미지는 차단·미표시가 흔해서
+    // 텍스트 워드마크를 기본으로 두면 어떤 클라이언트에서도 브랜드가 반드시 보인다.
+    const logoUrl = safeUrl(d.logoUrl);
+    const logoBlock = logoUrl
+      ? '<div style="padding:0 0 16px;line-height:0;"><img src="' + logoUrl + '" alt="' + esc(brand) +
+        '" height="36" style="height:36px;max-width:220px;width:auto;border:0;outline:none;display:inline-block;" /></div>'
+      : '<div style="font:800 40px/1 ' + FONT + ";letter-spacing:-.5px;color:" + C.ink + ';padding:0 0 16px;">' + esc(brand) + "</div>";
+
     let body = "";
 
     // 인사 + 소개
@@ -373,15 +390,20 @@
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
       'style="width:100%;max-width:' + WIDTH + 'px;margin:0 auto;">' +
 
-      // 헤더 (다크)
-      '<tr><td class="hd" style="background:' + C.dark + ';border-radius:14px;padding:34px 30px;text-align:center;">' +
+      // 헤더 (브랜드 노랑→크림 그라데이션 · 검정 로고)
+      // background 를 단색 노랑으로 먼저 깔고 그 위에 그라데이션을 얹는다 —
+      // Outlook 등 그라데이션을 무시하는 클라이언트는 단색 노랑으로 떨어져도 브랜드에 맞다.
+      '<tr><td class="hd" style="background:' + C.heroFallback +
+      ";background:linear-gradient(180deg," + C.heroTop + " 0%," + C.heroMid + " 46%," + C.heroBot + " 100%);" +
+      'border-radius:14px;padding:36px 30px;text-align:center;">' +
+      logoBlock +
       '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>' +
-      '<td style="border:1px solid rgba(240,230,210,.45);border-radius:999px;padding:7px 18px;font:700 11px/1.2 ' + FONT +
-      ";letter-spacing:.16em;color:" + C.onDark + ';">✉️ CAMPAIGN INVITATION</td>' +
+      '<td style="border:1px solid rgba(23,23,23,.32);border-radius:999px;padding:7px 18px;font:700 11px/1.2 ' + FONT +
+      ";letter-spacing:.16em;color:" + C.inkSoft + ';">✉️ CAMPAIGN INVITATION</td>' +
       "</tr></table>" +
-      '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.onDark + ';padding:18px 0 10px;">' + esc(title) + "</div>" +
-      '<div style="font:600 10.5px/1.5 ' + FONT + ';letter-spacing:.18em;color:rgba(240,230,210,.62);text-transform:uppercase;">' +
-      esc(brand) + " · K-Beauty Creator Partnership</div>" +
+      '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.ink + ';padding:16px 0 8px;">' + esc(title) + "</div>" +
+      '<div style="font:600 10.5px/1.5 ' + FONT + ";letter-spacing:.18em;color:" + C.inkSoft + ';text-transform:uppercase;">' +
+      "K-Beauty Creator Partnership</div>" +
       "</td></tr>" +
 
       // 본문 카드
@@ -485,7 +507,7 @@
   }
 
   // ─── 제목 ──────────────────────────────────────────────────────
-  const DEFAULT_SUBJECT = "[{{brand}}] 💚 Paid Collab X {{name}} — {{campaign}}";
+  const DEFAULT_SUBJECT = "[{{brand}}] 💛 Paid Collab X {{name}} — {{campaign}}";
 
   function buildSubject(d) {
     const raw = has(d.subject) ? d.subject : DEFAULT_SUBJECT;
