@@ -8,8 +8,10 @@
  *   브라우저:  <script src="/email-template.js"></script> → window.OutreachTemplate
  *   서버:      const T = require("../email-template.js");
  *
- * 이메일 클라이언트 호환을 위해 <table> 레이아웃 + 인라인 CSS 만 쓴다.
- * (Gmail/네이버웍스 웹은 <style> 블록과 flex/grid 를 상당 부분 무시함)
+ * 이메일 클라이언트 호환을 위해 <table> 레이아웃 + 인라인 CSS 로 만든다.
+ * flex/grid 는 쓰지 않는다 — 상당수 클라이언트가 무시한다.
+ * <style> 블록은 **여백을 줄이는 모바일 보정에만** 쓴다. 지원하지 않는 클라이언트가
+ * 아직 있으므로, 그 블록이 통째로 무시돼도 레이아웃이 이미 성립해야 한다(MOBILE_CSS 참고).
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
@@ -32,6 +34,30 @@
   };
   const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
   const WIDTH = 600;
+
+  // ─── 모바일 대응 ────────────────────────────────────────────────
+  // 두 겹으로 만든다. 미디어 쿼리를 지원하지 않는 클라이언트가 아직 있기 때문에
+  // **미디어 쿼리 없이도 이미 화면에 들어와야** 하고, 쿼리는 여백을 더 줄이는 보정만 한다.
+  //
+  //   1겹(필수) — 바깥 틀을 width:100% + max-width:600px 로 둔다.
+  //     예전에는 width="600" 이 박혀 있어서 좁은 화면에서 잘렸다. 표 너비 속성은
+  //     max-width 를 모르는 클라이언트에서 그대로 이겨 버린다.
+  //   2겹(보정) — 아래 CSS 로 여백·글자 크기를 줄이고 버튼을 가로로 채운다.
+  //
+  // Outlook 데스크톱(Word 엔진)은 max-width 를 무시해 본문이 창 너비만큼 늘어난다.
+  // 그래서 MSO 전용 주석으로 600px 고정 표를 하나 더 감싼다(고스트 테이블).
+  const MOBILE_CSS =
+    "@media only screen and (max-width:620px){" +
+    ".gut{padding:12px 8px 26px!important}" +
+    ".hd{padding:26px 16px!important}" +
+    ".card{padding:24px 16px 26px!important}" +
+    ".bx{padding:18px 14px!important}" +
+    ".h1{font-size:21px!important;line-height:1.3!important}" +
+    ".big{font-size:27px!important}" +
+    // 버튼은 손가락으로 누르는 것이라 좁은 화면에서 가로를 꽉 채운다
+    ".cta{width:100%!important}" +
+    ".cta a{display:block!important;padding:15px 20px!important}" +
+    "}";
 
   // ─── 유틸 ──────────────────────────────────────────────────────
   function esc(s) {
@@ -78,7 +104,7 @@
     return '<tr><td style="padding:0;">' +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
       'style="background:' + C.box + ';border:1px solid ' + C.boxLine + ';border-radius:12px;">' +
-      '<tr><td style="padding:' + (o.pad || "22px 24px") + ';text-align:' + (o.align || "center") + ';">' +
+      '<tr><td class="bx" style="padding:' + (o.pad || "22px 24px") + ';text-align:' + (o.align || "center") + ';">' +
       inner + "</td></tr></table></td></tr>";
   }
 
@@ -98,7 +124,7 @@
       out += infoBox(
         '<div style="font:700 11.5px/1.4 ' + FONT + ';letter-spacing:.14em;text-transform:uppercase;color:' + C.gold + ';">' +
         "💰 Cash paid to you</div>" +
-        '<div style="font:800 34px/1.2 ' + FONT + ';color:' + C.text + ';padding:10px 0 6px;">' +
+        '<div class="big" style="font:800 34px/1.2 ' + FONT + ';color:' + C.text + ';padding:10px 0 6px;">' +
         esc(money(d.currency, d.amount)) + "</div>" +
         '<div style="font:400 13px/1.5 ' + FONT + ';color:' + C.muted + ';">' +
         esc(has(d.paymentNote) ? d.paymentNote : "Paid after your content goes live and is approved.") +
@@ -112,7 +138,7 @@
       out += infoBox(
         '<div style="font:700 11.5px/1.4 ' + FONT + ';letter-spacing:.14em;text-transform:uppercase;color:' + C.gold + ';">' +
         "📈 Affiliate commission</div>" +
-        '<div style="font:800 34px/1.2 ' + FONT + ';color:' + C.text + ';padding:10px 0 6px;">' +
+        '<div class="big" style="font:800 34px/1.2 ' + FONT + ';color:' + C.text + ';padding:10px 0 6px;">' +
         esc(rate ? rate + "%" : String(d.commission)) + "</div>" +
         '<div style="font:400 13px/1.5 ' + FONT + ';color:' + C.muted + ';">' +
         "On every sale made through your TikTok Shop affiliate link — " +
@@ -180,12 +206,19 @@
 
   // ─── 바이럴 영상 (이미 잘 되고 있다는 증거 — 수락률에 가장 크게 기여) ──
   // videos: ["https://...", ...] 또는 [{url, label}, ...] 둘 다 허용
+  // 링크 주소를 화면에 그대로 찍으면 폰에서 세 줄로 접히며 밑줄 덩어리가 된다.
+  // 눌러야 할 곳은 제목이므로, 주소는 알아볼 정도로만 줄여서 보조로 붙인다.
+  function shortUrl(u) {
+    const s = String(u == null ? "" : u).trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+    return s.length > 38 ? s.slice(0, 36) + "…" : s;
+  }
+
   function normVideos(v) {
     if (!v) return [];
     const arr = Array.isArray(v) ? v : String(v).split(/[\n,]+/);
     return arr.map(function (x) {
       const o = (x && typeof x === "object") ? x : { url: x };
-      return { url: safeUrl(o.url), label: has(o.label) ? o.label : "" };
+      return { url: safeUrl(o.url), short: esc(shortUrl(o.url)), label: has(o.label) ? o.label : "" };
     }).filter(function (o) { return o.url; }).slice(0, 4);
   }
 
@@ -203,9 +236,9 @@
         ";color:" + C.gold + ';">' + "▶" + "</td>" +
         '<td valign="top" style="padding:' + (i ? "12px" : "0") + ' 0 0;">' +
         '<a href="' + v.url + '" style="font:600 14px/1.5 ' + FONT + ";color:" + C.gold +
-        ';text-decoration:none;word-break:break-all;">' + (v.label ? esc(v.label) : v.url) + "</a>" +
+        ';text-decoration:none;word-break:break-word;">' + (v.label ? esc(v.label) : v.short) + "</a>" +
         (v.label ? '<div style="font:400 11.5px/1.5 ' + FONT + ";color:" + C.muted +
-          ';word-break:break-all;padding-top:2px;">' + v.url + "</div>" : "") +
+          ';padding-top:2px;">' + v.short + "</div>" : "") +
         "</td></tr>";
     });
     inner += "</table>";
@@ -250,8 +283,9 @@
     const url = safeUrl(d.applyUrl);
     if (!url) return "";
     const label = has(d.applyLabel) ? d.applyLabel : "Count me in →";
+    // 좁은 화면에서는 버튼이 가로를 채우도록 표 자체를 100% 로 넓힌다(.cta)
     return '<tr><td align="center" style="padding:34px 0 6px;">' +
-      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<table role="presentation" class="cta" cellpadding="0" cellspacing="0" border="0"><tr>' +
       '<td align="center" style="background:' + C.dark + ';border-radius:999px;">' +
       '<a href="' + url + '" style="display:inline-block;padding:15px 46px;font:700 15px/1.2 ' + FONT +
       ';color:#ffffff;text-decoration:none;border-radius:999px;">' + esc(label) + "</a>" +
@@ -325,29 +359,34 @@
       '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />' +
       '<meta name="viewport" content="width=device-width,initial-scale=1" />' +
       '<meta name="x-apple-disable-message-reformatting" />' +
-      "<title>" + esc(title) + "</title></head>" +
-      '<body style="margin:0;padding:0;background:' + C.page + ';">' +
+      "<title>" + esc(title) + "</title>" +
+      "<style>" + MOBILE_CSS + "</style></head>" +
+      '<body style="margin:0;padding:0;background:' + C.page +
+      ';-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;word-break:break-word;">' +
       '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;font-size:1px;line-height:1px;">' +
       esc(preheader) + "</div>" +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:' + C.page + ';">' +
-      '<tr><td align="center" style="padding:28px 12px 44px;">' +
-      '<table role="presentation" width="' + WIDTH + '" cellpadding="0" cellspacing="0" border="0" ' +
-      'style="width:' + WIDTH + 'px;max-width:100%;">' +
+      '<tr><td align="center" class="gut" style="padding:28px 12px 44px;">' +
+      // Outlook 데스크톱은 max-width 를 모른다 — 여기서만 600px 로 고정해 준다
+      '<!--[if mso]><table role="presentation" width="' + WIDTH +
+      '" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="width:100%;max-width:' + WIDTH + 'px;margin:0 auto;">' +
 
       // 헤더 (다크)
-      '<tr><td style="background:' + C.dark + ';border-radius:14px;padding:34px 30px;text-align:center;">' +
+      '<tr><td class="hd" style="background:' + C.dark + ';border-radius:14px;padding:34px 30px;text-align:center;">' +
       '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>' +
       '<td style="border:1px solid rgba(240,230,210,.45);border-radius:999px;padding:7px 18px;font:700 11px/1.2 ' + FONT +
       ";letter-spacing:.16em;color:" + C.onDark + ';">✉️ CAMPAIGN INVITATION</td>' +
       "</tr></table>" +
-      '<div style="font:800 25px/1.35 ' + FONT + ";color:" + C.onDark + ';padding:18px 0 10px;">' + esc(title) + "</div>" +
+      '<div class="h1" style="font:800 25px/1.35 ' + FONT + ";color:" + C.onDark + ';padding:18px 0 10px;">' + esc(title) + "</div>" +
       '<div style="font:600 10.5px/1.5 ' + FONT + ';letter-spacing:.18em;color:rgba(240,230,210,.62);text-transform:uppercase;">' +
       esc(brand) + " · K-Beauty Creator Partnership</div>" +
       "</td></tr>" +
 
       // 본문 카드
       '<tr><td style="height:14px;line-height:14px;">&nbsp;</td></tr>' +
-      '<tr><td style="background:' + C.card + ';border-radius:14px;padding:34px 32px 36px;">' +
+      '<tr><td class="card" style="background:' + C.card + ';border-radius:14px;padding:34px 32px 36px;">' +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' + body + "</table>" +
       "</td></tr>" +
 
@@ -357,7 +396,9 @@
       "Not interested? Just reply “no thanks” and we won't follow up." +
       "</td></tr>" +
 
-      "</table></td></tr></table></body></html>";
+      "</table>" +
+      "<!--[if mso]></td></tr></table><![endif]-->" +
+      "</td></tr></table></body></html>";
   }
 
   // ─── 플레인 텍스트 대체본 (스팸 점수 · 접근성) ──────────────────

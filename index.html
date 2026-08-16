@@ -73,6 +73,14 @@
   .subjline .v { font-size:14px; font-weight:650; line-height:1.45; word-break:break-word; }
   .subjline .to { font-size:12px; color:#888; margin-top:6px; }
   iframe.pv { width:100%; height:640px; border:1px solid #ececec; border-radius:14px; background:#f2ede1; display:block; }
+  /* 미리보기 폭 전환 — 메일 안의 미디어 쿼리가 iframe 폭에 반응하므로
+     폭만 바꿔 주면 실제 폰에서 보이는 모습이 그대로 나온다 */
+  .pvbar { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+  .pvtab { border:1px solid #e6e2d6; background:#fff; color:#666; border-radius:99px; padding:5px 13px;
+           font:600 12px/1.3 inherit; cursor:pointer; }
+  .pvtab.active { background:#1a1a1a; border-color:#1a1a1a; color:#fff; }
+  .pvhold { display:flex; justify-content:center; }
+  .pvhold.mobile iframe.pv { width:390px; max-width:100%; }
 
   .err { background:#fdecea; border:1px solid #f3c4bf; color:#a23b2e; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
   .ok { background:#eef7ed; border:1px solid #cfe4cb; color:#2b6b33; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
@@ -363,7 +371,15 @@
           <div class="to" id="pvTo"></div>
         </div>
 
-        <iframe class="pv" id="pv" sandbox=""></iframe>
+        <!-- 폰에서 어떻게 보이는지 보내기 전에 확인할 수 있게 -->
+        <div class="pvbar">
+          <button type="button" class="pvtab active" id="pvPc" onclick="setPvWidth('pc')">🖥 PC</button>
+          <button type="button" class="pvtab" id="pvMo" onclick="setPvWidth('mobile')">📱 모바일</button>
+          <span class="muted" id="pvW"></span>
+        </div>
+        <div class="pvhold" id="pvHold">
+          <iframe class="pv" id="pv" sandbox=""></iframe>
+        </div>
       </div>
     </div>
   </div>
@@ -755,6 +771,17 @@ function recipients(){
 }
 
 /* ── 미리보기 ── */
+/* 메일에 들어 있는 미디어 쿼리는 iframe 의 폭을 보고 동작한다. 그래서 폭만 390px 로
+   줄이면 실제 폰에서 보이는 모습이 그대로 나온다 — 따로 렌더링하지 않는다. */
+function setPvWidth(m){
+  const mobile = m === "mobile";
+  $("pvHold").className = "pvhold" + (mobile ? " mobile" : "");
+  $("pvPc").className = "pvtab" + (mobile ? "" : " active");
+  $("pvMo").className = "pvtab" + (mobile ? " active" : "");
+  $("pvW").textContent = mobile ? "390px — 아이폰 기준" : "";
+  localStorage.setItem("outreach_pvw", mobile ? "mobile" : "pc");
+}
+
 let pvTimer = null;
 function schedulePreview(){ clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, 250); }
 function renderPreview(){
@@ -1026,6 +1053,7 @@ async function boot(){
         '<a class="btn" href="'+base+'/team.html">📊 팀 대시보드</a>';
     }
     loadDraft();
+    setPvWidth(localStorage.getItem("outreach_pvw") || "pc");
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
     $("currency").addEventListener("change", schedulePreview);
     $("forceSend").addEventListener("change", paintDup);
