@@ -3,6 +3,7 @@
 // 관리자만 볼 수 있는 팀 전체 아웃리치 현황.
 //
 //   GET /api/admin                     → 요약 + 담당자별 집계
+//   GET /api/admin?view=daily&tz=-540  → 일별 발송 건수 (tz 는 브라우저 시차, 분)
 //   GET /api/admin?view=sent&by=…      → 발송 이력 (담당자로 거르기)
 //   GET /api/admin?view=blocked        → 중복이라 보류된 시도
 //   GET /api/admin?view=people         → 접촉한 크리에이터 단위로 묶어서
@@ -73,6 +74,59 @@ function groupByPerson(sent, blocked) {
       sends: p.sends
     };
   }).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+}
+
+// 하루 단위 집계.
+//
+// 기록의 시각은 UTC 다. 한국에서 아침 8시에 보낸 건 UTC 로는 전날 23시라, 그대로
+// 자르면 **하루씩 밀린다.** 그래서 브라우저가 보내온 시차(tz, 분 단위)만큼 옮겨서 자른다.
+function dayKey(at, tzMin) {
+  const t = Date.parse(at || "");
+  if (!isFinite(t)) return "";
+  return new Date(t - tzMin * 60000).toISOString().slice(0, 10);
+}
+
+// 발송이 없던 날도 0 으로 채운다. 빈 날을 빼면 막대가 다닥다닥 붙어
+// "매일 꾸준히 보낸 것" 처럼 보인다 — 시간축이 거짓말을 하게 된다.
+function fillDays(map, days, tzMin, maxFill) {
+  const keys = [...map.keys()].sort();
+  if (!keys.length) return [];
+
+  const today = dayKey(new Date().toISOString(), tzMin);
+  const span = Math.min(days || 3650, maxFill);
+  const startMs = Date.parse(today + "T00:00:00Z") - (span - 1) * 86400e3;
+  const firstMs = Math.max(Date.parse(keys[0] + "T00:00:00Z"), startMs);
+
+  const out = [];
+  for (let ms = firstMs; ms <= Date.parse(today + "T00:00:00Z"); ms += 86400e3) {
+    const k = new Date(ms).toISOString().slice(0, 10);
+    out.push(map.get(k) || { date: k, sent: 0, blocked: 0, by: {} });
+  }
+  return out;
+}
+
+function daily(sent, blocked, tzMin, days) {
+  const m = new Map();
+  const touch = k => {
+    let cur = m.get(k);
+    if (!cur) { cur = { date: k, sent: 0, blocked: 0, by: {} }; m.set(k, cur); }
+    return cur;
+  };
+
+  sent.forEach(r => {
+    const k = dayKey(r.at, tzMin);
+    if (!k) return;
+    const cur = touch(k);
+    cur.sent++;
+    const who = r.byName || r.by || "(알 수 없음)";
+    cur.by[who] = (cur.by[who] || 0) + 1;
+  });
+  blocked.forEach(r => {
+    const k = dayKey(r.at, tzMin);
+    if (k) touch(k).blocked++;
+  });
+
+  return fillDays(m, days, tzMin, 180);
 }
 
 function summarize(sent, blocked) {
@@ -156,6 +210,15 @@ module.exports = async (req, res) => {
       truncated: sentAll.length >= limit
     };
 
+    if (view === "daily") {
+      // tz 는 브라우저의 getTimezoneOffset() (KST 는 -540). 없으면 UTC 기준이 된다.
+      const tzMin = Number.isFinite(Number(q.tz)) ? Number(q.tz) : 0;
+      res.status(200).json(Object.assign(base, {
+        rows: daily(sent, blocked, tzMin, days),
+        staff: [...new Set(sent.map(r => r.byName || r.by).filter(Boolean))]
+      }));
+      return;
+    }
     if (view === "sent") { res.status(200).json(Object.assign(base, { rows: sent })); return; }
     if (view === "blocked") { res.status(200).json(Object.assign(base, { rows: blocked })); return; }
     if (view === "people") {
