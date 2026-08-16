@@ -54,6 +54,13 @@
   .gate { max-width:340px; margin:70px auto; }
   .gate input { width:100%; margin-bottom:8px; }
 
+  /* 언어 전환 */
+  .langs { display:inline-flex; gap:3px; border:1px solid #e6e2d6; border-radius:99px; padding:2px; background:#fff; }
+  .langbtn { border:0; background:transparent; color:#777; border-radius:99px;
+             padding:4px 10px; font:600 11.5px/1.3 inherit; cursor:pointer; white-space:nowrap; }
+  .langbtn.on { background:#1a1a1a; color:#fff; }
+
+
   /* ── 일별 차트 ──
      색은 눈대중이 아니라 검증기를 돌려 통과시킨 값이다
      (골드↔초록 CVD ΔE 9.0 protan · 일반 18.3, 둘 다 표면 대비 3:1 이상).
@@ -84,6 +91,7 @@
     <h1>📊 아웃리치 현황</h1>
     <span class="who" id="who"></span>
     <span class="grow"></span>
+    <span class="langs" id="langs"></span>
     <a class="btn" href="/index.html">✉️ 발송 화면</a>
     <button class="btn" onclick="logout()">로그아웃</button>
   </header>
@@ -117,6 +125,7 @@
 <div class="wrap gate" id="gate" style="display:none">
   <div class="panel">
     <h1 style="margin-bottom:12px">🔐 관리자 로그인</h1>
+    <div class="langs" id="langsGate" style="margin-bottom:10px"></div>
     <div id="gateMsg" class="muted" style="font-size:12.5px;margin-bottom:10px"></div>
     <input id="gid" placeholder="아이디" autocomplete="username" />
     <input id="gpw" type="password" placeholder="비밀번호" autocomplete="current-password"
@@ -125,6 +134,7 @@
   </div>
 </div>
 
+<script src="/i18n.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
@@ -554,7 +564,8 @@ async function boot(){
     ME = d.me || null;
     $("gate").style.display = "none";
     $("app").style.display = "";
-    $("who").textContent = ME ? (ME.name || ME.email) + " · 관리자" : "";
+    // 이름은 사람마다 다르므로 번역 대상에서 분리한다 — "· 관리자" 만 사전에 있으면 된다
+    $("who").innerHTML = ME ? esc(ME.name || ME.email) + ' <span>· 관리자</span>' : "";
     fillStaffPicker(d.accounts);
     // 저장소 미연결은 본문에서 설명하므로 위에 빨간 띠를 겹쳐 띄우지 않는다
     if(d.error && d.historyEnabled !== false){ $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>'; }
@@ -565,6 +576,9 @@ async function boot(){
   }
 }
 boot();
+I18N.init(document.getElementById("langs"));
+/* 로그인 화면에도 — 로그인 전에는 헤더가 안 보인다 */
+I18N.mount(document.getElementById("langsGate"));
 </script>
 </body>
 </html>

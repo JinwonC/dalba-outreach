@@ -121,6 +121,23 @@
   .progress .fill { height:100%; background:#B78A22; width:0; transition:width .25s; }
   .sendbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px; }
   .muted { color:#999; font-size:12px; }
+
+  /* 매출 상위 영상 목록 */
+  .vids { border:1px solid #ececec; border-radius:10px; max-height:230px; overflow:auto; }
+  .vitem { display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:#fff;
+           border:0; border-bottom:1px solid #f6f5f0; padding:9px 12px; cursor:pointer; font:inherit; }
+  .vitem:last-child { border-bottom:0; }
+  .vitem:hover { background:#fdfcf8; }
+  .vitem.used { opacity:.45; cursor:default; }
+  .vitem .g { font:700 12.5px/1.3 inherit; color:#158a61; min-width:76px; font-variant-numeric:tabular-nums; }
+  .vitem .h { font:600 12.5px/1.3 inherit; color:#1d1d1f; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vitem .v { font-size:11px; color:#bbb; }
+
+  /* 언어 전환 */
+  .langs { display:inline-flex; gap:3px; border:1px solid #e6e2d6; border-radius:99px; padding:2px; background:#fff; }
+  .langbtn { border:0; background:transparent; color:#777; border-radius:99px;
+             padding:4px 10px; font:600 11.5px/1.3 inherit; cursor:pointer; white-space:nowrap; }
+  .langbtn.on { background:#1a1a1a; color:#fff; }
 </style>
 </head>
 <body>
@@ -137,6 +154,7 @@
     <input id="gatePw" type="password" placeholder="비밀번호" autocomplete="current-password"
            onkeydown="if(event.key==='Enter')submitPw()" />
     <div class="actions"><button class="btn dark" id="gateBtn" onclick="submitPw()">들어가기</button></div>
+    <div class="langs" id="langsGate" style="margin-top:12px"></div>
   </div>
 </div>
 
@@ -206,7 +224,7 @@
       <div class="sub">핸들 · 금액 · 제품만 넣으면 브랜드 메일이 완성돼 네이버웍스로 바로 나갑니다</div>
     </div>
     <div class="right">
-      <span id="siblingNav"></span><span id="adminNav"></span>
+      <span id="siblingNav"></span><span id="adminNav"></span><span class="langs" id="langs"></span>
       <button class="btn who unset" id="whoBtn" onclick="openAcct()">발신 계정 미설정</button>
       <button class="logout" onclick="logout()">로그아웃</button>
     </div>
@@ -312,6 +330,12 @@
       <!-- 바이럴 영상 -->
       <div class="panel">
         <h2>이 제품 바이럴 영상</h2>
+        <!-- 제품을 고르면 그 제품의 매출 상위 영상을 시트에서 불러온다 -->
+        <div class="pickbar" id="vidBar" style="display:none">
+          <button type="button" class="btn" onclick="loadTopVideos()">📈 매출 상위 영상 불러오기</button>
+          <span class="picked" id="vidMsg"></span>
+        </div>
+        <div id="vidList" style="display:none;margin-bottom:12px"></div>
         <div class="hint">이미 잘 나가고 있다는 증거가 수락률을 가장 크게 올립니다. 링크만 넣어도 되고, 라벨(조회수 등)을 같이 넣으면 더 좋아요.</div>
         <div class="vrow"><input id="v1u" type="text" placeholder="https://www.tiktok.com/@creator/video/..." /><input id="v1l" type="text" placeholder="2.1M views" /></div>
         <div class="vrow"><input id="v2u" type="text" placeholder="https://www.tiktok.com/@creator/video/..." /><input id="v2l" type="text" placeholder="870K views" /></div>
@@ -386,6 +410,7 @@
 </div>
 
 <script src="/email-template.js"></script>
+<script src="/i18n.js"></script>
 <script>
 const T = window.OutreachTemplate;
 
@@ -533,6 +558,8 @@ function setDeal(d){
    자격증명(TTS_*)이 없으면 /api/products 가 501 을 주고, 그때는 버튼 자체를 숨긴다.
    상품 선택은 편의 기능일 뿐이라 없어도 나머지는 그대로 동작해야 한다. */
 let PRODUCTS = null;
+let PICKED_PID = "";      // 고른 제품의 TikTok Shop 상품 ID — 매출 상위 영상 조회에 쓴다
+let VIDEOS_READY = false; // 영상 시트가 설정된 배포에서만 버튼을 띄운다
 
 async function loadProducts(force){
   const msg = $("pickMsg");
@@ -625,6 +652,12 @@ async function lookupId(id){
 function choose(i){
   const p = PRODUCTS[i];
   if(!p) return;
+  PICKED_PID = p.id || "";
+  // 제품이 정해져야 그 제품의 영상을 부를 수 있다
+  $("vidBar").style.display = (VIDEOS_READY && PICKED_PID) ? "flex" : "none";
+  $("vidList").style.display = "none";
+  $("vidMsg").textContent = "";
+  TOPVIDS = null;
   $("product").value = p.title;
   $("productImage").value = p.image || "";
   $("productUrl").value = p.url || "";
@@ -646,6 +679,67 @@ function openPicker(){
   $("pickSearch").focus();
 }
 function closePicker(){ $("pickModal").style.display = "none"; }
+
+/* ── 이 제품의 매출 상위 영상 ──
+   TikTok Shop API 를 다시 부르지 않는다. 그 집계는 이미 구글 시트에 매일 쌓이고 있고,
+   두 곳에서 같은 걸 계산하면 숫자가 갈린다. 매출 1 미만은 서버에서 이미 빠져서 온다. */
+let TOPVIDS = null;
+
+async function loadTopVideos(){
+  const pid = PICKED_PID;
+  const msg = $("vidMsg"), box = $("vidList");
+  if(!pid){ msg.textContent = "먼저 위에서 제품을 고르세요."; return; }
+
+  msg.textContent = "불러오는 중…";
+  box.style.display = "none";
+  try {
+    const r = await fetch("/api/videos?pid=" + encodeURIComponent(pid) + "&limit=30",
+      { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
+
+    TOPVIDS = d.videos || [];
+    if(!TOPVIDS.length){
+      msg.textContent = "이 제품의 매출 있는 영상이 시트에 없습니다.";
+      return;
+    }
+    msg.textContent = TOPVIDS.length + "개 · 매출순";
+    renderTopVideos();
+    box.style.display = "";
+  } catch(e){
+    msg.innerHTML = '<span style="color:#c0392b">'+esc(String(e.message||e))+'</span>';
+  }
+}
+
+/* 이미 칸에 들어가 있는 영상은 다시 넣지 않도록 표시해 둔다 */
+function videoSlots(){ return ["v1","v2","v3"].map(k => ({ u:$(k+"u"), l:$(k+"l") })); }
+
+function renderTopVideos(){
+  const inUse = videoSlots().map(s => s.u.value.trim()).filter(Boolean);
+  $("vidList").innerHTML = '<div class="vids">' + TOPVIDS.map((v,i) => {
+    const used = inUse.indexOf(v.url) >= 0;
+    return '<button type="button" class="vitem'+(used?" used":"")+'" onclick="pickVideo('+i+')">' +
+      '<span class="g">$'+v.gmv.toLocaleString()+'</span>' +
+      '<span class="h">@'+esc(v.handle)+'</span>' +
+      '<span class="v">'+(used ? "넣음" : "")+'</span>' +
+      '</button>';
+  }).join("") + '</div>';
+}
+
+function pickVideo(i){
+  const v = TOPVIDS && TOPVIDS[i];
+  if(!v) return;
+  const slots = videoSlots();
+  if(slots.some(s => s.u.value.trim() === v.url)) return;   // 이미 넣은 것
+  const empty = slots.find(s => !s.u.value.trim());
+  if(!empty){ $("vidMsg").textContent = "영상 칸 3개가 다 찼습니다. 하나를 비우고 다시 고르세요."; return; }
+  empty.u.value = v.url;
+  // 라벨은 성과 증거로 쓰이므로 매출과 핸들을 같이 남긴다
+  empty.l.value = "$" + v.gmv.toLocaleString() + " GMV · @" + v.handle;
+  renderTopVideos();
+  renderPreview();
+}
 
 /* ── 명단 파싱 (탭 = 시트 붙여넣기, 콤마 = CSV) ── */
 /* 헤더 인식 — 실제 시트는 "E-Mail", "Creator Name", "TikTok Handle" 처럼 표기가 제각각이라
@@ -1079,6 +1173,15 @@ async function boot(){
       .then(r => r.json())
       .then(d => { if(d && d.ready) $("pickBar").style.display = "flex"; })
       .catch(() => {});
+
+    // 영상 시트도 마찬가지 — 설정이 없으면 버튼 자체를 띄우지 않는다
+    fetch("/api/videos?probe=1", { cache:"no-store", headers: authHeaders() })
+      .then(r => r.json())
+      .then(d => {
+        VIDEOS_READY = Boolean(d && d.ready);
+        if(VIDEOS_READY && PICKED_PID) $("vidBar").style.display = "flex";
+      })
+      .catch(() => {});
   }
   paintWho();
   renderPreview();
@@ -1086,6 +1189,10 @@ async function boot(){
 }
 
 boot();
+/* 화면을 그린 뒤 번역한다 — 렌더 코드는 건드리지 않는다 */
+I18N.init(document.getElementById("langs"));
+/* 로그인 화면에도 — 로그인 전에는 헤더가 안 보인다 */
+I18N.mount(document.getElementById("langsGate"));
 </script>
 </body>
 </html>
