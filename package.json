@@ -4,6 +4,7 @@
   "private": true,
   "description": "크리에이터 아웃리치 메일 발송 툴 — 네이버웍스 SMTP",
   "dependencies": {
+    "imapflow": "^1.7.1",
     "nodemailer": "^6.10.1"
   }
 }

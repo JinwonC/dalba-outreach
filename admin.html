@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>아웃리치 현황 · 관리자</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#faf8f3; color:#1d1d1f;
+         font:400 14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Apple SD Gothic Neo','Malgun Gothic',sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:22px 18px 60px; }
+  header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+  h1 { font-size:19px; margin:0; font-weight:750; }
+  .grow { flex:1; }
+  .btn { border:1px solid #e6e2d6; background:#fff; color:#333; border-radius:99px;
+         padding:7px 15px; font:600 12.5px/1.3 inherit; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn:hover { border-color:#b78a22; }
+  .btn.dark { background:#1a1a1a; border-color:#1a1a1a; color:#fff; }
+  .who { font-size:12.5px; color:#777; }
+
+  .panel { background:#fff; border:1px solid #efece2; border-radius:14px; padding:16px 18px; margin-bottom:14px; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .tab { border:1px solid #e6e2d6; background:#fff; color:#666; border-radius:99px;
+         padding:7px 15px; font:600 12.5px/1.3 inherit; cursor:pointer; }
+  .tab.active { background:#1a1a1a; border-color:#1a1a1a; color:#fff; }
+
+  .filters { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  input, select { border:1px solid #e6e2d6; border-radius:9px; padding:8px 11px;
+                  font:400 13px/1.4 inherit; background:#fff; color:#1d1d1f; }
+  input[type=search] { min-width:230px; }
+
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .card { background:#fff; border:1px solid #efece2; border-radius:12px; padding:14px 16px; }
+  .card .n { font:800 25px/1.2 inherit; }
+  .card .l { font-size:11.5px; color:#999; font-weight:600; letter-spacing:.04em; }
+
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; font-weight:700; color:#888; font-size:11px; letter-spacing:.05em;
+       text-transform:uppercase; padding:8px 10px; border-bottom:1px solid #f0efe9; white-space:nowrap; }
+  td { padding:9px 10px; border-bottom:1px solid #f6f5f0; vertical-align:top; }
+  tr:hover td { background:#fdfcf8; }
+  .scroll { overflow:auto; max-height:calc(100vh - 340px); border:1px solid #f0efe9; border-radius:10px; }
+  .mono { font-variant-numeric:tabular-nums; }
+  .muted { color:#999; }
+  .tag { display:inline-block; border-radius:99px; padding:1px 8px; font-size:11px; font-weight:700; }
+  .tag.hold { background:#fdf6e3; color:#8a6d1f; }
+  .tag.forced { background:#fdecea; color:#a23b2e; }
+  .tag.multi { background:#eef3fb; color:#2b5b8a; }
+  .err { background:#fdecea; border:1px solid #f3c4bf; color:#a23b2e; border-radius:10px;
+         padding:12px 15px; font-size:13px; line-height:1.6; }
+  .note { background:#fdf6e3; border:1px solid #ecdcae; color:#8a6d1f; border-radius:10px;
+          padding:11px 14px; font-size:12.5px; line-height:1.6; margin-bottom:12px; }
+  .gate { max-width:340px; margin:70px auto; }
+  .gate input { width:100%; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="app" style="display:none">
+  <header>
+    <h1>📊 아웃리치 현황</h1>
+    <span class="who" id="who"></span>
+    <span class="grow"></span>
+    <a class="btn" href="/index.html">✉️ 발송 화면</a>
+    <button class="btn" onclick="logout()">로그아웃</button>
+  </header>
+
+  <div id="msg"></div>
+
+  <div class="tabs">
+    <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
+    <button class="tab" data-v="people" onclick="go('people')">크리에이터별</button>
+    <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
+    <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
+    <button class="tab" data-v="mail" onclick="go('mail')">📬 메일함</button>
+  </div>
+
+  <div class="panel">
+    <div class="filters" id="filters">
+      <input type="search" id="q" placeholder="이메일 · 이름 · 핸들 · 캠페인 검색…" oninput="debounced()" />
+      <select id="days" onchange="load()">
+        <option value="0">전체 기간</option>
+        <option value="7">최근 7일</option>
+        <option value="30">최근 30일</option>
+        <option value="90">최근 90일</option>
+      </select>
+      <select id="by" onchange="load()"><option value="">담당자 전체</option></select>
+      <span id="mailOnly" style="display:none">
+        <select id="box" onchange="load()">
+          <option value="replies">크리에이터 회신만</option>
+          <option value="sent">보낸 메일</option>
+          <option value="inbox">받은 메일 전체</option>
+        </select>
+      </span>
+      <span class="muted" id="count"></span>
+    </div>
+    <div id="body"></div>
+  </div>
+</div>
+
+<!-- 로그인 -->
+<div class="wrap gate" id="gate" style="display:none">
+  <div class="panel">
+    <h1 style="margin-bottom:12px">🔐 관리자 로그인</h1>
+    <div id="gateMsg" class="muted" style="font-size:12.5px;margin-bottom:10px"></div>
+    <input id="gid" placeholder="아이디" autocomplete="username" />
+    <input id="gpw" type="password" placeholder="비밀번호" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')doLogin()" />
+    <button class="btn dark" style="width:100%" onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let VIEW = "summary";
+let ME = null;
+
+/* 발송 화면과 같은 세션 토큰을 쓴다 — 두 번 로그인하지 않도록 */
+const token = () => localStorage.getItem("nwtoken") || "";
+const headers = () => ({ authorization: "Bearer " + token() });
+
+function showGate(m){ $("gate").style.display=""; $("app").style.display="none"; $("gateMsg").textContent = m||""; }
+function logout(){ localStorage.removeItem("nwtoken"); location.reload(); }
+
+async function doLogin(){
+  const id = $("gid").value.trim(), pw = $("gpw").value;
+  if(!id || !pw) return;
+  try {
+    const r = await fetch("/api/login", { method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({ id, pw }) });
+    const d = await r.json();
+    if(!r.ok || d.error) { $("gateMsg").textContent = d.error || "로그인 실패"; return; }
+    localStorage.setItem("nwtoken", d.token);
+    $("gpw").value = "";
+    boot();
+  } catch(e){ $("gateMsg").textContent = String(e.message||e); }
+}
+
+/* ── 날짜·시간 표기 ── */
+function fmt(s){
+  if(!s) return "";
+  const d = new Date(s);
+  if(isNaN(d)) return String(s).slice(0,16);
+  const p = n => String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+function person(r){ return esc(r.byName || r.by || "—"); }
+
+/* ── 탭 ── */
+function go(v){
+  VIEW = v;
+  [...document.querySelectorAll(".tab")].forEach(t => {
+    t.className = "tab" + (t.dataset.v === v ? " active" : "");
+  });
+  const mail = v === "mail";
+  $("mailOnly").style.display = mail ? "" : "none";
+  // 메일함 탭에서는 같은 드롭다운이 "누구 메일함을 볼지" 를 고르는 칸이 된다
+  $("by").options[0].textContent = mail ? "내 메일함" : "담당자 전체";
+  $("q").style.display = mail ? "none" : "";
+  load();
+}
+
+let tmr = null;
+function debounced(){ clearTimeout(tmr); tmr = setTimeout(load, 350); }
+
+async function load(){
+  $("body").innerHTML = '<div class="muted" style="padding:20px 0">불러오는 중…</div>';
+  $("msg").innerHTML = "";
+  try {
+    const r = VIEW === "mail" ? await loadMail() : await loadAdmin();
+    if(r) $("count").textContent = r;
+  } catch(e){
+    $("body").innerHTML = "";
+    $("msg").innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
+  }
+}
+
+async function fetchJson(url){
+  const r = await fetch(url, { cache:"no-store", headers: headers() });
+  if(r.status === 401){ showGate("다시 로그인해 주세요."); throw new Error("로그인이 필요합니다"); }
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
+  return d;
+}
+
+async function loadAdmin(){
+  const qs = new URLSearchParams({ view: VIEW });
+  if($("q").value.trim()) qs.set("q", $("q").value.trim());
+  if($("days").value !== "0") qs.set("days", $("days").value);
+  if($("by").value) qs.set("by", $("by").value);
+  const d = await fetchJson("/api/admin?" + qs);
+
+  if(d.historyEnabled === false){
+    $("body").innerHTML = '<div class="err">'+esc(d.error||"이력 저장소가 없습니다")+'</div>';
+    return "";
+  }
+  if(VIEW === "summary") return renderSummary(d);
+  if(VIEW === "people")  return renderPeople(d);
+  if(VIEW === "sent")    return renderSent(d);
+  if(VIEW === "blocked") return renderBlocked(d);
+  return "";
+}
+
+function truncNote(d){
+  return d.truncated
+    ? '<div class="note">기록이 많아 최근 것부터 일부만 불러왔습니다. 기간이나 검색어로 좁혀 보세요.</div>'
+    : "";
+}
+
+function renderSummary(d){
+  // 담당자 목록을 필터 드롭다운에도 채운다
+  const sel = $("by"), cur = sel.value;
+  sel.innerHTML = '<option value="">담당자 전체</option>' +
+    (d.staff||[]).map(s => '<option value="'+esc(s.email)+'">'+esc(s.name||s.email)+'</option>').join("");
+  sel.value = cur;
+
+  const t = d.totals || {};
+  let h = truncNote(d) +
+    '<div class="cards">' +
+    '<div class="card"><div class="l">발송</div><div class="n mono">'+(t.sent||0)+'</div></div>' +
+    '<div class="card"><div class="l">접촉한 크리에이터</div><div class="n mono">'+(t.people||0)+'</div></div>' +
+    '<div class="card"><div class="l">중복으로 막힌 시도</div><div class="n mono">'+(t.blocked||0)+'</div></div>' +
+    '</div>';
+
+  h += '<div class="scroll"><table><thead><tr><th>담당자</th><th>발송</th><th>중복 시도</th><th>마지막 발송</th></tr></thead><tbody>' +
+    (d.staff||[]).map(s =>
+      '<tr><td><b>'+esc(s.name||s.email)+'</b><div class="muted">'+esc(s.email)+'</div></td>' +
+      '<td class="mono">'+s.sent+'</td>' +
+      '<td class="mono">'+(s.blocked ? '<span class="tag hold">'+s.blocked+'</span>' : '<span class="muted">0</span>')+'</td>' +
+      '<td class="mono muted">'+esc(fmt(s.lastAt))+'</td></tr>').join("") +
+    '</tbody></table></div>';
+
+  if(!(d.staff||[]).length) h += '<div class="muted" style="padding:20px 0">아직 발송 기록이 없습니다.</div>';
+  $("body").innerHTML = h;
+  return "";
+}
+
+function renderPeople(d){
+  const rows = d.rows||[];
+  $("body").innerHTML = truncNote(d) +
+    '<div class="scroll"><table><thead><tr>' +
+    '<th>크리에이터</th><th>핸들</th><th>발송</th><th>담당자</th><th>마지막 캠페인</th><th>마지막 발송</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(p =>
+      '<tr><td><b>'+esc(p.name||"—")+'</b><div class="muted">'+esc(p.to)+'</div></td>' +
+      '<td class="muted">'+esc(p.handle||"")+'</td>' +
+      '<td class="mono">'+p.count +
+        (p.count > 1 ? ' <span class="tag multi">중복 '+p.count+'회</span>' : '') +
+        (p.blocked ? ' <span class="tag hold">막힘 '+p.blocked+'</span>' : '') + '</td>' +
+      '<td>'+esc((p.owners||[]).join(", "))+'</td>' +
+      '<td class="muted">'+esc(p.lastCampaign||"")+'</td>' +
+      '<td class="mono muted">'+esc(fmt(p.lastAt))+'</td></tr>').join("") +
+    '</tbody></table></div>' +
+    (rows.length ? "" : '<div class="muted" style="padding:20px 0">해당하는 기록이 없습니다.</div>');
+  return rows.length + "명";
+}
+
+function renderSent(d){
+  const rows = d.rows||[];
+  $("body").innerHTML = truncNote(d) +
+    '<div class="scroll"><table><thead><tr>' +
+    '<th>보낸 시각</th><th>받는 사람</th><th>핸들</th><th>캠페인</th><th>담당자</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(r =>
+      '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+      '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
+      '<td class="muted">'+esc(r.handle||"")+'</td>' +
+      '<td>'+esc(r.campaign||"")+(r.forced ? ' <span class="tag forced">강제</span>' : '')+'</td>' +
+      '<td>'+person(r)+'</td></tr>').join("") +
+    '</tbody></table></div>' +
+    (rows.length ? "" : '<div class="muted" style="padding:20px 0">해당하는 기록이 없습니다.</div>');
+  return rows.length + "건";
+}
+
+function renderBlocked(d){
+  const rows = d.rows||[];
+  $("body").innerHTML =
+    '<div class="note">이미 다른 담당자가 보낸 크리에이터라서 <b>발송되지 않은</b> 시도입니다. ' +
+    '같은 사람이 자주 겹친다면 명단 배분을 조정할 신호입니다.</div>' +
+    '<div class="scroll"><table><thead><tr>' +
+    '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 보낸 사람</th><th>원래 발송</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(r => {
+      const p = r.prior || {};
+      return '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+        '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
+        '<td>'+person(r)+'</td>' +
+        '<td>'+esc(p.byName||p.by||"—")+'</td>' +
+        '<td class="mono muted">'+esc(fmt(p.at))+(p.campaign ? '<div class="muted">'+esc(p.campaign)+'</div>' : '')+'</td></tr>';
+    }).join("") +
+    '</tbody></table></div>' +
+    (rows.length ? "" : '<div class="muted" style="padding:20px 0">중복 시도가 없습니다. 👍</div>');
+  return rows.length + "건";
+}
+
+/* ── 메일함 (IMAP) ── */
+async function loadMail(){
+  const box = $("box").value;
+  const qs = new URLSearchParams({ box, days: $("days").value === "0" ? "90" : $("days").value, limit:"300" });
+  if($("by").value) qs.set("user", $("by").value);
+
+  $("body").innerHTML = '<div class="muted" style="padding:20px 0">메일함을 읽는 중… (건수에 따라 10초 이상 걸릴 수 있습니다)</div>';
+  const d = await fetchJson("/api/mailbox?" + qs);
+  const rows = d.rows||[];
+
+  const head = '<div class="note"><b>'+esc(d.user)+'</b> · 폴더 <b>'+esc(d.path)+'</b> · 최근 '+d.days+'일' +
+    (d.truncated ? ' · 많아서 최신 '+rows.length+'건만' : '') +
+    '<br />제목과 발신자만 읽습니다 (본문은 가져오지 않습니다).</div>';
+
+  if(box === "replies"){
+    $("body").innerHTML = head +
+      '<div class="scroll"><table><thead><tr>' +
+      '<th>받은 시각</th><th>보낸 사람</th><th>제목</th><th>우리가 보낸 캠페인</th><th>담당자</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => {
+        const o = r.outreach||{};
+        return '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+          '<td><b>'+esc(r.fromName||"—")+'</b><div class="muted">'+esc(r.from)+'</div></td>' +
+          '<td>'+esc(r.subject)+'</td>' +
+          '<td class="muted">'+esc(o.campaign||"")+'</td>' +
+          '<td>'+esc(o.byName||o.by||"")+'</td></tr>';
+      }).join("") +
+      '</tbody></table></div>' +
+      (rows.length ? "" : '<div class="muted" style="padding:20px 0">아웃리치한 크리에이터에게서 온 회신이 없습니다.</div>');
+  } else {
+    $("body").innerHTML = head +
+      '<div class="scroll"><table><thead><tr>' +
+      '<th>시각</th><th>'+(box==="sent"?"받는 사람":"보낸 사람")+'</th><th>제목</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => {
+        const who = box === "sent" ? { n:r.toName, e:r.to } : { n:r.fromName, e:r.from };
+        return '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+          '<td><b>'+esc(who.n||"—")+'</b><div class="muted">'+esc(who.e||"")+'</div></td>' +
+          '<td>'+esc(r.subject)+'</td></tr>';
+      }).join("") +
+      '</tbody></table></div>' +
+      (rows.length ? "" : '<div class="muted" style="padding:20px 0">메일이 없습니다.</div>');
+  }
+  return rows.length + "건";
+}
+
+/* ── 시작 ── */
+async function boot(){
+  if(!token()){ showGate(""); return; }
+  try {
+    const r = await fetch("/api/admin", { cache:"no-store", headers: headers() });
+    const d = await r.json();
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    if(r.status === 403){
+      $("gate").style.display="none"; $("app").style.display="";
+      $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>';
+      document.querySelector(".tabs").style.display = "none";
+      $("filters").style.display = "none";
+      return;
+    }
+    ME = d.me || null;
+    $("gate").style.display = "none";
+    $("app").style.display = "";
+    $("who").textContent = ME ? (ME.name || ME.email) + " · 관리자" : "";
+    if(d.error){ $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>'; }
+    go("summary");
+  } catch(e){
+    $("gate").style.display="none"; $("app").style.display="";
+    $("msg").innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
+  }
+}
+boot();
+</script>
+</body>
+</html>

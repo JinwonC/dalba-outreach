@@ -27,8 +27,10 @@
 const WINDOW_DAYS = Math.max(1, Number(process.env.HISTORY_DAYS || 90));
 const TTL_SEC = Math.round(WINDOW_DAYS * 86400);
 
-const LOG_KEY = "outreach:log";
+const LOG_KEY = "outreach:log";          // 성공한 발송
+const BLOCK_KEY = "outreach:blocked";    // 중복이라 보류된 시도
 const LOG_MAX = 5000;
+const BLOCK_MAX = 2000;
 
 function conf() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
@@ -192,14 +194,30 @@ async function log(rec) {
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
-async function recent(n) {
+// 중복이라 막힌 시도도 남긴다. "누가 누구에게 보내려다 막혔는지" 가 보이면
+// 담당자끼리 명단이 얼마나 겹치는지, 배분을 어떻게 고쳐야 하는지가 드러난다.
+async function logBlocked(rec) {
+  if (!enabled()) return;
+  try {
+    await pipeline([
+      ["LPUSH", BLOCK_KEY, JSON.stringify(rec)],
+      ["LTRIM", BLOCK_KEY, "0", String(BLOCK_MAX - 1)]
+    ]);
+  } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
+}
+
+async function readList(key, max, n) {
   if (!enabled()) return [];
-  const out = await cmd(["LRANGE", LOG_KEY, "0", String(Math.max(1, Math.min(Number(n) || 200, LOG_MAX)) - 1)]);
+  const count = Math.max(1, Math.min(Number(n) || 200, max));
+  const out = await cmd(["LRANGE", key, "0", String(count - 1)]);
   return (out || []).map(parseRec).filter(Boolean);
 }
 
+function recent(n) { return readList(LOG_KEY, LOG_MAX, n); }
+function recentBlocked(n) { return readList(BLOCK_KEY, BLOCK_MAX, n); }
+
 module.exports = {
-  enabled, lookup, reserve, release, log, recent,
+  enabled, lookup, reserve, release, log, logBlocked, recent, recentBlocked,
   normEmail, normHandle,
-  WINDOW_DAYS
+  WINDOW_DAYS, LOG_MAX, BLOCK_MAX
 };

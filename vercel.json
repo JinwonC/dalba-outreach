@@ -5,6 +5,12 @@
     },
     "api/products.js": {
       "maxDuration": 60
+    },
+    "api/mailbox.js": {
+      "maxDuration": 60
+    },
+    "api/admin.js": {
+      "maxDuration": 30
     }
   }
 }

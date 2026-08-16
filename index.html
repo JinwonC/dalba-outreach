@@ -206,7 +206,7 @@
       <div class="sub">핸들 · 금액 · 제품만 넣으면 브랜드 메일이 완성돼 네이버웍스로 바로 나갑니다</div>
     </div>
     <div class="right">
-      <span id="siblingNav"></span>
+      <span id="siblingNav"></span><span id="adminNav"></span>
       <button class="btn who unset" id="whoBtn" onclick="openAcct()">발신 계정 미설정</button>
       <button class="logout" onclick="logout()">로그아웃</button>
     </div>
@@ -1058,6 +1058,11 @@ async function boot(){
     $("currency").addEventListener("change", schedulePreview);
     $("forceSend").addEventListener("change", paintDup);
   }
+
+  // 아웃리치 현황은 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
+  // (로그인 뒤에도 갱신돼야 하므로 최초 1회 블록 밖에 둔다)
+  $("adminNav").innerHTML = CFG.admin
+    ? ' <a class="btn" href="/admin.html">📊 아웃리치 현황</a>' : "";
 
   // 이력 저장소가 붙어 있을 때만 중복 확인·강제 발송이 의미가 있다
   if(CFG.history && CFG.history.enabled){
