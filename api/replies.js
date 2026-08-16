@@ -4,8 +4,9 @@
 // 남겨 둔 기록으로 일별·담당자별 회신 수를 세므로, 화면을 열 때마다 IMAP 을
 // 뒤지지 않아도 된다 (담당자가 10명이면 그건 못 견딘다).
 //
-//   POST /api/replies { user, days }        → 그 담당자 받은편지함을 훑어 기록
-//   POST /api/replies { all:true, days }    → 등록된 담당자 전원 (관리자만)
+//   POST /api/replies { user, since }        → 그 담당자 받은편지함을 훑어 기록
+//   POST /api/replies { all:true, since }    → 등록된 담당자 전원 (관리자만)
+//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-07-01)
 //
 // ─── 무엇을 기록하나 ─────────────────────────────────────────────
 // 발신자가 **우리가 보낸 적 있는 주소**일 때만. 그 외 메일은 읽고 버린다.
@@ -20,6 +21,9 @@ const A = require("../auth.js");
 const H = require("../history.js");
 const M = require("../mail.js");
 
+// 회신도 발송 이력과 같은 날부터 본다 — 기준이 다르면 회신율이 말이 안 된다
+const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-07-01";
+
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
@@ -33,8 +37,8 @@ function readBody(req) {
 }
 
 // 한 계정의 받은편지함을 훑는다. 반환은 집계용 숫자만.
-async function scan(account, contacted, days, limit) {
-  const mail = await M.read(account, { kind: "inbox", days, limit });
+async function scan(account, contacted, since, limit) {
+  const mail = await M.read(account, { kind: "inbox", since, limit });
   let found = 0, dup = 0;
 
   for (const m of mail.rows) {
@@ -77,7 +81,7 @@ module.exports = async (req, res) => {
     }
 
     const body = readBody(req);
-    const days = Math.max(1, Math.min(Number(body.days) || 30, 365));
+    const since = String(body.since || SINCE_DEFAULT);
     const limit = Math.max(1, Math.min(Number(body.limit) || 400, 1000));
 
     // 대상 계정 정하기 — 기본은 본인, 남의 메일함이나 전원은 관리자만
@@ -121,7 +125,7 @@ module.exports = async (req, res) => {
     for (const acc of targets) {
       if (Date.now() > deadline) { skipped.push(acc.email); continue; }
       try {
-        results.push(await scan(acc, contacted, days, limit));
+        results.push(await scan(acc, contacted, since, limit));
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
       }
@@ -129,7 +133,7 @@ module.exports = async (req, res) => {
 
     res.status(200).json({
       contacted: contacted.size,
-      days,
+      since,
       results,
       totals: {
         found: results.reduce((s, r) => s + (r.found || 0), 0),

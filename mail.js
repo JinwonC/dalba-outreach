@@ -47,9 +47,10 @@ function all(list) {
 async function read(account, opts) {
   const o = opts || {};
   const kind = o.kind || "sent";
-  const days = Math.max(1, Math.min(Number(o.days) || 30, 3650));
   const limit = Math.max(1, Math.min(Number(o.limit) || 200, 2000));
-  const since = new Date(Date.now() - days * 86400e3);
+  // since 를 날짜로 직접 줄 수도 있고(고정 시작일), days 로 줄 수도 있다
+  const since = o.since ? new Date(o.since)
+    : new Date(Date.now() - Math.max(1, Math.min(Number(o.days) || 30, 3650)) * 86400e3);
 
   const client = makeClient(account);
   await client.connect();

@@ -4,8 +4,9 @@
 // 이 도구를 쓰기 전에 나간 메일도 중복 판정에 들어와야, 툴을 켠 날 이전에 접촉한
 // 크리에이터에게 그대로 다시 나가는 일이 없다.
 //
-//   POST /api/backfill { user, days, subject, dryRun:true }  → 미리보기 (쓰지 않음)
-//   POST /api/backfill { user, days, subject }               → 실제 가져오기
+//   POST /api/backfill { user, since, dryRun:true }  → 미리보기 (쓰지 않음)
+//   POST /api/backfill { user, since }               → 실제 가져오기
+//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-07-01)
 //
 // ─── 왜 미리보기가 먼저인가 ──────────────────────────────────────
 // 보낸편지함에는 아웃리치가 아닌 메일이 섞여 있다. 그대로 밀어 넣으면 동료·거래처
@@ -28,6 +29,9 @@ const COMPANY_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
   .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
 
 const MAX_RECIPIENTS = 5;   // 이보다 많으면 공지·회람으로 본다
+
+// 이력을 어느 날부터 채울지. 그 전 메일은 읽지 않는다.
+const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-07-01";
 
 function isAdmin(u) { return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase())); }
 function isInternal(email) {
@@ -93,14 +97,16 @@ module.exports = async (req, res) => {
       if (!account) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + wanted }); return; }
     }
 
-    const days = Math.max(1, Math.min(Number(body.days) || 180, 3650));
+    // 언제부터 가져올지. 기본은 HISTORY_SINCE(없으면 2026-07-01) — 이 도구를 쓰기 전
+    // 기간까지 이력에 넣어야 중복 판정과 실적 집계가 그 날부터 맞는다.
+    const since = String(body.since || SINCE_DEFAULT);
     const limit = Math.max(1, Math.min(Number(body.limit) || 500, 2000));
     const needle = String(body.subject || "").trim().toLowerCase();
     const dryRun = body.dryRun !== false;   // 기본은 미리보기 — 실수로 쓰지 않도록
 
     let mail;
     try {
-      mail = await M.read(account, { kind: "sent", days, limit });
+      mail = await M.read(account, { kind: "sent", since, limit });
     } catch (e) {
       res.status(502).json({
         error: "네이버웍스 IMAP 연결/인증 실패: " + String((e && e.message) || e),
@@ -125,7 +131,7 @@ module.exports = async (req, res) => {
     });
 
     const base = {
-      user: account.email, path: mail.path, days,
+      user: account.email, path: mail.path, since,
       windowDays: H.WINDOW_DAYS,
       scanned: mail.rows.length,
       truncated: mail.truncated,

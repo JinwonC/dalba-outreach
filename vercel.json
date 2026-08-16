@@ -6,9 +6,6 @@
     "api/products.js": {
       "maxDuration": 60
     },
-    "api/mailbox.js": {
-      "maxDuration": 60
-    },
     "api/replies.js": {
       "maxDuration": 60
     },
