@@ -101,6 +101,8 @@
   .pcard .noimg { width:100%; aspect-ratio:1/1; border-radius:8px; background:#f4f2ec; display:flex; align-items:center; justify-content:center; color:#c3bda8; font-size:11px; }
   .pcard .nm { font-size:12px; line-height:1.4; margin-top:8px; color:#1d1d1f; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .pcard .mt { font-size:11px; color:#999; margin-top:5px; }
+  /* 상품 ID — 담당자끼리 ID 로 주고받으므로 카드에서 바로 보이게 한다 */
+  .pcard .pid { font-size:10px; color:#bbb; margin-top:3px; font-variant-numeric:tabular-nums; }
   .pcard .oos { color:#c0392b; }
 
   .progress { height:8px; background:#f0efe9; border-radius:99px; overflow:hidden; margin:12px 0 8px; }
@@ -158,7 +160,7 @@
   <div class="card" style="max-width:760px">
     <h2>🛍 상품 선택</h2>
     <p>선택하면 <b>제품명 · 이미지 · 제품 링크</b>가 자동으로 채워집니다.</p>
-    <input id="pickSearch" type="text" placeholder="상품명 검색…" oninput="renderPicker()" />
+    <input id="pickSearch" type="text" placeholder="상품명 또는 상품 ID 검색…" oninput="onPickSearch()" />
     <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#777;margin:2px 0 6px">
       <input type="checkbox" id="pickAll" style="width:auto;margin:0" onchange="loadProducts(true)" />
       판매중이 아닌 상품도 보기
@@ -543,8 +545,9 @@ function thumbFail(img){
 function renderPicker(){
   if(!PRODUCTS) return;
   const q = ($("pickSearch").value || "").trim().toLowerCase();
-  const list = q ? PRODUCTS.filter(p => p.title.toLowerCase().includes(q)) : PRODUCTS;
-  $("pickGrid").innerHTML = list.slice(0, 120).map((p,i) =>
+  /* 상품명과 상품 ID 둘 다로 찾는다 — 담당자끼리 ID 로 주고받는 경우가 많다 */
+  const list = q ? PRODUCTS.filter(p => p.title.toLowerCase().includes(q) || p.id.includes(q)) : PRODUCTS;
+  $("pickGrid").innerHTML = list.slice(0, 120).map(p =>
     '<button type="button" class="pcard" onclick="choose('+PRODUCTS.indexOf(p)+')">' +
     (p.image
       ? '<img class="thumb" src="'+esc(p.image)+'" alt="" loading="lazy"' +
@@ -553,8 +556,44 @@ function renderPicker(){
     '<div class="nm">'+esc(p.title)+'</div>' +
     '<div class="mt">'+esc(p.currency+" "+p.price)+
       (p.stock>0 ? ' · 재고 '+p.stock : ' · <span class="oos">품절</span>')+'</div>' +
+    '<div class="pid">'+esc(p.id)+
+      (p.status && p.status.toUpperCase()!=="ACTIVATE" ? ' · <span class="oos">'+esc(p.status)+'</span>' : '')+
+    '</div>' +
     '</button>'
   ).join("") || '<div style="color:#999;font-size:12.5px">검색 결과가 없습니다.</div>';
+}
+
+/* 검색창 입력 처리.
+   ID 처럼 생긴 숫자를 쳤는데 불러온 목록에 없으면 — 판매중이 아니거나
+   목록 밖의 상품일 수 있으므로 — 그 ID 하나만 서버에 직접 물어본다. */
+let idTimer = 0;
+function onPickSearch(){
+  renderPicker();
+  clearTimeout(idTimer);
+  const q = ($("pickSearch").value || "").trim();
+  if(!/^\d{6,}$/.test(q)) return;
+  if(PRODUCTS && PRODUCTS.some(p => p.id === q)) return;
+  idTimer = setTimeout(() => lookupId(q), 400);
+}
+
+async function lookupId(id){
+  const msg = $("pickMsg");
+  msg.textContent = "상품 ID " + id + " 조회 중…";
+  try {
+    const r = await fetch("/api/products?id=" + encodeURIComponent(id),
+      { cache:"no-store", headers: authHeaders() });
+    const d = await r.json();
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    if(d.error) throw new Error(d.error);
+    const p = (d.products || [])[0];
+    if(!p){ msg.textContent = "그 ID 의 상품을 찾지 못했습니다."; return; }
+    if(!PRODUCTS) PRODUCTS = [];
+    if(!PRODUCTS.some(x => x.id === p.id)) PRODUCTS.unshift(p);
+    msg.textContent = "ID 로 찾음" + (p.status ? " · " + p.status : "");
+    renderPicker();
+  } catch(e){
+    msg.innerHTML = '<span style="color:#c0392b">'+esc(String(e.message||e))+'</span>';
+  }
 }
 
 function choose(i){

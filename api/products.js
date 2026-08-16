@@ -5,6 +5,7 @@
 //
 //   GET /api/products             → 판매중(ACTIVATE) 상품만
 //   GET /api/products?all=1       → 전체 상태 포함
+//   GET /api/products?id=<상품ID> → 그 상품 하나만 (목록에 없어도 찾는다)
 //   GET /api/products?fresh=1     → 목록 캐시 무시하고 다시 조회
 //   GET /api/products?debug=1     → 목록 응답의 원본 구조를 함께 반환
 //   GET /api/products?debugDetail=1 → 상세 응답의 원본 구조를 함께 반환
@@ -94,11 +95,8 @@ async function getAccessToken() {
 const DETAIL_TTL = 24 * 3600e3;
 const imageCache = new Map();   // id -> { url, at }
 
-async function fetchDetailImage(id, token) {
-  const hit = imageCache.get(id);
-  if (hit && Date.now() - hit.at < DETAIL_TTL) return hit.url;
-
-  const path = `/product/202309/products/${id}`;
+async function fetchDetail(id, token) {
+  const path = `/product/202309/products/${encodeURIComponent(id)}`;
   const params = {
     app_key: APP_KEY,
     shop_cipher: SHOP_CIPHER,
@@ -106,18 +104,40 @@ async function fetchDetailImage(id, token) {
   };
   params.sign = sign(path, params, "");
 
+  const r = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
+    headers: { "x-tts-access-token": token }
+  });
+  return r.json();
+}
+
+async function fetchDetailImage(id, token) {
+  const hit = imageCache.get(id);
+  if (hit && Date.now() - hit.at < DETAIL_TTL) return hit.url;
+
   let url = "";
   try {
-    const r = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
-      headers: { "x-tts-access-token": token }
-    });
-    const d = await r.json();
+    const d = await fetchDetail(id, token);
     if (d.code === 0) url = rawImage(d.data || {});
   } catch (_) { /* 개별 실패는 무시 */ }
 
   // 실패해도 빈 값을 캐시한다 — 한 상품 때문에 매 요청마다 재시도하지 않도록
   imageCache.set(id, { url, at: Date.now() });
   return url;
+}
+
+// 상품 ID 하나로 바로 조회. 목록 캐시를 거치지 않으므로
+// 판매중이 아니거나 목록 상한(MAX_PAGES) 밖의 상품도 찾을 수 있다.
+async function fetchOne(id) {
+  let token = await getAccessToken();
+  let d = await fetchDetail(id, token);
+  if (d.code === 105002) { token = await refreshAccessToken(); d = await fetchDetail(id, token); }
+  if (d.code !== 0) return { error: `code=${d.code} ${d.message || ""}` };
+
+  const p = Object.assign({ id }, d.data || {});
+  const n = normalize(p);
+  if (!n.id) n.id = String(id);
+  if (n.image) imageCache.set(n.id, { url: n.imageOrig, at: Date.now() });
+  return { product: n };
 }
 
 // 상품이 100개가 넘어 순차로 돌면 함수 제한시간을 넘긴다. 동시 8개로 묶고,
@@ -136,22 +156,22 @@ async function enrichImages(items, token, deadline) {
 }
 
 // ─── 상품 검색 1페이지 ───────────────────────────────────────────
+// ⚠️ page_token 은 **쿼리 파라미터**다. 본문에 넣으면 API 가 조용히 무시하고
+//    매번 1페이지를 돌려준다 — 같은 상품이 두 번 나오고 100번째 뒤 상품은
+//    영영 안 보이는 증상이 여기서 나왔다. (본문은 status 같은 검색 조건용)
 async function searchPage(pageToken, token) {
-  const bodyObj = pageToken ? { page_token: pageToken } : {};
-  const body = pageToken ? JSON.stringify(bodyObj) : "";
-
   const params = {
     app_key: APP_KEY,
     shop_cipher: SHOP_CIPHER,
     timestamp: String(Math.floor(Date.now() / 1000)),
     page_size: String(PAGE_SIZE)
   };
-  params.sign = sign(SEARCH_PATH, params, body);
+  if (pageToken) params.page_token = pageToken;
+  params.sign = sign(SEARCH_PATH, params, "");   // 서명에도 page_token 이 포함돼야 한다
 
   const r = await fetch(`${BASE}${SEARCH_PATH}?${new URLSearchParams(params)}`, {
     method: "POST",
-    headers: { "x-tts-access-token": token, "content-type": "application/json" },
-    body: body || undefined
+    headers: { "x-tts-access-token": token, "content-type": "application/json" }
   });
   return r.json();
 }
@@ -247,6 +267,7 @@ let listCache = { at: 0, items: null, raw: null };
 async function fetchAll() {
   let token = await getAccessToken();
   const items = [];
+  const seen = new Set();      // 같은 상품이 두 번 담기지 않도록 — 화면에 중복 카드가 뜨는 걸 막는다
   let pageToken = null, pages = 0, firstRaw = null, refreshed = false;
 
   while (pages < MAX_PAGES) {
@@ -264,11 +285,20 @@ async function fetchAll() {
 
     const products = (d.data && d.data.products) || [];
     if (!firstRaw && products[0]) firstRaw = products[0];
-    products.forEach(p => items.push(normalize(p)));
+
+    let added = 0;
+    products.forEach(p => {
+      const n = normalize(p);
+      if (!n.id || seen.has(n.id)) return;
+      seen.add(n.id);
+      items.push(n);
+      added++;
+    });
 
     const next = (d.data && d.data.next_page_token) || "";
     pages++;
-    if (!next || next === pageToken) break;
+    // 다음 토큰이 없거나, 제자리걸음이거나, 새로 들어온 게 없으면 끝
+    if (!next || next === pageToken || !added) break;
     pageToken = next;
   }
 
@@ -305,6 +335,17 @@ module.exports = async (req, res) => {
     if (q.probe === "1") {
       res.setHeader("Cache-Control", "no-store");
       res.status(200).json({ ready: true });
+      return;
+    }
+
+    // 상품 ID 직접 조회 — 목록에 없는 상품(판매중지·목록 상한 밖)도 집어올 수 있다
+    const wantId = String(q.id || "").trim();
+    if (wantId) {
+      res.setHeader("Cache-Control", "no-store");
+      if (!/^\d+$/.test(wantId)) { res.status(400).json({ error: "상품 ID 는 숫자여야 합니다" }); return; }
+      const one = await fetchOne(wantId);
+      if (one.error) { res.status(200).json({ byId: wantId, products: [], notFound: one.error }); return; }
+      res.status(200).json({ byId: wantId, returned: 1, products: [one.product] });
       return;
     }
 
