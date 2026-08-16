@@ -321,7 +321,7 @@
       : '<div style="font:400 40px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">' + esc(brand) + "</div>";
     const logoBlock = '<div style="padding:0 0 18px;">' + (logoUrl
       ? '<img src="' + logoUrl + '" alt="' + esc(brand) +
-        '" height="40" style="height:40px;max-width:240px;width:auto;border:0;outline:none;display:inline-block;" />'
+        '" height="46" style="height:46px;max-width:70%;width:auto;border:0;outline:none;display:inline-block;" />'
       : wordmark) + "</div>";
 
     let body = "";

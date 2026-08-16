@@ -49,6 +49,18 @@ const SMTP_PORT = Number(process.env.NW_SMTP_PORT || 465);
 const ALLOWED_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
   .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
 
+// 메일 헤더 로고 이미지 주소.
+//  1) LOGO_URL 을 직접 넣었으면 그걸 쓴다 (커스텀 도메인·외부 CDN 등).
+//  2) 아니면 레포에 올린 logo-black.png 를 Vercel 배포 도메인에서 불러온다.
+//     VERCEL_PROJECT_PRODUCTION_URL 은 배포마다 바뀌지 않는 프로덕션 도메인이라
+//     발송 메일이 항상 같은 주소를 가리킨다.
+//  3) 둘 다 없으면 빈 값 → 템플릿이 텍스트 워드마크로 그린다 (로컬 개발 등).
+function logoUrl() {
+  if (process.env.LOGO_URL) return process.env.LOGO_URL;
+  const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return host ? "https://" + host + "/logo-black.png" : "";
+}
+
 // 관리자 화면(/admin.html)을 볼 수 있는 사람. 여기서는 버튼 노출 여부만 판단하고,
 // 실제 권한 검사는 api/admin.js 가 다시 한다 — 화면을 숨기는 건 보호가 아니다.
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
@@ -151,7 +163,7 @@ module.exports = async (req, res) => {
         bcc: Boolean(process.env.NW_BCC),
         history: { enabled: H.enabled(), windowDays: H.WINDOW_DAYS },
         admin: isAdmin(me),          // 관리자 화면 버튼을 띄울지
-        logoUrl: process.env.LOGO_URL || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
+        logoUrl: logoUrl(),   // 미리보기가 실제 발송과 같은 로고를 쓰도록
         me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;
@@ -183,8 +195,8 @@ module.exports = async (req, res) => {
       senderName: account ? account.name : (campaign.senderName || ""),
       senderEmail: account ? account.email : (campaign.senderEmail || ""),
       senderTitle: (account && account.title) || campaign.senderTitle || "",
-      // 로고 이미지 주소는 환경변수로 둔다 — 없으면 템플릿이 텍스트 워드마크로 그린다
-      logoUrl: campaign.logoUrl || process.env.LOGO_URL || ""
+      // 로고 이미지 주소 — 없으면 템플릿이 텍스트 워드마크로 그린다
+      logoUrl: campaign.logoUrl || logoUrl()
     });
 
     // ─── dryRun: 발송 없이 렌더 결과만 확인 ──────────────────────
