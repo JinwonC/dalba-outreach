@@ -36,6 +36,22 @@ function serviceAccount() {
 
 function configured() { return Boolean(CSV_URL || serviceAccount()); }
 
+// 왜 안 되는지 한 줄로. 조용히 꺼지면 "키를 넣었는데 왜 안 뜨지" 를 짚을 수 없다.
+// 개인키는 절대 돌려주지 않는다 — 있는지 없는지, 형식이 맞는지만 말한다.
+function status() {
+  if (CSV_URL) return { ok: true, via: "csv" };
+  const raw = (process.env.GOOGLE_SERVICE_ACCOUNT || "").trim();
+  if (!raw) return { ok: false, reason: "GOOGLE_SERVICE_ACCOUNT 가 비어 있습니다 — 저장 후 재배포(Redeploy)했는지 확인하세요" };
+  let j;
+  try { j = JSON.parse(raw); }
+  catch (_) {
+    return { ok: false, reason: "GOOGLE_SERVICE_ACCOUNT 가 올바른 JSON 이 아닙니다 (" + raw.length + "자) — 파일 내용을 { 부터 } 까지 통째로 붙여넣어야 합니다" };
+  }
+  const miss = ["client_email", "private_key"].filter(k => !j[k]);
+  if (miss.length) return { ok: false, reason: "JSON 에 " + miss.join(", ") + " 가 없습니다 — 서비스 계정 키 파일이 맞는지 확인하세요" };
+  return { ok: true, via: "service_account", account: j.client_email };
+}
+
 // ─── 서비스 계정 → 액세스 토큰 ───────────────────────────────────
 // 서명한 JWT 를 토큰으로 바꿔 받는다(OAuth2 JWT bearer). 추가 패키지 없이 crypto 로 된다.
 let tokenCache = { value: "", exp: 0 };
@@ -134,6 +150,30 @@ async function readRows() {
   return rows;
 }
 
+// 실제로 읽히는지만 확인한다 — 한 칸만 읽어서 인증·공유·탭 이름을 한 번에 검증한다.
+// 전체를 읽어 확인하면 화면을 열 때마다 시트를 통째로 받게 된다.
+async function ping() {
+  if (cache.rows && Date.now() - cache.at < CACHE_MS) return { rows: cache.rows.length };
+  if (serviceAccount()) {
+    const token = await accessToken();
+    const range = encodeURIComponent(`'${SHEET_TAB}'!A1:A1`);
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}`,
+      { headers: { authorization: "Bearer " + token } });
+    const d = await r.json();
+    if (d.error) {
+      const m = d.error.message || "";
+      // 가장 흔한 두 가지는 원인을 콕 집어 준다
+      if (r.status === 403) throw new Error("시트가 서비스 계정에 공유되지 않았습니다 — " + (serviceAccount().client_email) + " 을 뷰어로 추가하세요");
+      if (/Unable to parse range/i.test(m)) throw new Error(`"${SHEET_TAB}" 탭을 찾지 못했습니다 — 탭 이름이 정확한지 확인하세요`);
+      throw new Error("시트 읽기 실패: " + m);
+    }
+    return { ok: true };
+  }
+  const r = await fetch(CSV_URL, { method: "HEAD" });
+  if (!r.ok) throw new Error("게시된 CSV 주소를 읽지 못했습니다 (HTTP " + r.status + ")");
+  return { ok: true };
+}
+
 // 제품 하나의 매출 상위 영상. 매출 1 미만은 아예 후보로 두지 않는다.
 async function topVideos(pid, limit) {
   const want = String(pid || "").trim();
@@ -161,4 +201,4 @@ async function topVideos(pid, limit) {
     .filter(v => v.url);
 }
 
-module.exports = { configured, topVideos, readRows, parseCsv, SHEET_TAB, SHEET_ID };
+module.exports = { configured, status, ping, topVideos, readRows, parseCsv, SHEET_TAB, SHEET_ID };

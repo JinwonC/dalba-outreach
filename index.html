@@ -332,7 +332,7 @@
         <h2>이 제품 바이럴 영상</h2>
         <!-- 제품을 고르면 그 제품의 매출 상위 영상을 시트에서 불러온다 -->
         <div class="pickbar" id="vidBar" style="display:none">
-          <button type="button" class="btn" onclick="loadTopVideos()">📈 매출 상위 영상 불러오기</button>
+          <button type="button" class="btn" id="vidBtn" onclick="loadTopVideos()">📈 매출 상위 영상 불러오기</button>
           <span class="picked" id="vidMsg"></span>
         </div>
         <div id="vidList" style="display:none;margin-bottom:12px"></div>
@@ -560,6 +560,7 @@ function setDeal(d){
 let PRODUCTS = null;
 let PICKED_PID = "";      // 고른 제품의 TikTok Shop 상품 ID — 매출 상위 영상 조회에 쓴다
 let VIDEOS_READY = false; // 영상 시트가 설정된 배포에서만 버튼을 띄운다
+let VIDEOS_WHY = "";      // 안 되면 그 이유 — 조용히 사라지면 원인을 짚을 수 없다
 
 async function loadProducts(force){
   const msg = $("pickMsg");
@@ -652,18 +653,47 @@ async function lookupId(id){
 function choose(i){
   const p = PRODUCTS[i];
   if(!p) return;
-  PICKED_PID = p.id || "";
-  // 제품이 정해져야 그 제품의 영상을 부를 수 있다
-  $("vidBar").style.display = (VIDEOS_READY && PICKED_PID) ? "flex" : "none";
-  $("vidList").style.display = "none";
-  $("vidMsg").textContent = "";
-  TOPVIDS = null;
   $("product").value = p.title;
   $("productImage").value = p.image || "";
-  $("productUrl").value = p.url || "";
+  // 링크가 비어 있어도 상품 ID 만은 남긴다 — 여기서 pid 를 되찾기 때문
+  $("productUrl").value = p.url || (p.id ? "https://shop.tiktok.com/view/product/" + p.id : "");
+  syncPid();
   paintPicked(p);
   closePicker();
   renderPreview();
+}
+
+/* ── 고른 제품의 상품 ID ──
+   pid 를 따로 저장하지 않고 **제품 링크에서 되찾는다.** 링크는 이미 초안에 저장되고
+   그 안에 상품 ID 가 들어 있다. 저장을 두 군데 두면 새로고침한 뒤 둘이 어긋나서,
+   제품은 그대로 채워져 있는데 영상 버튼만 사라지는 일이 생긴다(실제로 그랬다).
+   링크를 손으로 붙여 넣은 경우에도 그대로 동작한다. */
+function pidFromUrl(u){
+  const m = String(u||"").match(/\/product\/(\d{6,})/);
+  return m ? m[1] : "";
+}
+
+function syncPid(){
+  const next = pidFromUrl(val("productUrl"));
+  if(next !== PICKED_PID){
+    PICKED_PID = next;
+    TOPVIDS = null;                       // 제품이 바뀌면 앞 제품의 영상 목록은 버린다
+    $("vidList").style.display = "none";
+    $("vidList").innerHTML = "";
+    $("vidMsg").textContent = "";
+  }
+  paintVidBar();
+}
+
+/* 시트가 설정돼 있지 않으면 버튼을 감추되 **이유는 남긴다.**
+   조용히 사라지면 "키를 넣었는데 왜 안 뜨지" 를 화면만 보고는 알 수 없다. */
+function paintVidBar(){
+  const bar = $("vidBar");
+  if(!PICKED_PID){ bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  $("vidBtn").disabled = !VIDEOS_READY;
+  if(!VIDEOS_READY && VIDEOS_WHY) $("vidMsg").innerHTML =
+    '<span style="color:#c0392b">'+esc(VIDEOS_WHY)+'</span>';
 }
 
 function paintPicked(p){
@@ -1147,8 +1177,10 @@ async function boot(){
         '<a class="btn" href="'+base+'/team.html">📊 팀 대시보드</a>';
     }
     loadDraft();
+    syncPid();                 // 저장된 제품 링크에서 상품 ID 를 되찾는다
     setPvWidth(localStorage.getItem("outreach_pvw") || "pc");
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
+    $("productUrl").addEventListener("input", syncPid);
     $("currency").addEventListener("change", schedulePreview);
     $("forceSend").addEventListener("change", paintDup);
   }
@@ -1174,14 +1206,15 @@ async function boot(){
       .then(d => { if(d && d.ready) $("pickBar").style.display = "flex"; })
       .catch(() => {});
 
-    // 영상 시트도 마찬가지 — 설정이 없으면 버튼 자체를 띄우지 않는다
+    // 영상 시트도 마찬가지 — 다만 안 되는 이유는 화면에 남긴다
     fetch("/api/videos?probe=1", { cache:"no-store", headers: authHeaders() })
       .then(r => r.json())
       .then(d => {
         VIDEOS_READY = Boolean(d && d.ready);
-        if(VIDEOS_READY && PICKED_PID) $("vidBar").style.display = "flex";
+        VIDEOS_WHY = VIDEOS_READY ? "" : String((d && (d.reason || d.error)) || "시트를 읽을 수 없습니다");
+        paintVidBar();
       })
-      .catch(() => {});
+      .catch(e => { VIDEOS_WHY = String(e.message||e); paintVidBar(); });
   }
   paintWho();
   renderPreview();

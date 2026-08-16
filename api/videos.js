@@ -32,15 +32,30 @@ module.exports = async (req, res) => {
 
     const q = req.query || {};
 
-    // 설정이 없으면 기능만 꺼진다 — 화면이 이 버튼을 아예 감춘다
-    if (!S.configured()) {
+    // 설정이 없으면 기능만 꺼진다 — 대신 왜 꺼졌는지는 화면까지 전한다
+    const st = S.status();
+    if (!st.ok) {
       res.status(501).json({
         error: "영상 시트가 설정되지 않았습니다",
+        reason: st.reason,
         need: ["GOOGLE_SERVICE_ACCOUNT (권장)", "또는 SHEET_CSV_URL"]
       });
       return;
     }
-    if (q.probe === "1") { res.status(200).json({ ready: true, tab: S.SHEET_TAB }); return; }
+    // 설정만 보는 게 아니라 **실제로 읽히는지** 확인한다. 키가 있어도 시트 공유가
+    // 안 돼 있으면 버튼만 뜨고 눌러야 실패해서, 원인을 한 박자 늦게 알게 된다.
+    if (q.probe === "1") {
+      try {
+        await S.ping();
+        res.status(200).json({ ready: true, via: st.via, account: st.account, tab: S.SHEET_TAB });
+      } catch (e) {
+        res.status(200).json({
+          ready: false, via: st.via, account: st.account,
+          reason: String((e && e.message) || e)
+        });
+      }
+      return;
+    }
 
     const pid = String(q.pid || "").trim();
     if (!pid) { res.status(400).json({ error: "pid 가 필요합니다" }); return; }
