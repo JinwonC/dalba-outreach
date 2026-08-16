@@ -956,6 +956,11 @@ function loadDraft(){
   let o = {};
   try { o = JSON.parse(localStorage.getItem("outreach_draft")||"{}"); } catch(e){}
   FIELDS.forEach(f => { if($(f) && o[f] != null) $(f).value = o[f]; });
+  // 예전에 저장해 둔 초안에 초록 하트가 남아 있으면 브랜드 노랑 하트로 바꿔 준다
+  if($("subject") && /💚/.test($("subject").value)){
+    $("subject").value = $("subject").value.replace(/💚/g, "💛");
+    saveDraft();
+  }
   if(!val("subject")) $("subject").value = T.DEFAULT_SUBJECT;
   if(!val("brand")) $("brand").value = "d'Alba";
   // Next steps 는 처음 열 때만 기본 문구를 채운다 (지운 상태는 그대로 존중)
