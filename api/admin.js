@@ -74,6 +74,40 @@ function groupByPerson(sent, blocked) {
   }).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
 }
 
+// 담당자별 "회신한 크리에이터" 목차 — 관리자가 협상 스레드를 열기 위한 목록.
+// 회신이 있어야 협상이 성립하므로 회신 기록을 기준으로 담당자→크리에이터로 묶는다.
+// 발송 이력에서 그 크리에이터에게 몇 번 보냈는지도 함께 붙인다.
+function conversations(sent, replies) {
+  const staff = new Map();
+  const ensure = (byKey, byName) => {
+    if (!staff.has(byKey)) staff.set(byKey, { by: byKey, byName: byName || byKey, creators: new Map() });
+    return staff.get(byKey);
+  };
+  replies.forEach(r => {
+    const byKey = String(r.by || r.inbox || "").toLowerCase();
+    const ck = H.normEmail(r.from);
+    if (!byKey || !ck) return;
+    const s = ensure(byKey, r.byName);
+    const c = s.creators.get(ck) ||
+      { email: r.from, name: r.fromName || "", replies: 0, sent: 0, lastAt: "", lastSubject: "", campaign: r.campaign || "" };
+    c.replies++;
+    if (r.fromName && !c.name) c.name = r.fromName;
+    if (String(r.at || "") > String(c.lastAt || "")) { c.lastAt = r.at || ""; c.lastSubject = r.subject || c.lastSubject; }
+    s.creators.set(ck, c);
+  });
+  sent.forEach(r => {
+    const s = staff.get(String(r.by || "").toLowerCase());
+    if (!s) return;
+    const c = s.creators.get(H.normEmail(r.to));
+    if (c) c.sent++;
+  });
+  return [...staff.values()]
+    .map(s => ({ by: s.by, byName: s.byName,
+      creators: [...s.creators.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))) }))
+    .filter(s => s.creators.length)
+    .sort((a, b) => b.creators.length - a.creators.length);
+}
+
 // 하루 단위 집계.
 //
 // 기록의 시각은 UTC 다. 한국에서 아침 8시에 보낸 건 UTC 로는 전날 23시라, 그대로
@@ -233,7 +267,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "people";
+    const countView = view === "summary" || view === "daily" || view === "people" || view === "conversations";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -289,6 +323,7 @@ module.exports = async (req, res) => {
     }
 
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
+    if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
 
     res.status(200).json(Object.assign(base, summarize(sent, blocked, replies), {
       recentSent: sent.slice(0, 20),

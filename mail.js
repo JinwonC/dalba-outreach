@@ -7,6 +7,7 @@
 // 제목·발신자·수신자만 읽는다(envelope). 본문은 가져오지 않는다.
 
 const { ImapFlow } = require("imapflow");
+const { simpleParser } = require("mailparser");
 
 const IMAP_HOST = process.env.NW_IMAP_HOST || "imap.worksmobile.com";
 const IMAP_PORT = Number(process.env.NW_IMAP_PORT || 993);
@@ -102,4 +103,62 @@ async function read(account, opts) {
   return { path, rows, total, truncated: total > rows.length };
 }
 
-module.exports = { read, IMAP_HOST, IMAP_PORT };
+// ─── 대화 한 건을 본문까지 읽는다 ────────────────────────────────
+// 관리자가 특정 담당자의 특정 크리에이터(peer)와의 협상 스레드를 볼 때만 쓴다.
+// 받은편지함(peer→담당자)과 보낸편지함(담당자→peer)을 합쳐 시간순으로 돌려준다.
+// 본문은 여기서만 읽는다 — **저장하지 않고** 매번 그때그때 불러온다(민감 정보 최소화).
+function clipBody(t) {
+  const s = String(t == null ? "" : t).replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return s.length > 8000 ? s.slice(0, 8000) + "\n\n…(이하 생략)" : s;
+}
+
+async function collectSide(client, path, crit, direction, limit, deadline, out) {
+  if (!path) return;
+  let lock;
+  try { lock = await client.getMailboxLock(path); } catch (_) { return; }
+  try {
+    const uids = await client.search(crit, { uid: true }) || [];
+    const take = uids.slice(-limit);                    // 오름차순이라 뒤쪽이 최신
+    if (!take.length) return;
+    for await (const msg of client.fetch(take, { uid: true, envelope: true, source: true }, { uid: true })) {
+      const env = msg.envelope || {};
+      let text = "";
+      try { const parsed = await simpleParser(msg.source); text = parsed.text || ""; } catch (_) {}
+      out.push({
+        direction,                                      // "in"=상대가 보냄 / "out"=담당자가 보냄
+        at: env.date, subject: env.subject || "(제목 없음)",
+        from: one(env.from), to: one(env.to),
+        body: clipBody(text)
+      });
+      if (Date.now() > deadline) break;
+    }
+  } finally { if (lock) lock.release(); }
+}
+
+async function readThread(account, opts) {
+  const o = opts || {};
+  const peer = String(o.peer || "").trim().toLowerCase();
+  if (!peer) return { peer: "", rows: [] };
+  const since = o.since ? new Date(o.since)
+    : new Date(Date.now() - Math.max(1, Math.min(Number(o.days) || 365, 3650)) * 86400e3);
+  const perSide = Math.max(1, Math.min(Number(o.limit) || 50, 300));
+  const deadline = Date.now() + Math.max(8000, Number(o.budgetMs) || 45000);
+
+  const client = makeClient(account);
+  await client.connect();
+  const out = [];
+  try {
+    if (o.pingOnly) return { peer, rows: [] };
+    // 상대가 보낸 것: 받은편지함에서 from=peer
+    await collectSide(client, "INBOX", { since, from: peer }, "in", perSide, deadline, out);
+    // 담당자가 보낸 것: 보낸편지함에서 to=peer
+    const sentPath = await findMailbox(client, "sent");
+    await collectSide(client, sentPath, { since, to: peer }, "out", perSide, deadline, out);
+  } finally {
+    try { await client.logout(); } catch (_) { try { client.close(); } catch (_) {} }
+  }
+  out.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));   // 대화는 오래된→최신
+  return { peer, rows: out };
+}
+
+module.exports = { read, readThread, IMAP_HOST, IMAP_PORT };

@@ -54,6 +54,28 @@
   .gate { max-width:340px; margin:70px auto; }
   .gate input { width:100%; margin-bottom:8px; }
 
+  /* 대화 목록 */
+  .convgrp { margin-bottom:18px; }
+  .convby { font:700 14px/1.4 inherit; margin:0 2px 8px; }
+  .convrow td { cursor:pointer; }
+  .convrow:hover td { background:#fdfcf8; }
+
+  /* 협상 스레드 모달 */
+  .veil { position:fixed; inset:0; background:rgba(20,18,12,.5); display:flex;
+          align-items:center; justify-content:center; padding:20px; z-index:50; }
+  .tmodal { background:#fff; border-radius:16px; width:100%; max-width:720px; max-height:86vh;
+            display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); overflow:hidden; }
+  .tmhead { display:flex; align-items:center; gap:10px; padding:16px 18px 6px; font:700 15px/1.4 inherit; }
+  .tmhead .x { margin-left:auto; border:0; background:none; font-size:18px; color:#999; cursor:pointer; }
+  .tmnote { padding:0 18px 12px; font-size:11.5px; border-bottom:1px solid #f0efe9; }
+  .tmbody { overflow:auto; padding:16px 18px 20px; background:#f7f5ef; }
+  .bubble { max-width:82%; margin:0 0 12px; padding:10px 13px; border-radius:14px; font-size:13.5px; line-height:1.6; }
+  .bubble .bh { font-size:11px; color:#8a8a8a; margin-bottom:3px; font-weight:600; }
+  .bubble .bsub { font-weight:700; font-size:12.5px; margin-bottom:5px; color:#333; }
+  .bubble .btext { white-space:pre-wrap; word-break:break-word; color:#222; }
+  .bubble.in  { background:#fff; border:1px solid #ececec; margin-right:auto; border-top-left-radius:4px; }
+  .bubble.out { background:#fbf1d3; border:1px solid #ecd9a6; margin-left:auto; border-top-right-radius:4px; }
+
   /* 언어 전환 */
   .langs { display:inline-flex; gap:3px; border:1px solid #e6e2d6; border-radius:99px; padding:2px; background:#fff; }
   .langbtn { border:0; background:transparent; color:#777; border-radius:99px;
@@ -101,6 +123,7 @@
   <div class="tabs">
     <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
+    <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
   </div>
@@ -131,6 +154,15 @@
     <input id="gpw" type="password" placeholder="비밀번호" autocomplete="current-password"
            onkeydown="if(event.key==='Enter')doLogin()" />
     <button class="btn dark" style="width:100%" onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<!-- 협상 스레드 (관리자가 대화 하나를 열어 본문까지 본다) -->
+<div class="veil" id="threadModal" style="display:none">
+  <div class="tmodal">
+    <div class="tmhead"><span id="threadHead"></span><button class="x" onclick="closeThread()" aria-label="닫기">✕</button></div>
+    <div class="tmnote muted">메일함에서 직접 읽어 옵니다 · 본문은 저장하지 않습니다</div>
+    <div class="tmbody" id="threadBody"></div>
   </div>
 </div>
 
@@ -241,6 +273,7 @@ async function loadAdmin(){
   if(VIEW === "summary") return renderSummary(d);
   if(VIEW === "sent")    return renderSent(d);
   if(VIEW === "blocked") return renderBlocked(d);
+  if(VIEW === "conversations") return renderConversations(d);
   return "";
 }
 
@@ -480,6 +513,74 @@ function renderBlocked(d){
     (rows.length ? "" : '<div class="muted" style="padding:20px 0">중복 시도가 없습니다. 👍</div>');
   return rows.length + "건";
 }
+
+/* ── 대화 (담당자 ↔ 크리에이터 협상) ──
+   회신한 크리에이터만 목차로 띄운다(협상은 회신이 있어야 성립). 한 명을 누르면
+   그 담당자 메일함에서 주고받은 스레드를 본문까지 그때그때 읽어 온다. */
+function renderConversations(d){
+  const rows = d.rows || [];
+  if(!rows.length){
+    $("body").innerHTML = truncNote(d) +
+      '<div class="note"><b>아직 회신 대화가 없습니다.</b><br />' +
+      '담당자별 탭에서 <b>[🔄 메일함에서 동기화]</b> 를 먼저 돌려 회신을 채우세요. ' +
+      '회신한 크리에이터만 여기 대화로 뜹니다.</div>';
+    return "";
+  }
+  let total = 0;
+  $("body").innerHTML = truncNote(d) + rows.map(s => {
+    total += s.creators.length;
+    return '<div class="convgrp"><div class="convby">'+esc(s.byName||s.by)+
+      ' <span class="muted">· 대화 '+s.creators.length+'명</span></div>' +
+      '<div class="scroll"><table><thead><tr>' +
+      '<th>크리에이터</th><th>회신</th><th>발송</th><th>최근</th><th>최근 제목</th>' +
+      '</tr></thead><tbody>' +
+      s.creators.map(c =>
+        '<tr class="convrow" data-staff="'+esc(s.by)+'" data-peer="'+esc(c.email)+'">' +
+        '<td><b>'+esc(c.name||"—")+'</b><div class="muted">'+esc(c.email)+'</div></td>' +
+        '<td class="mono">'+(c.replies||0)+'</td>' +
+        '<td class="mono">'+(c.sent||0)+'</td>' +
+        '<td class="mono muted">'+esc(fmt(c.lastAt))+'</td>' +
+        '<td class="muted">'+esc(c.lastSubject||"")+'</td></tr>'
+      ).join("") +
+      '</tbody></table></div></div>';
+  }).join("");
+  // onclick 을 문자열로 박지 않고 data-* + 위임으로 — 이메일에 따옴표가 섞여도 안전하다
+  [...document.querySelectorAll(".convrow")].forEach(tr =>
+    tr.addEventListener("click", () => openThread(tr.dataset.staff, tr.dataset.peer)));
+  return total + "명과 대화";
+}
+
+async function openThread(staff, peer){
+  $("threadModal").style.display = "flex";
+  $("threadHead").innerHTML = esc(peer);
+  $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">불러오는 중… (메일함을 직접 읽습니다)</div>';
+  try {
+    const d = await fetchJson("/api/thread?staff="+encodeURIComponent(staff)+"&peer="+encodeURIComponent(peer));
+    renderThread(d);
+  } catch(e){
+    $("threadBody").innerHTML = '<div class="err" style="margin:8px">'+esc(String(e.message||e))+'</div>';
+  }
+}
+function renderThread(d){
+  $("threadHead").innerHTML = esc(d.staff||"") + ' <span class="muted">↔</span> ' + esc(d.peer||"");
+  const rows = d.rows || [];
+  if(!rows.length){
+    $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">이 대화의 메일을 찾지 못했습니다. (기간이 2026-07-01 이후인지 확인하세요)</div>';
+    return;
+  }
+  $("threadBody").innerHTML = rows.map(m => {
+    const out = m.direction === "out";
+    return '<div class="bubble '+(out?"out":"in")+'">' +
+      '<div class="bh">'+(out?"담당자":"크리에이터")+' · '+esc(fmt(m.at))+'</div>' +
+      (m.subject ? '<div class="bsub">'+esc(m.subject)+'</div>' : '') +
+      '<div class="btext">'+esc(m.body||"(본문 없음)")+'</div></div>';
+  }).join("");
+  $("threadBody").scrollTop = $("threadBody").scrollHeight;   // 최신 메일이 보이게 맨 아래로
+}
+function closeThread(){ $("threadModal").style.display = "none"; $("threadBody").innerHTML = ""; }
+// 배경(veil) 클릭·ESC 로 닫기
+document.addEventListener("click", e => { if(e.target && e.target.id === "threadModal") closeThread(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread(); });
 
 /* ── 메일함에서 동기화 ──
    담당자별로 ① 보낸편지함 → 발송 이력, ② 받은편지함 → 회신 기록 순으로 채운다.
