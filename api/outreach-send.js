@@ -66,6 +66,21 @@ function logoUrl() {
 // 판정은 auth.js 한 곳에서만 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
 const isAdmin = A.isAdmin;
 
+// 업로드한 제품 이미지(data URL)를 메일 인라인 첨부로 바꾼다.
+// 상품이 TikTok Shop 목록에 없어 이미지 URL 이 없을 때, 링크 대신 파일을 그대로 붙인다.
+// 콤마 뒤가 base64 문자뿐인지 전체를 검사하고 5MB 로 상한을 둔다.
+const INLINE_IMG_CID = "productimg@dalba";
+function parseDataImage(s) {
+  // m[1]=전체 MIME(image/jpeg), m[2]=하위타입(jpeg), m[3]=base64
+  const m = /^data:(image\/(png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=\s]+)$/i.exec(String(s == null ? "" : s).trim());
+  if (!m) return null;
+  const buffer = Buffer.from(m[3].replace(/\s+/g, ""), "base64");
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024) return null;
+  const sub = m[2].toLowerCase();
+  const ext = (sub === "jpg" || sub === "jpeg") ? "jpeg" : sub;
+  return { buffer, contentType: m[1].toLowerCase(), ext };
+}
+
 const MAX_PER_REQUEST = 25;   // Vercel 60s 안에서 안전한 배치 크기 (프론트가 청크로 쪼개 호출)
 
 // 연속 발송 간격 — 네이버웍스는 **분당 60회**를 넘기면 최대 1분간 차단한다.
@@ -188,6 +203,9 @@ module.exports = async (req, res) => {
     if (resolved.error && !dryRun) { res.status(400).json({ error: resolved.error }); return; }
     const account = resolved.account || null;
 
+    // 업로드한 제품 이미지가 있으면 한 번만 디코드해 둔다 (모든 수신자에게 같은 이미지)
+    const inlineImg = parseDataImage(campaign.productImageData);
+
     // 수신자별 데이터: 캠페인 공통값 + 수신자 개별값(개별값 우선)
     // 서명/발신자는 **인증 계정으로 강제** — 네이버웍스는 인증 계정 외 From 을 허용하지 않는다.
     const compose = r => Object.assign({}, campaign, r, {
@@ -195,7 +213,10 @@ module.exports = async (req, res) => {
       senderEmail: account ? account.email : (campaign.senderEmail || ""),
       senderTitle: (account && account.title) || campaign.senderTitle || "",
       // 로고 이미지 주소 — 없으면 템플릿이 텍스트 워드마크로 그린다
-      logoUrl: campaign.logoUrl || logoUrl()
+      logoUrl: campaign.logoUrl || logoUrl(),
+      // 실제 발송에서는 업로드 이미지를 cid 로 참조한다(첨부는 아래에서 붙인다).
+      // dryRun 은 cid 를 안 넣어 템플릿이 data URL 을 그대로 그린다(미리보기).
+      productImageCid: (inlineImg && !dryRun) ? INLINE_IMG_CID : ""
     });
 
     // ─── dryRun: 발송 없이 렌더 결과만 확인 ──────────────────────
@@ -310,7 +331,14 @@ module.exports = async (req, res) => {
           bcc: process.env.NW_BCC || undefined,   // 발송 이력 보관용 사본
           subject: cleanHeader(built.subject),
           text: built.text,
-          html: built.html
+          html: built.html,
+          attachments: inlineImg ? [{
+            filename: "product." + inlineImg.ext,
+            content: inlineImg.buffer,
+            contentType: inlineImg.contentType,
+            cid: INLINE_IMG_CID,               // html 의 src="cid:productimg@dalba" 와 맞물린다
+            contentDisposition: "inline"
+          }] : undefined
         });
         results.push({ to, ok: true, messageId: info.messageId, subject: built.subject });
         H.log({

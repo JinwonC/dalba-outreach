@@ -159,7 +159,7 @@
     if (wantPaid && wantAff && has(d.amount) && has(d.commission)) {
       out += '<tr><td style="padding:12px 4px 0;font:600 13.5px/1.6 ' + FONT + ';color:' + C.text + ';text-align:center;">' +
         // 통화 기호(₩ 등) 대신 코드 표기를 쓴다 — ₩ 의 가로 이중선이 숫자에 취소선처럼 겹쳐 보임
-        "You get <span style=\"color:" + C.gold + ";\">" + esc(money(d.currency, d.amount)) + " up front</span>" +
+        "You get <span style=\"color:" + C.gold + ";\">" + esc(money(d.currency, d.amount)) + " flat</span>" +
         " <span style=\"color:" + C.muted + ";font-weight:400;\">+</span> " +
         "<span style=\"color:" + C.gold + ";\">" + esc(String(d.commission).replace(/[^0-9.]/g, "")) + "% of every sale</span>." +
         "</td></tr>";
@@ -187,11 +187,23 @@
     return sectionLabel("📦", "Campaign details") + infoBox(inner, { align: "left", pad: "20px 24px" });
   }
 
+  // 제품 이미지 주소. 세 가지를 받는다:
+  //   cid:…       서버가 메일에 인라인 첨부한 이미지 (링크 없이 파일로 붙일 때)
+  //   data:image  브라우저 미리보기용 (업로드한 파일을 그 자리서 보여줄 때)
+  //   http(s)     일반 이미지 URL
+  // data URL 은 콤마 뒤가 base64 문자뿐인지 전체를 검사해서 따옴표 주입을 막는다.
+  function productImgSrc(d) {
+    if (has(d.productImageCid)) return "cid:" + String(d.productImageCid).replace(/[^\w.@-]/g, "");
+    const data = String(d.productImageData == null ? "" : d.productImageData).trim();
+    if (data && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(data)) return data.replace(/\s+/g, "");
+    return safeUrl(d.productImage);
+  }
+
   // ─── 제품 소개 ─────────────────────────────────────────────────
   function productBlock(d) {
     if (!has(d.product) && !has(d.productDesc)) return "";
     const url = safeUrl(d.productUrl);
-    const img = safeUrl(d.productImage);
+    const img = productImgSrc(d);
     let inner = "";
 
     if (img) {

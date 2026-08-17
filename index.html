@@ -106,6 +106,10 @@
   .picked img { width:34px; height:34px; object-fit:cover; border-radius:7px; border:1px solid #eee; flex:none; }
   /* 상품명은 JS 로 자르지 않고 CSS 말줄임에 맡긴다 — 단어 중간에서 잘리지 않게 */
   .picked span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .imgup { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:-4px; margin-bottom:6px; }
+  .imgup #imgUpThumb { display:inline-flex; align-items:center; gap:8px; }
+  .imgup #imgUpThumb img { width:44px; height:44px; object-fit:cover; border-radius:7px; border:1px solid #eee; }
+  .imgup .rm { border:none; background:none; color:#c0392b; font-size:12px; cursor:pointer; text-decoration:underline; font-family:inherit; }
   .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; margin-top:14px; }
   .pcard { border:1px solid #ececec; border-radius:12px; padding:10px; cursor:pointer; background:#fff; text-align:left; font-family:inherit; }
   .pcard:hover { border-color:#b78a22; box-shadow:0 3px 12px rgba(183,138,34,.13); }
@@ -323,6 +327,13 @@
         </div>
         <label class="f"><span>제품 이미지 URL <i>— 메일에 그대로 표시됩니다 (https 이미지 직링크)</i></span>
           <input id="productImage" type="text" placeholder="https://.../serum.jpg" /></label>
+        <!-- 상품이 TikTok Shop 목록에 없어 이미지 URL 이 없을 때: 파일을 그대로 첨부한다 -->
+        <div class="imgup">
+          <button type="button" class="btn" id="imgUpBtn">🖼 이미지 파일 첨부</button>
+          <input id="imgUpFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
+          <span class="picked" id="imgUpMsg">URL 이 없으면 파일을 올리세요 — 메일에 그대로 담겨 나갑니다.</span>
+          <span id="imgUpThumb" style="display:none"><img alt="" /><button type="button" class="rm" id="imgUpClear">제거</button></span>
+        </div>
         <label class="f"><span>제품 설명</span>
           <textarea id="productDesc" rows="3" placeholder="A vegan serum with white truffle extract — brightens, hydrates, and absorbs in seconds. Our #1 seller in Korea for 3 years running."></textarea></label>
       </div>
@@ -559,6 +570,7 @@ function setDeal(d){
    상품 선택은 편의 기능일 뿐이라 없어도 나머지는 그대로 동작해야 한다. */
 let PRODUCTS = null;
 let PICKED_PID = "";      // 고른 제품의 TikTok Shop 상품 ID — 매출 상위 영상 조회에 쓴다
+let PRODUCT_IMG_DATA = ""; // 업로드한 제품 이미지 (data URL) — URL 이 없을 때 파일 첨부
 let VIDEOS_READY = false; // 영상 시트가 설정된 배포에서만 버튼을 띄운다
 let VIDEOS_WHY = "";      // 안 되면 그 이유 — 조용히 사라지면 원인을 짚을 수 없다
 
@@ -654,6 +666,7 @@ function choose(i){
   const p = PRODUCTS[i];
   if(!p) return;
   $("product").value = p.title;
+  if(PRODUCT_IMG_DATA) setImgData("");   // 목록에서 고른 상품은 자체 이미지가 있으니 첨부는 비운다
   $("productImage").value = p.image || "";
   // 링크가 비어 있어도 상품 ID 만은 남긴다 — 여기서 pid 를 되찾기 때문
   $("productUrl").value = p.url || (p.id ? "https://shop.tiktok.com/view/product/" + p.id : "");
@@ -878,6 +891,7 @@ function campaign(){
     paymentNote: val("paymentNote"), commissionNote: val("commissionNote"),
     deliverables: val("deliverables"), deadline: val("deadline"), location: val("location"),
     product: val("product"), productUrl: val("productUrl"), productImage: val("productImage"),
+    productImageData: PRODUCT_IMG_DATA,   // 파일을 올렸으면 이걸 우선 사용 (URL 없이 첨부)
     productDesc: val("productDesc"),
     videos: videos(), videosNote: val("videosNote"),
     stepsIntro: val("stepsIntro"),
@@ -893,6 +907,57 @@ function recipients(){
     return r.to ? [r] : [];
   }
   return parseBulk().rows;
+}
+
+/* ── 제품 이미지 파일 첨부 ──
+   상품이 TikTok Shop 목록에 없어 이미지 URL 이 없을 때 파일을 그대로 담아 보낸다.
+   보내기 전에 브라우저에서 최대 1000px 로 줄이고 JPEG 로 다시 인코딩한다 —
+   원본을 그대로 실으면 요청 본문이 수 MB 가 돼 Vercel 한도를 넘고 발송이 느려진다. */
+const IMG_MAX_PX = 1000;
+function loadImageFile(file){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("파일을 읽지 못했습니다"));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("이미지를 열지 못했습니다"));
+      img.onload = () => {
+        const scale = Math.min(1, IMG_MAX_PX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const cx = cv.getContext("2d");
+        cx.fillStyle = "#ffffff"; cx.fillRect(0, 0, w, h);   // 투명 배경은 흰색으로 (JPEG 는 알파가 없다)
+        cx.drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+function paintImgUp(){
+  const has = Boolean(PRODUCT_IMG_DATA);
+  $("imgUpThumb").style.display = has ? "inline-flex" : "none";
+  if(has) $("imgUpThumb").querySelector("img").src = PRODUCT_IMG_DATA;
+  $("imgUpMsg").textContent = has
+    ? "이미지가 첨부됐습니다 — 위 URL 대신 이 파일이 메일에 담깁니다."
+    : "URL 이 없으면 파일을 올리세요 — 메일에 그대로 담겨 나갑니다.";
+  $("productImage").disabled = has;   // 첨부가 우선이므로 URL 칸은 잠근다
+}
+function setImgData(dataUrl){
+  PRODUCT_IMG_DATA = dataUrl || "";
+  try { PRODUCT_IMG_DATA ? localStorage.setItem("outreach_prodimg", PRODUCT_IMG_DATA) : localStorage.removeItem("outreach_prodimg"); } catch(e){}
+  paintImgUp();
+  renderPreview();
+}
+async function onImgFile(e){
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";                 // 같은 파일 다시 골라도 change 가 뜨도록
+  if(!file) return;
+  if(!/^image\//.test(file.type)){ $("imgUpMsg").textContent = "이미지 파일만 올릴 수 있습니다."; return; }
+  $("imgUpMsg").textContent = "이미지 처리 중…";
+  try { setImgData(await loadImageFile(file)); }
+  catch(err){ $("imgUpMsg").innerHTML = '<span style="color:#c0392b">'+esc(String(err.message||err))+'</span>'; }
 }
 
 /* ── 미리보기 ── */
@@ -1184,11 +1249,16 @@ async function boot(){
     }
     loadDraft();
     syncPid();                 // 저장된 제품 링크에서 상품 ID 를 되찾는다
+    try { PRODUCT_IMG_DATA = localStorage.getItem("outreach_prodimg") || ""; } catch(e){}
+    paintImgUp();              // 저장해 둔 첨부 이미지 복원
     setPvWidth(localStorage.getItem("outreach_pvw") || "pc");
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
     $("productUrl").addEventListener("input", syncPid);
     $("currency").addEventListener("change", schedulePreview);
     $("forceSend").addEventListener("change", paintDup);
+    $("imgUpBtn").addEventListener("click", () => $("imgUpFile").click());
+    $("imgUpFile").addEventListener("change", onImgFile);
+    $("imgUpClear").addEventListener("click", () => setImgData(""));
   }
 
   // 아웃리치 현황은 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
