@@ -13,7 +13,7 @@
       "maxDuration": 60
     },
     "api/admin.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/cron.js": {
       "maxDuration": 60

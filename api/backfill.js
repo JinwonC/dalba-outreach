@@ -66,7 +66,7 @@ module.exports = async (req, res) => {
     // 언제부터 가져올지. 기본은 HISTORY_SINCE(없으면 2026-07-01) — 이 도구를 쓰기 전
     // 기간까지 이력에 넣어야 중복 판정과 실적 집계가 그 날부터 맞는다.
     const since = String(body.since || S.SINCE_DEFAULT);
-    const limit = Math.max(1, Math.min(Number(body.limit) || 500, 2000));
+    const limit = Math.max(1, Math.min(Number(body.limit) || 2000, 20000));
     const dryRun = body.dryRun !== false;   // 기본은 미리보기 — 실수로 쓰지 않도록
 
     let read;

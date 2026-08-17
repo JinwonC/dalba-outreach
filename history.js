@@ -30,9 +30,13 @@ const TTL_SEC = Math.round(WINDOW_DAYS * 86400);
 const LOG_KEY = "outreach:log";          // 성공한 발송
 const BLOCK_KEY = "outreach:blocked";    // 중복이라 보류된 시도
 const REPLY_KEY = "outreach:replies";    // 크리에이터에게서 온 회신
-const LOG_MAX = 5000;
-const BLOCK_MAX = 2000;
-const REPLY_MAX = 5000;
+// 팀 전체 이력 보관 상한. 담당자가 10명이면 몇 달치가 쉽게 만 단위를 넘으므로 넉넉히 둔다.
+// 예전 5,000 상한 때문에 그 이상은 오래된 것부터 잘려 나가 집계가 실제보다 적게 잡혔다.
+// 필요하면 환경변수로 더 키울 수 있다. (읽기는 청크로 나눠 큰 리스트도 견딘다)
+const LOG_MAX = Number(process.env.HISTORY_LOG_MAX) || 100000;
+const REPLY_MAX = Number(process.env.HISTORY_REPLY_MAX) || 100000;
+const BLOCK_MAX = Number(process.env.HISTORY_BLOCK_MAX) || 20000;
+const READ_CHUNK = 3000;                 // LRANGE 한 번에 이만큼씩 — 응답이 너무 커지지 않게
 
 function conf() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
@@ -249,11 +253,27 @@ async function logBlocked(rec) {
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
+// 최신 순으로 최대 n 개를 읽는다. 한 번에 다 받으면 리스트가 클 때 응답이 너무 커져
+// Upstash REST 가 버거우므로 READ_CHUNK 씩 끊어 받는다. 실제 리스트 끝에 닿으면 멈춘다.
 async function readList(key, max, n) {
   if (!enabled()) return [];
   const count = Math.max(1, Math.min(Number(n) || 200, max));
-  const out = await cmd(["LRANGE", key, "0", String(count - 1)]);
-  return (out || []).map(parseRec).filter(Boolean);
+  const out = [];
+  for (let start = 0; start < count; start += READ_CHUNK) {
+    const end = Math.min(start + READ_CHUNK, count) - 1;
+    const chunk = await cmd(["LRANGE", key, String(start), String(end)]);
+    if (!chunk || !chunk.length) break;
+    for (const s of chunk) { const r = parseRec(s); if (r) out.push(r); }
+    if (chunk.length < end - start + 1) break;   // 리스트 끝에 도달 — 더 없음
+  }
+  return out;
+}
+
+// 이력 건수만 빠르게 (LLEN — 값을 내려받지 않는다)
+async function count(key) {
+  if (!enabled()) return 0;
+  const n = await cmd(["LLEN", key]);
+  return Number(n) || 0;
 }
 
 function recent(n) { return readList(LOG_KEY, LOG_MAX, n); }
@@ -282,7 +302,8 @@ async function writeRaw(key, val) { if (enabled()) await cmd(["SET", key, String
 
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
-  recordReply, recent, recentBlocked, recentReplies,
+  recordReply, recent, recentBlocked, recentReplies, count,
+  LOG_KEY, BLOCK_KEY, REPLY_KEY,
   normEmail, normHandle,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

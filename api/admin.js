@@ -226,18 +226,26 @@ module.exports = async (req, res) => {
 
     const q = req.query || {};
     const view = String(q.view || "summary");
-    const limit = Math.max(1, Math.min(Number(q.limit) || 500, H.LOG_MAX));
+    const displayLimit = Math.max(1, Math.min(Number(q.limit) || 1000, H.LOG_MAX));
     const days = Number(q.days) || 0;
     const needle = String(q.q || "").trim().toLowerCase();
     const by = String(q.by || "").trim().toLowerCase();
 
+    // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
+    // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
+    const countView = view === "summary" || view === "daily" || view === "people";
+    const readN = countView ? H.LOG_MAX : displayLimit;
+
     let cronStatus = null;
     try { cronStatus = JSON.parse(await H.readRaw("outreach:cron:status")); } catch (_) {}
 
-    const [sentAll, blockedAll, replyAll] = await Promise.all([
-      H.recent(limit),
-      H.recentBlocked(Math.min(limit, H.BLOCK_MAX)),
-      H.recentReplies(Math.min(limit, H.REPLY_MAX))
+    const [sentAll, blockedAll, replyAll, totalSent, totalBlocked, totalReplies] = await Promise.all([
+      H.recent(readN),
+      H.recentBlocked(Math.min(readN, H.BLOCK_MAX)),
+      H.recentReplies(Math.min(readN, H.REPLY_MAX)),
+      H.count(H.LOG_KEY),
+      H.count(H.BLOCK_KEY),
+      H.count(H.REPLY_KEY)
     ]);
 
     const keep = r => withinDays(r, days) && matches(r, needle) &&
@@ -258,8 +266,10 @@ module.exports = async (req, res) => {
       accounts: roster(),
       // 자동 동기화가 언제 돌았는지 — 숫자가 낡았는지 화면에서 바로 알 수 있어야 한다
       cron: cronStatus,
-      // 목록 상한에 걸렸으면 숨기지 않고 알린다 — 전부라고 오해하면 판단이 틀어진다
-      truncated: sentAll.length >= limit
+      // 저장소에 실제로 쌓인 전체 건수 (LLEN — 표시 개수·필터와 무관하게 항상 정확하다)
+      stored: { sent: totalSent, blocked: totalBlocked, replies: totalReplies },
+      // 목록 뷰에서 표시 상한에 걸렸으면 숨기지 않고 알린다 (집계 뷰는 전부 읽으므로 해당 없음)
+      truncated: !countView && sentAll.length >= displayLimit
     };
 
     if (view === "daily") {

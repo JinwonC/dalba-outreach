@@ -52,7 +52,7 @@ async function readSent(account, opts) {
   const needle = String(o.subject || "").trim().toLowerCase();
   const mail = await M.read(account, {
     kind: "sent", since: o.since || SINCE_DEFAULT,
-    limit: Math.max(1, Math.min(Number(o.limit) || 500, 2000))
+    limit: Math.max(1, Math.min(Number(o.limit) || 2000, 20000))
   });
 
   const rows = [];
@@ -106,7 +106,7 @@ async function collectReplies(account, contacted, opts) {
   const o = opts || {};
   const mail = await M.read(account, {
     kind: "inbox", since: o.since || SINCE_DEFAULT,
-    limit: Math.max(1, Math.min(Number(o.limit) || 400, 1000))
+    limit: Math.max(1, Math.min(Number(o.limit) || 2000, 20000))
   });
 
   let found = 0, duplicate = 0;
