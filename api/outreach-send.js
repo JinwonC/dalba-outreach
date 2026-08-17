@@ -38,6 +38,8 @@
 // 저장소가 없으면 이 검사는 통째로 건너뛴다 — 안전장치이지 발송의 전제가 아니다.
 
 const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
 const T = require("../email-template.js");
 const A = require("../auth.js");
 const H = require("../history.js");
@@ -59,6 +61,29 @@ function logoUrl() {
   if (process.env.LOGO_URL) return process.env.LOGO_URL;
   const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
   return host ? "https://" + host + "/logo-black.png" : "";
+}
+
+// ─── 로고를 메일에 인라인으로 박는다 ──────────────────────────────
+// 외부 URL 로 불러오면 배포 보호·리다이렉트·전파 지연 등으로 그 요청이 실패해
+// 로고가 깨져 보일 때가 있다. 제품 이미지처럼 파일을 메일 안에 담으면(cid) 외부 요청이
+// 아예 없어 절대 깨지지 않는다. 파일은 레포 루트의 logo-black.png 다.
+// LOGO_URL 을 명시적으로 지정한 배포는 그 뜻을 존중해 인라인을 쓰지 않는다.
+const LOGO_CID = "dalbalogo@dalba";
+let logoBuf;   // undefined=아직 안 읽음, null=없음, Buffer=성공
+function logoBuffer() {
+  if (logoBuf !== undefined) return logoBuf;
+  if (process.env.LOGO_URL) { logoBuf = null; return logoBuf; }   // 외부 로고를 쓰겠다고 명시함
+  try { logoBuf = fs.readFileSync(path.join(__dirname, "..", "logo-black.png")); }
+  catch (_) { logoBuf = null; }
+  return logoBuf;
+}
+function logoDataUrl() {
+  const b = logoBuffer();
+  return b ? "data:image/png;base64," + b.toString("base64") : "";
+}
+function logoAttachment() {
+  const b = logoBuffer();
+  return b ? { filename: "logo.png", content: b, contentType: "image/png", cid: LOGO_CID, contentDisposition: "inline" } : null;
 }
 
 // 관리자 화면(/admin.html)을 볼 수 있는 사람. 여기서는 버튼 노출 여부만 판단하고,
@@ -177,7 +202,8 @@ module.exports = async (req, res) => {
         bcc: Boolean(process.env.NW_BCC),
         history: { enabled: H.enabled(), windowDays: H.WINDOW_DAYS },
         admin: isAdmin(me),          // 관리자 화면 버튼을 띄울지
-        logoUrl: logoUrl(),   // 미리보기가 실제 발송과 같은 로고를 쓰도록
+        // 미리보기도 외부 요청 없이 로고를 그리도록 data URL 로 준다 (없으면 URL 폴백)
+        logoUrl: logoDataUrl() || logoUrl(),
         me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;
@@ -205,6 +231,18 @@ module.exports = async (req, res) => {
 
     // 업로드한 제품 이미지가 있으면 한 번만 디코드해 둔다 (모든 수신자에게 같은 이미지)
     const inlineImg = parseDataImage(campaign.productImageData);
+    // 로고 파일 — 실제 발송에서는 인라인(cid) 첨부, 미리보기(dryRun)에서는 data URL
+    const logoAtt = dryRun ? null : logoAttachment();
+    // 첨부는 수신자와 무관하게 같으므로 한 번만 만든다 (로고 + 업로드한 제품 이미지)
+    const attachments = [];
+    if (logoAtt) attachments.push(logoAtt);
+    if (inlineImg) attachments.push({
+      filename: "product." + inlineImg.ext,
+      content: inlineImg.buffer,
+      contentType: inlineImg.contentType,
+      cid: INLINE_IMG_CID,               // html 의 src="cid:productimg@dalba" 와 맞물린다
+      contentDisposition: "inline"
+    });
 
     // 수신자별 데이터: 캠페인 공통값 + 수신자 개별값(개별값 우선)
     // 서명/발신자는 **인증 계정으로 강제** — 네이버웍스는 인증 계정 외 From 을 허용하지 않는다.
@@ -212,8 +250,8 @@ module.exports = async (req, res) => {
       senderName: account ? account.name : (campaign.senderName || ""),
       senderEmail: account ? account.email : (campaign.senderEmail || ""),
       senderTitle: (account && account.title) || campaign.senderTitle || "",
-      // 로고 이미지 주소 — 없으면 템플릿이 텍스트 워드마크로 그린다
-      logoUrl: campaign.logoUrl || logoUrl(),
+      // 로고: 실제 발송은 인라인 첨부(cid), 미리보기는 data URL, 둘 다 없으면 외부 URL/텍스트
+      logoUrl: logoAtt ? ("cid:" + LOGO_CID) : (logoDataUrl() || campaign.logoUrl || logoUrl()),
       // 실제 발송에서는 업로드 이미지를 cid 로 참조한다(첨부는 아래에서 붙인다).
       // dryRun 은 cid 를 안 넣어 템플릿이 data URL 을 그대로 그린다(미리보기).
       productImageCid: (inlineImg && !dryRun) ? INLINE_IMG_CID : ""
@@ -332,13 +370,7 @@ module.exports = async (req, res) => {
           subject: cleanHeader(built.subject),
           text: built.text,
           html: built.html,
-          attachments: inlineImg ? [{
-            filename: "product." + inlineImg.ext,
-            content: inlineImg.buffer,
-            contentType: inlineImg.contentType,
-            cid: INLINE_IMG_CID,               // html 의 src="cid:productimg@dalba" 와 맞물린다
-            contentDisposition: "inline"
-          }] : undefined
+          attachments: attachments.length ? attachments : undefined
         });
         results.push({ to, ok: true, messageId: info.messageId, subject: built.subject });
         H.log({

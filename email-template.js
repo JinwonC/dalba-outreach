@@ -84,6 +84,17 @@
   function nl2br(s) { return esc(s).replace(/\r?\n/g, "<br />"); }
   function has(s) { return String(s == null ? "" : s).trim() !== ""; }
 
+  // 이미지 src — http(s) URL, 메일 인라인 첨부(cid:), 미리보기용 data URL 셋 다 받는다.
+  // cid 는 메일 안에 담긴 첨부라 외부 요청이 없어 절대 깨지지 않는다.
+  // data URL 은 콤마 뒤가 base64 문자뿐인지 전체를 검사해 따옴표 주입을 막는다.
+  function mediaSrc(s) {
+    const v = String(s == null ? "" : s).trim();
+    if (!v) return "";
+    if (/^cid:[\w.@-]+$/i.test(v)) return v;
+    if (/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(v)) return v.replace(/\s+/g, "");
+    return safeUrl(v);
+  }
+
   function money(currency, amount) {
     const cur = (currency || "USD").toUpperCase();
     const n = Number(String(amount).replace(/[^0-9.-]/g, ""));
@@ -193,10 +204,8 @@
   //   http(s)     일반 이미지 URL
   // data URL 은 콤마 뒤가 base64 문자뿐인지 전체를 검사해서 따옴표 주입을 막는다.
   function productImgSrc(d) {
-    if (has(d.productImageCid)) return "cid:" + String(d.productImageCid).replace(/[^\w.@-]/g, "");
-    const data = String(d.productImageData == null ? "" : d.productImageData).trim();
-    if (data && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(data)) return data.replace(/\s+/g, "");
-    return safeUrl(d.productImage);
+    if (has(d.productImageCid)) return mediaSrc("cid:" + String(d.productImageCid).replace(/[^\w.@-]/g, ""));
+    return mediaSrc(d.productImageData) || safeUrl(d.productImage);
   }
 
   // ─── 제품 소개 ─────────────────────────────────────────────────
@@ -326,7 +335,7 @@
     // (이미지 로고가 필요하면 logoUrl 에 절대주소를 넣으면 그 이미지로 바뀐다.)
     const SERIF = "Georgia,'Times New Roman','Nanum Myeongjo',serif";
     const isDalba = /d[’']?\s*alba/i.test(brand);
-    const logoUrl = safeUrl(d.logoUrl);
+    const logoUrl = mediaSrc(d.logoUrl);   // cid(메일 인라인)·data·URL 모두 허용
     const wordmark = isDalba
       ? '<div style="font:400 44px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.5px;">d’Alba</div>' +
         '<div style="font:400 12px/1 ' + SERIF + ";color:" + C.ink + ';letter-spacing:.62em;padding:9px 0 0 .62em;">piedmont</div>'
