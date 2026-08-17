@@ -169,12 +169,23 @@ function daily(sent, blocked, replies, tzMin, days) {
 // 담당자 목록은 **등록된 직원 명단(NW_ACCOUNTS)** 에서 시작한다.
 // 발송 기록에서만 뽑으면 아직 이 도구로 안 보낸 사람이 목록에 없고, 그러면
 // 그 사람의 지난 발송을 가져오려 해도 고를 수가 없다 — 순환에 걸린다.
+// 관리자는 감시하는 쪽이지 실적 집계 대상이 아니다. ADMIN_EMAILS 에 있는 사람은
+// 담당자 명단(0건 행·담당자 선택칸)에서 뺀다. 관리자이자 담당자인 사람도 여기서는 제외된다.
 function roster() {
-  return A.parseAccounts().map(a => ({
-    email: a.email,
-    name: a.name || a.email.split("@")[0],
-    title: a.title || ""
-  }));
+  const admins = A.adminEmails();
+  return A.parseAccounts()
+    .filter(a => !admins.includes(String(a.email || "").toLowerCase()))
+    .map(a => ({
+      email: a.email,
+      name: a.name || a.email.split("@")[0],
+      title: a.title || ""
+    }));
+}
+
+// 기록의 담당자(발송자/받은편지함 주인)가 관리자면 모든 뷰에서 뺀다.
+function ownerIsAdmin(r, admins) {
+  return admins.includes(String(r.by || "").toLowerCase()) ||
+         admins.includes(String(r.inbox || "").toLowerCase());
 }
 
 function summarize(sent, blocked, replies) {
@@ -282,7 +293,10 @@ module.exports = async (req, res) => {
       H.count(H.REPLY_KEY)
     ]);
 
+    // 관리자 본인의 발송·회신·시도는 집계에서 뺀다 (감시하는 쪽이라 대상이 아니다)
+    const admins = A.adminEmails();
     const keep = r => withinDays(r, days) && matches(r, needle) &&
+      !ownerIsAdmin(r, admins) &&
       (!by || String(r.by || "").toLowerCase() === by);
 
     // 저장된 순서에 기대지 않고 항상 시각순으로 정렬한다.
