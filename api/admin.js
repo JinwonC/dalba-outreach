@@ -18,12 +18,8 @@
 const A = require("../auth.js");
 const H = require("../history.js");
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-function isAdmin(user) {
-  return Boolean(user && ADMIN_EMAILS.includes(String(user.email).toLowerCase()));
-}
+// 관리자 판정은 auth.js 한 곳에서만 한다 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
+const isAdmin = A.isAdmin;
 
 // 검색어는 주소·이름·핸들·캠페인·담당자 어디에 걸려도 잡히게 한다.
 // 회신 기록은 상대가 to 가 아니라 from 이므로 그쪽도 함께 본다.
@@ -212,7 +208,7 @@ module.exports = async (req, res) => {
       res.status(501).json({ error: "직원 계정(NW_ACCOUNTS)을 설정해야 관리자 화면을 쓸 수 있습니다" });
       return;
     }
-    if (!ADMIN_EMAILS.length) {
+    if (!A.adminEmails().length) {
       res.status(501).json({ error: "환경변수 ADMIN_EMAILS 에 관리자 이메일을 등록하세요 (예: jinwon.choi@dalba.com)" });
       return;
     }

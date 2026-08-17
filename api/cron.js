@@ -51,8 +51,7 @@ module.exports = async (req, res) => {
 
     // 로그인한 관리자가 브라우저로 상태를 확인하는 것도 허용한다
     const me = A.enabled() ? A.currentUser(req) : null;
-    const admins = (process.env.ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-    const byAdmin = Boolean(me && admins.includes(String(me.email).toLowerCase()));
+    const byAdmin = A.isAdmin(me);
 
     if (!authorized(req) && !byAdmin) {
       res.status(401).json({ error: "unauthorized" });

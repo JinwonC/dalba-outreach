@@ -56,7 +56,7 @@ dalba-outreach/
 | `HISTORY_DAYS` | 선택 | 재발송 차단 기간, 기본 `90` 일 |
 | `HISTORY_SINCE` | 선택 | 메일함에서 이력을 채울 시작일, 기본 `2026-07-01` |
 | `CRON_SECRET` | **권장** | 자동 동기화(`/api/cron`)를 아무나 못 부르게 하는 비밀값. Vercel 이 자동으로 헤더에 실어 보낸다 |
-| `ADMIN_EMAILS` | 선택 | 관리자 화면을 볼 수 있는 이메일, 콤마 구분. 비우면 **아무도 관리자가 아니다** |
+| `ADMIN_EMAILS` | 선택 | 관리자 화면을 볼 수 있는 이메일 **여러 명**. 콤마·세미콜론·공백·줄바꿈 아무거로 구분해도 된다. 비우면 **아무도 관리자가 아니다** |
 | `NW_IMAP_HOST` | 선택 | 기본 `imap.worksmobile.com` |
 | `NW_IMAP_PORT` | 선택 | 기본 `993` (SSL) |
 
@@ -154,8 +154,10 @@ quinn|Qu1nnX7!|Quinn|quinn@dalbausa.com|wxyz 1234 5678 9012|Creator Partnerships
 
 ## 📊 관리자 화면 (`/admin.html`)
 
-`ADMIN_EMAILS` 에 등록된 사람만 볼 수 있다. 발송 화면과 **같은 로그인**을 쓰므로
-두 번 로그인하지 않아도 되고, 관리자에게만 발송 화면 헤더에 바로가기가 뜬다.
+`ADMIN_EMAILS` 에 등록된 사람만 볼 수 있다 — **여러 명**을 콤마·세미콜론·공백·줄바꿈
+아무거로 구분해 넣으면 된다 (예: `jinwon.choi@dalba.com, dohyeon.kim@dalba.com`).
+발송 화면과 **같은 로그인**을 쓰므로 두 번 로그인하지 않아도 되고,
+관리자에게만 발송 화면 헤더에 바로가기가 뜬다.
 
 | 탭 | 보이는 것 |
 |---|---|

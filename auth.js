@@ -153,8 +153,26 @@ function publicUser(a) {
   return a ? { id: a.id, name: a.name || a.email.split("@")[0], email: a.email, title: a.title } : null;
 }
 
+// ─── 관리자 목록 ─────────────────────────────────────────────────
+// ADMIN_EMAILS 에 적힌 사람만 관리자 화면을 볼 수 있다. 비워 두면 아무도 아니다.
+// 구분자는 콤마·세미콜론·공백·줄바꿈 아무거나 된다 — 콤마로만 나누면 "a@x.com b@y.com"
+// 처럼 공백으로 넣었을 때 통째로 한 주소로 잡혀 아무도 관리자가 안 되는 사고가 난다.
+// @ 가 있는 토큰만 남겨, 이름 등 실수로 섞인 값이 주소로 오인되지 않게 한다.
+function adminEmails() {
+  return String(process.env.ADMIN_EMAILS || "")
+    .split(/[\s,;]+/)
+    .map(s => s.trim().toLowerCase())
+    .filter(s => s.includes("@"));
+}
+
+function isAdmin(user) {
+  const email = user && String(user.email || "").toLowerCase();
+  return Boolean(email && adminEmails().includes(email));
+}
+
 module.exports = {
   enabled, parseAccounts, findByLogin, findByEmail,
   makeToken, verifyToken, tokenFrom, currentUser, publicUser,
+  adminEmails, isAdmin,
   SESSION_DAYS
 };

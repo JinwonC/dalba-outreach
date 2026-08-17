@@ -63,9 +63,8 @@ function logoUrl() {
 
 // 관리자 화면(/admin.html)을 볼 수 있는 사람. 여기서는 버튼 노출 여부만 판단하고,
 // 실제 권한 검사는 api/admin.js 가 다시 한다 — 화면을 숨기는 건 보호가 아니다.
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-function isAdmin(u) { return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase())); }
+// 판정은 auth.js 한 곳에서만 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
+const isAdmin = A.isAdmin;
 
 const MAX_PER_REQUEST = 25;   // Vercel 60s 안에서 안전한 배치 크기 (프론트가 청크로 쪼개 호출)
 

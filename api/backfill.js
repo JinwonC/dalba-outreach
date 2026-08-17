@@ -23,10 +23,8 @@ const A = require("../auth.js");
 const H = require("../history.js");
 const S = require("../sync.js");   // 메일함 → 이력 변환은 여기 한 곳에만 있다
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-function isAdmin(u) { return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase())); }
+// 관리자 판정은 auth.js 한 곳에서만 한다 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
+const isAdmin = A.isAdmin;
 
 function readBody(req) {
   const b = req.body;

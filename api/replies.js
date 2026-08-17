@@ -24,10 +24,8 @@ const S = require("../sync.js");
 // 회신도 발송 이력과 같은 날부터 본다 — 기준이 다르면 회신율이 말이 안 된다
 
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-function isAdmin(u) { return Boolean(u && ADMIN_EMAILS.includes(String(u.email).toLowerCase())); }
+// 관리자 판정은 auth.js 한 곳에서만 한다 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
+const isAdmin = A.isAdmin;
 
 function readBody(req) {
   const b = req.body;
