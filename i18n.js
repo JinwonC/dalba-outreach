@@ -133,6 +133,12 @@
       "아래 공통 조건보다 우선": "overrides the shared settings below",
       "이미 잘 나가고 있다는 증거가 수락률을 가장 크게 올립니다. 링크만 넣어도 되고, 라벨(조회수 등)을 같이 넣으면 더 좋아요.":
         "Proof it is already performing lifts acceptance the most. A link alone works; adding a label (view count) is better.",
+      "인하우스 팀이 전달한 영상을 넣으세요. 링크만 넣어도 되고, 라벨(조회수 등)을 같이 넣으면 더 좋아요.":
+        "Add the videos the in-house team sent you. A link alone works; adding a label (view count) is better.",
+      "⚠️ 영상은 d'Alba 인하우스 팀이 선정해 전달합니다.":
+        "⚠️ Videos are selected and provided by the d'Alba in-house team.",
+      "전달받은 영상만 넣고, 임의로 아무거나 고르지 마세요.":
+        "Only use the videos you were given — do not pick arbitrary ones.",
       "번호 칸을 비우면 그 줄은 메일에서 빠집니다. 필요하면 단가·배송지 같은 항목을 추가하세요.":
         "Leave a numbered field empty to drop that line. Add items like rate or shipping address if needed.",
 
@@ -305,9 +311,9 @@
       "로 2026-07-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
         "on the By-staff screen to fill sends and replies from 2026-07-01 onward.",
       "먼저 위에서 제품을 고르세요.": "Pick a product above first.",
-      "이 제품의 매출 있는 영상이 시트에 없습니다.": "No videos with sales for this product in the sheet.",
+      "이 제품의 영상이 시트에 없습니다.": "No videos for this product in the sheet.",
       "영상 칸 3개가 다 찼습니다. 하나를 비우고 다시 고르세요.": "All 3 video slots are full. Clear one and pick again.",
-      "📈 매출 상위 영상 불러오기": "📈 Load top-selling videos",
+      "📈 영상 불러오기": "📈 Load videos",
       "· 매출순": "· by sales",
       "넣음": "added",
       "명 인식 ·": "recognized ·",
@@ -421,6 +427,12 @@
       "아래 공통 조건보다 우선": "ưu tiên hơn cài đặt chung bên dưới",
       "이미 잘 나가고 있다는 증거가 수락률을 가장 크게 올립니다. 링크만 넣어도 되고, 라벨(조회수 등)을 같이 넣으면 더 좋아요.":
         "Bằng chứng sản phẩm đang bán tốt giúp tăng tỷ lệ đồng ý nhiều nhất. Chỉ cần link là được, thêm nhãn (lượt xem) thì tốt hơn.",
+      "인하우스 팀이 전달한 영상을 넣으세요. 링크만 넣어도 되고, 라벨(조회수 등)을 같이 넣으면 더 좋아요.":
+        "Hãy dùng video do nhóm nội bộ gửi cho bạn. Chỉ cần link là được, thêm nhãn (lượt xem) thì tốt hơn.",
+      "⚠️ 영상은 d'Alba 인하우스 팀이 선정해 전달합니다.":
+        "⚠️ Video do nhóm nội bộ d'Alba chọn và cung cấp.",
+      "전달받은 영상만 넣고, 임의로 아무거나 고르지 마세요.":
+        "Chỉ dùng video được cung cấp — đừng tự ý chọn video bất kỳ.",
       "번호 칸을 비우면 그 줄은 메일에서 빠집니다. 필요하면 단가·배송지 같은 항목을 추가하세요.":
         "Để trống ô số thì dòng đó bị bỏ khỏi email. Có thể thêm mục như đơn giá hay địa chỉ giao hàng.",
 
@@ -589,9 +601,9 @@
       "로 2026-07-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
         "ở màn hình Theo nhân viên để điền dữ liệu từ 2026-07-01 trở đi.",
       "먼저 위에서 제품을 고르세요.": "Hãy chọn sản phẩm ở trên trước.",
-      "이 제품의 매출 있는 영상이 시트에 없습니다.": "Không có video có doanh thu cho sản phẩm này trong sheet.",
+      "이 제품의 영상이 시트에 없습니다.": "Không có video cho sản phẩm này trong sheet.",
       "영상 칸 3개가 다 찼습니다. 하나를 비우고 다시 고르세요.": "Đã đầy 3 ô video. Hãy xóa bớt rồi chọn lại.",
-      "📈 매출 상위 영상 불러오기": "📈 Tải video bán chạy nhất",
+      "📈 영상 불러오기": "📈 Tải video",
       "· 매출순": "· theo doanh thu",
       "넣음": "đã thêm",
       "명 인식 ·": "được nhận diện ·",
