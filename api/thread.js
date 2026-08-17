@@ -7,13 +7,12 @@
 //
 // ─── 프라이버시 · 스코프 ─────────────────────────────────────────
 //   · 관리자(ADMIN_EMAILS)만. 그 외에는 남의 메일함을 이 경로로도 못 본다.
-//   · peer 는 그 담당자에게 **실제로 회신한 크리에이터**여야 한다(아웃리치 대화만).
-//     이 검증이 없으면 관리자가 임의 주소로 담당자 메일함을 뒤질 수 있다.
+//   · 담당자 계정은 크리에이터 아웃리치 전용이라 개인·사내 메일이 없다 —
+//     그래서 peer 를 회신 기록으로 재검증하지 않는다(정당한 대화를 막곤 했다).
 //   · 본문은 **저장하지 않는다** — 열 때만 그때그때 IMAP 으로 받아 보여준다.
 //   · 스레드는 그 담당자와 그 한 명(peer) 사이 메일만 받는다. 받은편지함 전체가 아니다.
 
 const A = require("../auth.js");
-const H = require("../history.js");
 const M = require("../mail.js");
 const S = require("../sync.js");
 
@@ -35,19 +34,10 @@ module.exports = async (req, res) => {
     const account = A.findByEmail(staffEmail);
     if (!account) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + staffEmail }); return; }
 
-    // ── 아웃리치 대화만 ── peer 가 이 담당자에게 회신한 크리에이터인지 확인한다.
-    // 회신 기록은 발송보다 훨씬 적어 검증이 가볍고, 협상은 회신이 있어야 성립한다.
-    if (H.enabled()) {
-      const mine = e => H.normEmail(e) === H.normEmail(staffEmail);
-      const target = H.normEmail(peer);
-      const replies = await H.recentReplies(H.REPLY_MAX);
-      const ok = replies.some(r => (mine(r.by) || mine(r.inbox)) && H.normEmail(r.from) === target);
-      if (!ok) {
-        res.status(403).json({ error: "이 담당자에게 회신한 크리에이터가 아닙니다 (아웃리치 대화만 볼 수 있습니다)" });
-        return;
-      }
-    }
-
+    // 담당자 계정은 크리에이터 아웃리치 전용이라 개인·사내 메일이 없다 — 그래서 peer 를
+    // 회신 기록으로 재검증하지 않는다(그 검증이 회신 주소가 미묘하게 다를 때 정당한 대화를
+    // 막곤 했다). 접근 통제는 위의 **관리자 전용** 잠금이 담당한다. 스레드는 그래도 그
+    // 한 명(peer)과의 메일만 받는다 — 받은편지함 전체를 쏟아내지 않는다.
     const thread = await M.readThread(account, {
       peer,
       since: q.since || S.SINCE_DEFAULT,
