@@ -1206,7 +1206,9 @@ function paintResults(results, total, final){
       '</tbody></table></div>';
   }
   if(held.length && final){
-    h += '<div class="muted" style="margin-top:10px">보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.</div>' +
+    h += '<div class="muted" style="margin-top:10px">' + (CFG.admin
+        ? '보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.'
+        : '이미 발송된 주소라 보류되었습니다. 중복 발송은 관리자만 할 수 있고, 이 시도는 관리자 페이지에 남습니다.') + '</div>' +
       '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
       held.map(b => '<tr><td>'+esc(b.to)+'</td><td>'+esc(priorText(b.prior) || b.error || "")+'</td></tr>').join("") +
       '</tbody></table></div>';
@@ -1266,17 +1268,19 @@ async function boot(){
     $("imgUpClear").addEventListener("click", () => setImgData(""));
   }
 
-  // 아웃리치 현황은 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
+  // 관리자 페이지는 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
   // (로그인 뒤에도 갱신돼야 하므로 최초 1회 블록 밖에 둔다)
   $("adminNav").innerHTML = CFG.admin
-    ? ' <a class="btn" href="/admin.html">📊 아웃리치 현황</a>' : "";
+    ? ' <a class="btn" href="/admin.html">📊 관리자 페이지</a>' : "";
 
-  // 이력 저장소가 붙어 있을 때만 중복 확인·강제 발송이 의미가 있다
-  if(CFG.history && CFG.history.enabled){
+  // 강제 발송(중복 무시)은 관리자만 할 수 있다. 그 외 담당자에게는 체크박스를 아예 안 띄우고,
+  // 중복은 자동 보류돼 관리자 페이지에 남는다. (서버도 관리자가 아니면 force 를 무시한다)
+  if(CFG.history && CFG.history.enabled && CFG.admin){
     $("forceWrap").style.display = "flex";
     $("forceWrap").title = CFG.history.windowDays + "일 안에 이미 보낸 주소는 자동 보류됩니다";
   } else {
     $("forceWrap").style.display = "none";
+    if($("forceSend").checked) $("forceSend").checked = false;   // 혹시 남아 있던 체크 해제
   }
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.

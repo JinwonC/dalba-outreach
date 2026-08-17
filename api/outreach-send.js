@@ -215,7 +215,10 @@ module.exports = async (req, res) => {
     const campaign = body.campaign || {};
     const recipients = Array.isArray(body.recipients) ? body.recipients : [];
     const dryRun = Boolean(body.dryRun);
-    const force = Boolean(body.force);   // 이미 보낸 사람도 보내겠다고 담당자가 명시한 경우
+    // 강제 발송(중복 무시)은 **관리자만** 할 수 있다. 관리자가 아니면 요청에 force 가 실려
+    // 와도 무시한다 — 화면에서 체크박스를 숨기는 것만으로는 보호가 아니다(서버가 막아야 한다).
+    const me = A.enabled() ? A.currentUser(req) : null;
+    const force = Boolean(body.force) && isAdmin(me);
 
     if (!recipients.length) { res.status(400).json({ error: "recipients 가 비어 있습니다" }); return; }
     if (recipients.length > MAX_PER_REQUEST) {

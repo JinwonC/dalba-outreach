@@ -54,8 +54,8 @@
       "크리에이터 아웃리치 발송": "Creator Outreach",
       "핸들 · 금액 · 제품만 넣으면 브랜드 메일이 완성돼 네이버웍스로 바로 나갑니다":
         "Enter handle, amount and product — the branded email is built and sent via Naver Works.",
-      "📊 아웃리치 현황": "📊 Outreach Dashboard",
-      "아웃리치 현황 · 관리자": "Outreach Dashboard · Admin",
+      "📊 관리자 페이지": "📊 Admin Page",
+      "관리자 페이지": "Admin Page",
       "✉️ 발송 화면": "✉️ Send",
       "✉️ 내 발신 계정": "✉️ My sender account",
       "관리자": "Admin",
@@ -254,6 +254,8 @@
       "⚠️ 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Force-sending even to people already contacted.",
       "보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.":
         "Held recipients — turn on [force send] and press again to send anyway.",
+      "이미 발송된 주소라 보류되었습니다. 중복 발송은 관리자만 할 수 있고, 이 시도는 관리자 페이지에 남습니다.":
+        "Held — this address was already contacted. Only admins can send duplicates, and this attempt is logged on the admin page.",
       "에서": "→",
       "에게 보냅니다.": "recipient(s).",
       "⏸ 보류": "⏸ Held",
@@ -348,8 +350,8 @@
       "크리에이터 아웃리치 발송": "Gửi thư mời Creator",
       "핸들 · 금액 · 제품만 넣으면 브랜드 메일이 완성돼 네이버웍스로 바로 나갑니다":
         "Chỉ cần nhập handle, số tiền và sản phẩm — email thương hiệu sẽ được tạo và gửi qua Naver Works.",
-      "📊 아웃리치 현황": "📊 Bảng theo dõi",
-      "아웃리치 현황 · 관리자": "Bảng theo dõi · Quản trị",
+      "📊 관리자 페이지": "📊 Trang quản trị",
+      "관리자 페이지": "Trang quản trị",
       "✉️ 발송 화면": "✉️ Gửi thư",
       "✉️ 내 발신 계정": "✉️ Tài khoản gửi của tôi",
       "관리자": "Quản trị",
@@ -548,6 +550,8 @@
       "⚠️ 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Gửi cưỡng chế cả cho người đã liên hệ.",
       "보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.":
         "Người nhận bị giữ — bật [gửi cưỡng chế] rồi bấm lại nếu vẫn muốn gửi.",
+      "이미 발송된 주소라 보류되었습니다. 중복 발송은 관리자만 할 수 있고, 이 시도는 관리자 페이지에 남습니다.":
+        "Đã giữ — địa chỉ này đã được liên hệ. Chỉ quản trị viên mới gửi trùng được, và lần thử này được ghi lại ở trang quản trị.",
       "에서": "→",
       "에게 보냅니다.": "người nhận.",
       "⏸ 보류": "⏸ Giữ lại",
