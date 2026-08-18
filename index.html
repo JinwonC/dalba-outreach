@@ -282,6 +282,8 @@
           <textarea id="pitch" rows="2" placeholder="We're looking for creators to introduce our best-selling serum to the US audience."></textarea></label>
         <label class="f"><span>메일 제목 <i>— {{name}} {{brand}} {{campaign}} {{amount}} {{commission}} 사용 가능</i></span>
           <input id="subject" type="text" /></label>
+        <label class="f"><span>참조 (CC) <i>— 선택 · 모든 발송에 함께 참조됩니다. 쉼표로 여러 명</i></span>
+          <input id="cc" type="text" placeholder="manager@dalba.com, partnerships@dalba.com" /></label>
       </div>
 
       <!-- 협업 조건 -->
@@ -410,6 +412,7 @@
           <div class="l">제목</div>
           <div class="v" id="pvSubject">—</div>
           <div class="to" id="pvTo"></div>
+          <div class="to" id="pvCc" style="display:none"></div>
         </div>
 
         <!-- 폰에서 어떻게 보이는지 보내기 전에 확인할 수 있게 -->
@@ -441,7 +444,7 @@ let MODE = "single";
 let DEAL = "paid";
 
 /* ── 저장/복원 대상 필드 ── */
-const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","brandIntro","pitch","subject",
+const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","brandIntro","pitch","subject","cc",
   "currency","amount","commission","paymentNote","commissionNote","deliverables","deadline","location",
   "product","productUrl","productImage","productDesc","v1u","v1l","v2u","v2l","v3u","v3l","videosNote",
   "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes","bulkText"];
@@ -891,7 +894,7 @@ function campaign(){
   const a = acct() || {};
   return {
     brand: val("brand"), campaignTitle: val("campaignTitle"), brandIntro: val("brandIntro"),
-    pitch: val("pitch"), subject: val("subject"),
+    pitch: val("pitch"), subject: val("subject"), cc: val("cc"),
     dealType: DEAL, currency: val("currency"), amount: val("amount"), commission: val("commission"),
     paymentNote: val("paymentNote"), commissionNote: val("commissionNote"),
     deliverables: val("deliverables"), deadline: val("deadline"), location: val("location"),
@@ -996,6 +999,9 @@ function renderPreview(){
   $("pvTo").textContent = list.length
     ? (MODE==="bulk" ? "미리보기: " + (sample.to||"") + " · 총 " + list.length + "명" : (sample.to||""))
     : "받는 사람이 아직 없습니다";
+  const ccList = T.parseList(val("cc"));
+  $("pvCc").style.display = ccList.length ? "" : "none";
+  $("pvCc").textContent = ccList.length ? "참조: " + ccList.join(", ") : "";
   $("pv").srcdoc = built.html;
 
   const errs = T.validate(d);

@@ -84,6 +84,17 @@
   function nl2br(s) { return esc(s).replace(/\r?\n/g, "<br />"); }
   function has(s) { return String(s == null ? "" : s).trim() !== ""; }
 
+  // 콤마·세미콜론·공백·줄바꿈으로 구분된 이메일 목록 → 유효한 주소만, 중복 없이.
+  // 참조(CC)를 미리보기와 발송이 똑같이 해석하도록 한 곳에 둔다.
+  function parseList(s) {
+    const out = [];
+    String(s == null ? "" : s).split(/[,;\s]+/).forEach(function (x) {
+      const e = x.trim().toLowerCase();
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && out.indexOf(e) === -1) out.push(e);
+    });
+    return out;
+  }
+
   // 이미지 src — http(s) URL, 메일 인라인 첨부(cid:), 미리보기용 data URL 셋 다 받는다.
   // cid 는 메일 안에 담긴 첨부라 외부 요청이 없어 절대 깨지지 않는다.
   // data URL 은 콤마 뒤가 base64 문자뿐인지 전체를 검사해 따옴표 주입을 막는다.
@@ -569,6 +580,7 @@
     buildSubject: buildSubject,
     validate: validate,
     money: money,
+    parseList: parseList,
     DEFAULT_SUBJECT: DEFAULT_SUBJECT,
     DEFAULT_STEPS_INTRO: DEFAULT_STEPS_INTRO,
     DEFAULT_STEPS: DEFAULT_STEPS,

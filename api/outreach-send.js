@@ -234,6 +234,8 @@ module.exports = async (req, res) => {
 
     // 업로드한 제품 이미지가 있으면 한 번만 디코드해 둔다 (모든 수신자에게 같은 이미지)
     const inlineImg = parseDataImage(campaign.productImageData);
+    // 참조(CC) — 캠페인 공통이라 한 번만 정리한다. 유효한 주소만 남긴다.
+    const ccList = T.parseList(campaign.cc);
     // 로고 파일 — 실제 발송에서는 인라인(cid) 첨부, 미리보기(dryRun)에서는 data URL
     const logoAtt = dryRun ? null : logoAttachment();
     // 첨부는 수신자와 무관하게 같으므로 한 번만 만든다 (로고 + 업로드한 제품 이미지)
@@ -368,6 +370,7 @@ module.exports = async (req, res) => {
         const info = await transporter.sendMail({
           from: { name: cleanHeader(account.name), address: account.email },  // 인증 계정 고정
           to: toName ? { name: toName, address: to } : to,
+          cc: ccList.length ? ccList : undefined,   // 참조 — 담당자가 지정한 공통 참조
           replyTo: account.email,
           bcc: process.env.NW_BCC || undefined,   // 발송 이력 보관용 사본
           subject: cleanHeader(built.subject),
