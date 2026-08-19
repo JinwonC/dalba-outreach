@@ -67,6 +67,7 @@
   .kcard .kh { font-size:11.5px; color:#999; margin-bottom:5px; }
   .kcard .kmeta { font-size:11.5px; color:#6b6b6b; display:flex; gap:8px; flex-wrap:wrap; }
   .kcard .kbadge { background:#fbf1d3; color:#8a6d16; border-radius:6px; padding:0 6px; font-weight:600; }
+  .kcard .krem { background:#fde4cf; color:#b5651d; border-radius:6px; padding:0 6px; font-weight:600; }
   .kcard .ksub { font-size:11.5px; color:#999; margin-top:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .kempty { color:#bbb; font-size:12px; text-align:center; padding:24px 0; }
 
@@ -608,6 +609,8 @@ document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread()
    카드를 누르면 그 크리에이터와의 대화 스레드가 열린다. */
 const PIPE_STAGES = [
   { key:"outreach", label:"첫 발송 · 회신 대기", color:"#9aa0a6" },
+  { key:"remind1",  label:"1차 리마인드 보냄",   color:"#e0a53b" },
+  { key:"remind2",  label:"2차+ 리마인드 보냄",  color:"#d97a2b" },
   { key:"reply1",   label:"1차 회신",           color:"#4f9cf5" },
   { key:"reply2",   label:"2차+ 회신 · 협상",    color:"#158a61" }
 ];
@@ -616,6 +619,7 @@ function pipeCard(c){
     '<div class="knm">'+esc(c.name||c.email)+'</div>' +
     (c.handle ? '<div class="kh">@'+esc(String(c.handle).replace(/^@/,""))+'</div>' : '<div class="kh">'+esc(c.email)+'</div>') +
     '<div class="kmeta"><span class="kbadge">회신 '+(c.replies||0)+'</span><span>발송 '+(c.sends||0)+'</span>'+
+      (c.reminds ? '<span class="krem">리마인드 '+c.reminds+'</span>' : '')+
       '<span class="muted">'+esc(fmt(c.lastAt))+'</span></div>' +
     (c.lastSubject ? '<div class="ksub">'+esc(c.lastSubject)+'</div>'
       : (c.campaign ? '<div class="ksub">'+esc(c.campaign)+'</div>' : '')) +
