@@ -58,6 +58,8 @@
       "관리자 페이지": "Admin Page",
       "💬 대화": "💬 Conversations",
       "🗂 내 파이프라인": "🗂 My pipeline",
+      "✉️ 발송": "✉️ Send",
+      "🗂 Mail Pipeline": "🗂 Mail Pipeline",
       "첫 발송 · 회신 대기": "First outreach · awaiting reply",
       "1차 리마인드 보냄": "1st reminder sent",
       "2차+ 리마인드 보냄": "2nd+ reminder sent",
@@ -72,6 +74,7 @@
       "닫기": "Close",
       "지우기": "Clear",
       "새로고침": "Refresh",
+      "🔄 새로고침": "🔄 Refresh",
       "선택": "optional",
 
       // ── 발송 폼 ──
@@ -369,6 +372,8 @@
       "관리자 페이지": "Trang quản trị",
       "💬 대화": "💬 Hội thoại",
       "🗂 내 파이프라인": "🗂 Pipeline của tôi",
+      "✉️ 발송": "✉️ Gửi thư",
+      "🗂 Mail Pipeline": "🗂 Mail Pipeline",
       "첫 발송 · 회신 대기": "Gửi lần đầu · chờ trả lời",
       "1차 리마인드 보냄": "Đã gửi nhắc lần 1",
       "2차+ 리마인드 보냄": "Đã gửi nhắc lần 2+",
@@ -383,6 +388,7 @@
       "닫기": "Đóng",
       "지우기": "Xóa",
       "새로고침": "Tải lại",
+      "🔄 새로고침": "🔄 Tải lại",
       "선택": "tùy chọn",
 
       // ── Biểu mẫu ──

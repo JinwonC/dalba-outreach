@@ -17,6 +17,7 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
+const { groupPipeline } = require("../pipeline-lib.js");
 
 // 관리자 판정은 auth.js 한 곳에서만 한다 (콤마·세미콜론·공백·줄바꿈 구분 모두 허용)
 const isAdmin = A.isAdmin;
@@ -108,45 +109,7 @@ function conversations(sent, replies) {
     .sort((a, b) => b.creators.length - a.creators.length);
 }
 
-// 개인 파이프라인 — 한 담당자가 접촉한 크리에이터를 단계별로 나눈다.
-//   첫 발송(회신 대기) · 1차 리마인드 보냄 · 2차+ 리마인드 보냄 · 1차 회신 · 2차+ 회신(협상)
-// 회신이 있으면 회신 단계로, 없으면 보낸 리마인드 횟수로 단계를 매긴다.
-// (리마인드는 회신 없는 사람에게만 나가므로 리마인드 단계는 "회신 대기" 를 세분한 것이다.)
-function pipeline(sent, replies, reminders) {
-  const c = new Map();
-  const get = (email, name, handle) => {
-    const k = H.normEmail(email);
-    if (!c.has(k)) c.set(k, { email: email, name: name || "", handle: handle || "", sends: 0, replies: 0, reminds: 0, lastAt: "", lastSubject: "", campaign: "" });
-    const x = c.get(k);
-    if (name && !x.name) x.name = name;
-    if (handle && !x.handle) x.handle = handle;
-    return x;
-  };
-  sent.forEach(r => {
-    const x = get(r.to, r.name, r.handle);
-    x.sends++;
-    if (String(r.at || "") > String(x.lastAt || "")) { x.lastAt = r.at || ""; x.campaign = r.campaign || x.campaign; }
-  });
-  replies.forEach(r => {
-    const x = get(r.from, r.fromName, "");
-    x.replies++;
-    if (String(r.at || "") > String(x.lastAt || "")) { x.lastAt = r.at || ""; x.lastSubject = r.subject || x.lastSubject; }
-  });
-  // 리마인드 로그 — 한 크리에이터에게 몇 번째 리마인드까지 나갔는지(n 의 최댓값)
-  (reminders || []).forEach(r => {
-    const x = get(r.to, r.name, r.handle);
-    x.reminds = Math.max(x.reminds || 0, Number(r.n) || 0);
-    if (String(r.at || "") > String(x.lastAt || "")) x.lastAt = r.at || "";
-  });
-  const stageOf = x =>
-    x.replies >= 2 ? "reply2" :
-    x.replies === 1 ? "reply1" :
-    x.reminds >= 2 ? "remind2" :
-    x.reminds === 1 ? "remind1" : "outreach";
-  return [...c.values()]
-    .map(x => Object.assign(x, { stage: stageOf(x) }))
-    .sort((a, b) => String(b.lastAt || "").localeCompare(String(a.lastAt || "")));
-}
+// 개인 파이프라인 집계는 pipeline-lib.js 로 옮겼다 (발송 화면 api/pipeline.js 와 공유).
 
 // 하루 단위 집계.
 //
@@ -388,7 +351,7 @@ module.exports = async (req, res) => {
       // 보낸 리마인드 로그 — 이 사람이 보낸 것만
       const remLog = await H.recentReminders(H.LOG_MAX);
       const mineRem = remLog.filter(r => win(r) && String(r.by || "").toLowerCase() === target);
-      res.status(200).json(Object.assign(base, { rows: pipeline(mineSent, mineReplies, mineRem), pipelineOf: target }));
+      res.status(200).json(Object.assign(base, { rows: groupPipeline(mineSent, mineReplies, mineRem), pipelineOf: target }));
       return;
     }
 

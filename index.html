@@ -48,6 +48,43 @@
   .tab { border:1px solid #e2e2de; background:#fff; color:#444; border-radius:999px; padding:6px 16px; cursor:pointer; font-size:12.5px; }
   .tab.active { background:#1d1d1f; color:#fff; border-color:#1d1d1f; }
 
+  /* 화면 전환 탭 (발송 / Mail Pipeline) — 좌측 상단 */
+  .viewtabs { display:flex; gap:6px; margin:16px 0 0; flex-wrap:wrap; }
+  .vtab { border:1px solid #e2e2de; background:#fff; color:#555; border-radius:10px; padding:8px 18px;
+          cursor:pointer; font:600 13px/1.3 inherit; display:inline-flex; align-items:center; gap:7px; }
+  .vtab.active { background:#B78A22; color:#fff; border-color:#B78A22; }
+
+  /* 파이프라인 (칸반) — admin.html 과 같은 모양 */
+  .kan { display:flex; gap:14px; overflow-x:auto; padding-bottom:8px; align-items:flex-start; }
+  .kcol { flex:0 0 300px; background:#f7f5ef; border:1px solid #ece8dc; border-radius:14px; padding:10px; }
+  .khead { display:flex; align-items:center; gap:8px; font:700 13px/1.4 inherit; padding:4px 6px 10px; }
+  .kdot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .kcount { margin-left:auto; background:#fff; border:1px solid #e6e2d6; border-radius:99px; padding:1px 9px; font-size:12px; color:#666; }
+  .klist { display:flex; flex-direction:column; gap:9px; max-height:calc(100vh - 240px); overflow-y:auto; }
+  .kcard { background:#fff; border:1px solid #ececec; border-radius:11px; padding:11px 12px; cursor:pointer; }
+  .kcard:hover { border-color:#b78a22; box-shadow:0 3px 12px rgba(183,138,34,.12); }
+  .kcard .knm { font:700 13px/1.35 inherit; color:#1d1d1f; }
+  .kcard .kh { font-size:11.5px; color:#999; margin-bottom:5px; }
+  .kcard .kmeta { font-size:11.5px; color:#6b6b6b; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .kcard .kbadge { background:#fbf1d3; color:#8a6d16; border-radius:6px; padding:0 6px; font-weight:600; }
+  .kcard .krem { background:#fde4cf; color:#b5651d; border-radius:6px; padding:0 6px; font-weight:600; }
+  .kcard .ksub { font-size:11.5px; color:#999; margin-top:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kempty { color:#bbb; font-size:12px; text-align:center; padding:24px 0; }
+
+  /* 협상 스레드 모달 */
+  .tmodal { background:#fff; border-radius:16px; width:100%; max-width:720px; max-height:86vh;
+            display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); overflow:hidden; }
+  .tmhead { display:flex; align-items:center; gap:10px; padding:16px 18px 6px; font:700 15px/1.4 inherit; }
+  .tmhead .x { margin-left:auto; border:0; background:none; font-size:18px; color:#999; cursor:pointer; }
+  .tmnote { padding:0 18px 12px; font-size:11.5px; color:#999; border-bottom:1px solid #f0efe9; }
+  .tmbody { overflow:auto; padding:16px 18px 20px; background:#f7f5ef; }
+  .bubble { max-width:82%; margin:0 0 12px; padding:10px 13px; border-radius:14px; font-size:13.5px; line-height:1.6; }
+  .bubble .bh { font-size:11px; color:#8a8a8a; margin-bottom:3px; font-weight:600; }
+  .bubble .bsub { font-weight:700; font-size:12.5px; margin-bottom:5px; color:#333; }
+  .bubble .btext { white-space:pre-wrap; word-break:break-word; color:#222; }
+  .bubble.in  { background:#fff; border:1px solid #ececec; margin-right:auto; border-top-left-radius:4px; }
+  .bubble.out { background:#fbf1d3; border:1px solid #ecd9a6; margin-left:auto; border-top-right-radius:4px; }
+
   label.f { display:block; margin-bottom:13px; }
   label.f > span { display:block; font-size:11.5px; color:#888; font-weight:600; margin-bottom:5px; }
   label.f > span em { font-style:normal; color:#c0392b; }
@@ -236,6 +273,13 @@
     </div>
   </div>
 
+  <!-- 화면 전환 — 발송 / Mail Pipeline. 파이프라인은 로그인 + 이력 저장소가 있을 때만 뜬다 -->
+  <div class="viewtabs" id="viewTabs" style="display:none">
+    <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
+    <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')">🗂 Mail Pipeline</div>
+  </div>
+
+  <div id="sendView">
   <div class="tabs">
     <div class="tab active" id="tabSingle" onclick="setMode('single')">1명에게 보내기</div>
     <div class="tab" id="tabBulk" onclick="setMode('bulk')">명단으로 여러 명</div>
@@ -437,6 +481,25 @@
         </div>
       </div>
     </div>
+  </div>
+  </div><!-- #sendView -->
+
+  <!-- Mail Pipeline — 로그인한 본인이 접촉한 크리에이터를 단계별로 -->
+  <div id="pipelineView" style="display:none">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 12px">
+      <button class="btn" onclick="loadPipeline()">🔄 새로고침</button>
+      <span class="muted" id="pipeMsg"></span>
+    </div>
+    <div id="pipeBody"></div>
+  </div>
+</div>
+
+<!-- 협상 스레드 모달 (카드 클릭 시) -->
+<div class="veil" id="threadModal" style="display:none">
+  <div class="tmodal">
+    <div class="tmhead"><span id="threadHead"></span><button class="x" onclick="closeThread()">✕</button></div>
+    <div class="tmnote">메일함을 직접 읽어 그때그때 보여줍니다 — 본문은 저장하지 않습니다.</div>
+    <div class="tmbody" id="threadBody"></div>
   </div>
 </div>
 
@@ -1238,6 +1301,123 @@ function paintResults(results, total, final){
   $("sendResult").innerHTML = h;
 }
 
+/* ── Mail Pipeline (발송 화면 내 개인 칸반) ──
+   로그인한 본인이 접촉한 크리에이터를 단계별로 본다: 첫 발송 → 1·2차 리마인드 → 1·2차 회신.
+   /api/pipeline 은 로그인만 필요하고 항상 **본인 것만** 준다. 카드를 누르면 협상 스레드가
+   열리고(자기 메일함이라 권한 문제 없음), 안 열리면 발송 폼에 수신자를 채워 팔로업을 돕는다. */
+let VIEW = "send";
+let PIPE_LOADED = false;
+
+function fmtAt(s){
+  if(!s) return "";
+  const t = Date.parse(s);
+  if(!isFinite(t)) return String(s).slice(0,10);
+  return new Date(t).toISOString().slice(0,10);
+}
+
+function setView(v){
+  VIEW = v;
+  $("vtabSend").classList.toggle("active", v==="send");
+  $("vtabPipeline").classList.toggle("active", v==="pipeline");
+  $("sendView").style.display = v==="send" ? "" : "none";
+  $("pipelineView").style.display = v==="pipeline" ? "" : "none";
+  if(v==="pipeline" && !PIPE_LOADED) loadPipeline();
+}
+
+const PIPE_STAGES = [
+  { key:"outreach", label:"첫 발송 · 회신 대기", color:"#9aa0a6" },
+  { key:"remind1",  label:"1차 리마인드 보냄",   color:"#e0a53b" },
+  { key:"remind2",  label:"2차+ 리마인드 보냄",  color:"#d97a2b" },
+  { key:"reply1",   label:"1차 회신",           color:"#4f9cf5" },
+  { key:"reply2",   label:"2차+ 회신 · 협상",    color:"#158a61" }
+];
+function pipeCard(c){
+  return '<div class="kcard" data-peer="'+esc(c.email)+'" data-name="'+esc(c.name||"")+
+    '" data-handle="'+esc(c.handle||"")+'">' +
+    '<div class="knm">'+esc(c.name||c.email)+'</div>' +
+    (c.handle ? '<div class="kh">@'+esc(String(c.handle).replace(/^@/,""))+'</div>' : '<div class="kh">'+esc(c.email)+'</div>') +
+    '<div class="kmeta"><span class="kbadge">회신 '+(c.replies||0)+'</span><span>발송 '+(c.sends||0)+'</span>'+
+      (c.reminds ? '<span class="krem">리마인드 '+c.reminds+'</span>' : '')+
+      '<span class="muted">'+esc(fmtAt(c.lastAt))+'</span></div>' +
+    (c.lastSubject ? '<div class="ksub">'+esc(c.lastSubject)+'</div>'
+      : (c.campaign ? '<div class="ksub">'+esc(c.campaign)+'</div>' : '')) +
+    '</div>';
+}
+function renderPipe(rows){
+  const bucket = {}; PIPE_STAGES.forEach(s => bucket[s.key] = []);
+  rows.forEach(r => { (bucket[r.stage] || bucket.outreach).push(r); });
+  $("pipeBody").innerHTML =
+    '<div class="kan">' + PIPE_STAGES.map(s => {
+      const list = bucket[s.key];
+      return '<div class="kcol"><div class="khead"><span class="kdot" style="background:'+s.color+'"></span>' +
+        esc(s.label) + '<span class="kcount">'+list.length+'</span></div>' +
+        '<div class="klist">' + (list.length ? list.map(pipeCard).join("") : '<div class="kempty">없음</div>') + '</div></div>';
+    }).join("") + '</div>';
+  [...$("pipeBody").querySelectorAll(".kcard")].forEach(el =>
+    el.addEventListener("click", () => openThread(el.dataset.peer, el.dataset.name, el.dataset.handle)));
+}
+
+async function loadPipeline(){
+  $("pipeMsg").textContent = "불러오는 중…";
+  try {
+    const r = await fetch("/api/pipeline", { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error && !d.rows) throw new Error(d.error);
+    PIPE_LOADED = true;
+    const rows = d.rows || [];
+    if(!rows.length){
+      $("pipeBody").innerHTML = '<div class="hint" style="margin:0">아직 파이프라인에 크리에이터가 없습니다. ' +
+        '메일을 보내고 회신이 잡히면 여기 단계별로 나타납니다.</div>';
+      $("pipeMsg").textContent = "";
+      return;
+    }
+    renderPipe(rows);
+    $("pipeMsg").textContent = rows.length + "명 · 카드를 누르면 대화가 열립니다";
+  } catch(e){
+    $("pipeBody").innerHTML = '<div class="err" style="margin:0">'+esc(String(e.message||e))+'</div>';
+    $("pipeMsg").textContent = "";
+  }
+}
+
+/* 협상 스레드 — 본인 메일함을 그때그때 읽어 보여준다 */
+async function openThread(peer, name, handle){
+  const staff = (acct() && acct().email) || (ME && ME.email) || "";
+  if(!staff){ return; }
+  $("threadModal").style.display = "flex";
+  $("threadHead").innerHTML = esc(name || peer);
+  $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">불러오는 중… (메일함을 직접 읽습니다)</div>';
+  try {
+    const r = await fetch("/api/thread?staff="+encodeURIComponent(staff)+"&peer="+encodeURIComponent(peer),
+      { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ closeThread(); showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    renderThread(d, name);
+  } catch(e){
+    $("threadBody").innerHTML = '<div class="err" style="margin:8px">'+esc(String(e.message||e))+'</div>';
+  }
+}
+function renderThread(d, name){
+  $("threadHead").innerHTML = esc(name || d.peer || "");
+  const rows = d.rows || [];
+  if(!rows.length){
+    $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">이 대화의 메일을 찾지 못했습니다.</div>';
+    return;
+  }
+  $("threadBody").innerHTML = rows.map(m => {
+    const out = m.direction === "out";
+    return '<div class="bubble '+(out?"out":"in")+'">' +
+      '<div class="bh">'+(out?"나":"크리에이터")+' · '+esc(fmtAt(m.at))+'</div>' +
+      (m.subject ? '<div class="bsub">'+esc(m.subject)+'</div>' : '') +
+      '<div class="btext">'+esc(m.body||"(본문 없음)")+'</div></div>';
+  }).join("");
+  $("threadBody").scrollTop = $("threadBody").scrollHeight;
+}
+function closeThread(){ $("threadModal").style.display = "none"; $("threadBody").innerHTML = ""; }
+document.addEventListener("click", e => { if(e.target && e.target.id === "threadModal") closeThread(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape" && $("threadModal").style.display === "flex") closeThread(); });
+
 /* ── 시작 ── */
 // 비밀번호 게이트는 **서버가 401 을 줄 때만** 띄운다.
 // DASHBOARD_PASSWORD 를 설정하지 않은 배포에서 존재하지도 않는 비밀번호를 묻지 않기 위함.
@@ -1315,6 +1495,13 @@ async function boot(){
 
   // 자동 리마인드는 이력 저장소가 있어야 동작한다(예약을 저장할 곳이 필요). 관리자 여부와 무관.
   $("remindWrap").style.display = (CFG.history && CFG.history.enabled) ? "flex" : "none";
+
+  // Mail Pipeline 탭 — 로그인 방식(본인을 식별해야 본인 것만 줄 수 있다) + 이력 저장소가 있어야 뜬다.
+  // 파이프라인이 켜질 때마다 최신으로 다시 불러오게 한다.
+  const canPipe = AUTH_MODE === "accounts" && CFG.history && CFG.history.enabled;
+  $("viewTabs").style.display = canPipe ? "flex" : "none";
+  if(!canPipe && VIEW === "pipeline") setView("send");
+  PIPE_LOADED = false;
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.
   // probe 는 설정 여부만 확인하므로 페이지를 열 때마다 상품을 조회하지 않는다.

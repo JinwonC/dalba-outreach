@@ -6,7 +6,9 @@
 //   GET /api/thread?staff=<담당자 이메일>&peer=<크리에이터 이메일>
 //
 // ─── 프라이버시 · 스코프 ─────────────────────────────────────────
-//   · 관리자(ADMIN_EMAILS)만. 그 외에는 남의 메일함을 이 경로로도 못 본다.
+//   · **본인**은 자기 메일함(staff == 로그인 계정)을 언제나 볼 수 있다 — 발송 화면의
+//     Mail Pipeline 에서 자기 협상 스레드를 여는 용도. 자기 메일함이라 권한 문제가 없다.
+//   · **남의** 메일함(staff != 본인)은 관리자(ADMIN_EMAILS)만. 그 외에는 못 본다.
 //   · 담당자 계정은 크리에이터 아웃리치 전용이라 개인·사내 메일이 없다 —
 //     그래서 peer 를 회신 기록으로 재검증하지 않는다(정당한 대화를 막곤 했다).
 //   · 본문은 **저장하지 않는다** — 열 때만 그때그때 IMAP 으로 받아 보여준다.
@@ -23,13 +25,16 @@ module.exports = async (req, res) => {
     if (!A.enabled()) { res.status(501).json({ error: "직원 계정(NW_ACCOUNTS)을 설정해야 합니다" }); return; }
     const me = A.currentUser(req);
     if (!me) { res.status(401).json({ error: "로그인이 필요합니다" }); return; }
-    if (!A.isAdmin(me)) { res.status(403).json({ error: "관리자만 대화를 볼 수 있습니다" }); return; }
     if (req.method !== "GET") { res.status(405).json({ error: "method not allowed" }); return; }
 
     const q = req.query || {};
     const staffEmail = String(q.staff || "").trim().toLowerCase();
     const peer = String(q.peer || "").trim().toLowerCase();
     if (!staffEmail || !peer) { res.status(400).json({ error: "staff 와 peer 가 필요합니다" }); return; }
+
+    // 자기 메일함은 언제나, 남의 메일함은 관리자만.
+    const mine = staffEmail === String(me.email || "").toLowerCase();
+    if (!mine && !A.isAdmin(me)) { res.status(403).json({ error: "남의 대화는 관리자만 볼 수 있습니다" }); return; }
 
     const account = A.findByEmail(staffEmail);
     if (!account) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + staffEmail }); return; }

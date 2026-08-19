@@ -21,6 +21,9 @@
     "api/thread.js": {
       "maxDuration": 60
     },
+    "api/pipeline.js": {
+      "maxDuration": 60
+    },
     "api/videos.js": {
       "maxDuration": 30
     }
