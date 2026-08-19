@@ -54,6 +54,22 @@
   .gate { max-width:340px; margin:70px auto; }
   .gate input { width:100%; margin-bottom:8px; }
 
+  /* 파이프라인 (칸반) */
+  .kan { display:flex; gap:14px; overflow-x:auto; padding-bottom:8px; align-items:flex-start; }
+  .kcol { flex:0 0 300px; background:#f7f5ef; border:1px solid #ece8dc; border-radius:14px; padding:10px; }
+  .khead { display:flex; align-items:center; gap:8px; font:700 13px/1.4 inherit; padding:4px 6px 10px; }
+  .kdot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .kcount { margin-left:auto; background:#fff; border:1px solid #e6e2d6; border-radius:99px; padding:1px 9px; font-size:12px; color:#666; }
+  .klist { display:flex; flex-direction:column; gap:9px; max-height:calc(100vh - 300px); overflow-y:auto; }
+  .kcard { background:#fff; border:1px solid #ececec; border-radius:11px; padding:11px 12px; cursor:pointer; }
+  .kcard:hover { border-color:#b78a22; box-shadow:0 3px 12px rgba(183,138,34,.12); }
+  .kcard .knm { font:700 13px/1.35 inherit; color:#1d1d1f; }
+  .kcard .kh { font-size:11.5px; color:#999; margin-bottom:5px; }
+  .kcard .kmeta { font-size:11.5px; color:#6b6b6b; display:flex; gap:8px; flex-wrap:wrap; }
+  .kcard .kbadge { background:#fbf1d3; color:#8a6d16; border-radius:6px; padding:0 6px; font-weight:600; }
+  .kcard .ksub { font-size:11.5px; color:#999; margin-top:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kempty { color:#bbb; font-size:12px; text-align:center; padding:24px 0; }
+
   /* 대화 목록 */
   .convgrp { margin-bottom:18px; }
   .convby { font:700 14px/1.4 inherit; margin:0 2px 8px; }
@@ -123,6 +139,7 @@
   <div class="tabs">
     <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
+    <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
@@ -274,6 +291,7 @@ async function loadAdmin(){
   if(VIEW === "sent")    return renderSent(d);
   if(VIEW === "blocked") return renderBlocked(d);
   if(VIEW === "conversations") return renderConversations(d);
+  if(VIEW === "pipeline") return renderPipeline(d);
   return "";
 }
 
@@ -584,6 +602,48 @@ function closeThread(){ $("threadModal").style.display = "none"; $("threadBody")
 // 배경(veil) 클릭·ESC 로 닫기
 document.addEventListener("click", e => { if(e.target && e.target.id === "threadModal") closeThread(); });
 document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread(); });
+
+/* ── 내 파이프라인 (개인용 칸반) ──
+   내가 접촉한 크리에이터를 회신 횟수로 단계를 나눠 보여준다: 첫 발송 → 1차 회신 → 2차+ 회신.
+   카드를 누르면 그 크리에이터와의 대화 스레드가 열린다. */
+const PIPE_STAGES = [
+  { key:"outreach", label:"첫 발송 · 회신 대기", color:"#9aa0a6" },
+  { key:"reply1",   label:"1차 회신",           color:"#4f9cf5" },
+  { key:"reply2",   label:"2차+ 회신 · 협상",    color:"#158a61" }
+];
+function pipeCard(c){
+  return '<div class="kcard" data-peer="'+esc(c.email)+'">' +
+    '<div class="knm">'+esc(c.name||c.email)+'</div>' +
+    (c.handle ? '<div class="kh">@'+esc(String(c.handle).replace(/^@/,""))+'</div>' : '<div class="kh">'+esc(c.email)+'</div>') +
+    '<div class="kmeta"><span class="kbadge">회신 '+(c.replies||0)+'</span><span>발송 '+(c.sends||0)+'</span>'+
+      '<span class="muted">'+esc(fmt(c.lastAt))+'</span></div>' +
+    (c.lastSubject ? '<div class="ksub">'+esc(c.lastSubject)+'</div>'
+      : (c.campaign ? '<div class="ksub">'+esc(c.campaign)+'</div>' : '')) +
+    '</div>';
+}
+function renderPipeline(d){
+  const rows = d.rows || [];
+  const who = d.pipelineOf || (d.me && d.me.email) || "";
+  if(!rows.length){
+    $("body").innerHTML = '<div class="note"><b>아직 내 파이프라인에 크리에이터가 없습니다.</b><br />' +
+      '내가 보낸 발송·받은 회신이 잡히면 여기 단계별로 뜹니다. ' +
+      '담당자별 탭에서 <b>[🔄 메일함에서 동기화]</b> 를 먼저 돌려보세요.</div>';
+    return "";
+  }
+  const bucket = {}; PIPE_STAGES.forEach(s => bucket[s.key] = []);
+  rows.forEach(r => { (bucket[r.stage] || bucket.outreach).push(r); });
+  $("body").innerHTML =
+    '<div class="muted" style="margin:-2px 0 10px;font-size:12.5px">'+esc(who)+' 님 기준 · 카드를 누르면 대화가 열립니다</div>' +
+    '<div class="kan">' + PIPE_STAGES.map(s => {
+      const list = bucket[s.key];
+      return '<div class="kcol"><div class="khead"><span class="kdot" style="background:'+s.color+'"></span>' +
+        esc(s.label) + '<span class="kcount">'+list.length+'</span></div>' +
+        '<div class="klist">' + (list.length ? list.map(pipeCard).join("") : '<div class="kempty">없음</div>') + '</div></div>';
+    }).join("") + '</div>';
+  [...document.querySelectorAll(".kcard")].forEach(el =>
+    el.addEventListener("click", () => openThread(who, el.dataset.peer)));
+  return rows.length + "명";
+}
 
 /* ── 메일함에서 동기화 ──
    담당자별로 ① 보낸편지함 → 발송 이력, ② 받은편지함 → 회신 기록 순으로 채운다.

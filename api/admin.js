@@ -108,6 +108,34 @@ function conversations(sent, replies) {
     .sort((a, b) => b.creators.length - a.creators.length);
 }
 
+// 개인 파이프라인 — 한 담당자가 접촉한 크리에이터를 **회신 횟수로 단계**를 나눈다.
+//   첫 발송(회신 대기) · 1차 회신 · 2차+ 회신(협상 진행)
+// 크리에이터별로 발송·회신 수를 세어 단계를 매기고, 최근 활동순으로 돌려준다.
+function pipeline(sent, replies) {
+  const c = new Map();
+  const get = (email, name, handle) => {
+    const k = H.normEmail(email);
+    if (!c.has(k)) c.set(k, { email: email, name: name || "", handle: handle || "", sends: 0, replies: 0, lastAt: "", lastSubject: "", campaign: "" });
+    const x = c.get(k);
+    if (name && !x.name) x.name = name;
+    if (handle && !x.handle) x.handle = handle;
+    return x;
+  };
+  sent.forEach(r => {
+    const x = get(r.to, r.name, r.handle);
+    x.sends++;
+    if (String(r.at || "") > String(x.lastAt || "")) { x.lastAt = r.at || ""; x.campaign = r.campaign || x.campaign; }
+  });
+  replies.forEach(r => {
+    const x = get(r.from, r.fromName, "");
+    x.replies++;
+    if (String(r.at || "") > String(x.lastAt || "")) { x.lastAt = r.at || ""; x.lastSubject = r.subject || x.lastSubject; }
+  });
+  return [...c.values()]
+    .map(x => Object.assign(x, { stage: x.replies >= 2 ? "reply2" : (x.replies === 1 ? "reply1" : "outreach") }))
+    .sort((a, b) => String(b.lastAt || "").localeCompare(String(a.lastAt || "")));
+}
+
 // 하루 단위 집계.
 //
 // 기록의 시각은 UTC 다. 한국에서 아침 8시에 보낸 건 UTC 로는 전날 23시라, 그대로
@@ -278,7 +306,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "people" || view === "conversations";
+    const countView = view === "summary" || view === "daily" || view === "people" || view === "conversations" || view === "pipeline";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -338,6 +366,16 @@ module.exports = async (req, res) => {
 
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
     if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
+    if (view === "pipeline") {
+      // 개인용 — 기본은 로그인한 본인, 담당자를 고르면 그 사람. 관리자 제외 필터는 적용하지 않는다
+      // (본인이 관리자여도 자기 파이프라인은 봐야 한다). raw 배열에서 그 한 명만 추린다.
+      const target = by || (me ? String(me.email).toLowerCase() : "");
+      const win = r => withinDays(r, days) && matches(r, needle);
+      const mineSent = sentAll.filter(r => win(r) && String(r.by || "").toLowerCase() === target);
+      const mineReplies = replyAll.filter(r => win(r) && (String(r.by || "").toLowerCase() === target || String(r.inbox || "").toLowerCase() === target));
+      res.status(200).json(Object.assign(base, { rows: pipeline(mineSent, mineReplies), pipelineOf: target }));
+      return;
+    }
 
     res.status(200).json(Object.assign(base, summarize(sent, blocked, replies), {
       recentSent: sent.slice(0, 20),
