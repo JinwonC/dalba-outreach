@@ -285,9 +285,12 @@ function cronNote(d){
   if(!c) return '자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. ' +
            '눌러서 <b>2026-07-01 이후</b> 발송·회신을 지금 바로 가져오세요.';
   const when = fmt(c.at);
+  const rem = c.reminders;
   return '마지막 자동 동기화 <b>'+esc(when)+'</b>' +
     (c.complete ? '' : ' <span style="color:#a8801f">(전원을 다 못 돌아 다음 실행이 이어받습니다)</span>') +
     (c.totals && c.totals.failed ? ' <span style="color:#a23b2e">· 실패 '+c.totals.failed+'명</span>' : '') +
+    (rem && (rem.sent || rem.replied) ? ' <span class="muted">· 리마인드 '+(rem.sent||0)+'건 발송'+
+      (rem.replied ? ', 회신 도착으로 '+rem.replied+'건 종료' : '')+'</span>' : '') +
     ' <span class="muted">· 매일 07:00(KST) 자동 실행</span>';
 }
 

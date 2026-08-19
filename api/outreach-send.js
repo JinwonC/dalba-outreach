@@ -236,6 +236,13 @@ module.exports = async (req, res) => {
     const inlineImg = parseDataImage(campaign.productImageData);
     // 참조(CC) — 캠페인 공통이라 한 번만 정리한다. 유효한 주소만 남긴다.
     const ccList = T.parseList(campaign.cc);
+    // 자동 리마인드(팔로업) — 담당자가 발송 시 켠 경우. 며칠마다·최대 몇 번(직접 설정).
+    // ※ 캠페인 설정은 followup 로 받는다. 템플릿의 d.reminder(불리언)와 이름이 겹치면
+    //    첫 발송이 리마인드 본문으로 나가 버린다 — 그래서 이름을 분리한다.
+    const rem = campaign.followup || {};
+    const remindOn = Boolean(rem.enabled) && H.enabled() && !dryRun;
+    const remindEvery = Math.max(1, Math.min(Number(rem.intervalDays) || 3, 60));
+    const remindMax = Math.max(1, Math.min(Number(rem.maxCount) || 2, 10));
     // 로고 파일 — 실제 발송에서는 인라인(cid) 첨부, 미리보기(dryRun)에서는 data URL
     const logoAtt = dryRun ? null : logoAttachment();
     // 첨부는 수신자와 무관하게 같으므로 한 번만 만든다 (로고 + 업로드한 제품 이미지)
@@ -384,6 +391,21 @@ module.exports = async (req, res) => {
           at: new Date().toISOString(), by: account.email, byName: account.name,
           campaign: d.campaignTitle || "", forced: force || undefined
         });
+        // 회신이 없으면 정한 주기로 팔로업을 보내도록 예약해 둔다 (크론이 처리)
+        if (remindOn) {
+          const now = Date.now();
+          try {
+            await H.scheduleReminder({
+              to, creatorName: d.creatorName || "", handle: d.handle || "",
+              by: account.email, byName: account.name, senderTitle: account.title || "",
+              brand: d.brand || "", campaignTitle: d.campaignTitle || "",
+              subject: built.subject, applyUrl: d.applyUrl || "", applyLabel: d.applyLabel || "",
+              intervalDays: remindEvery, maxCount: remindMax, sentCount: 0,
+              nextAt: new Date(now + remindEvery * 86400e3).toISOString(),
+              createdAt: new Date(now).toISOString()
+            });
+          } catch (_) { /* 예약 실패가 발송을 무르지는 않는다 */ }
+        }
       } catch (e) {
         // 못 보냈으면 잡아둔 자리를 반납한다 — 실패한 주소가 계속 막히면 안 된다
         if (reserved) { try { await H.release(d); } catch (_) {} }

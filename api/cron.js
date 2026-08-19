@@ -20,6 +20,7 @@
 const A = require("../auth.js");
 const H = require("../history.js");
 const S = require("../sync.js");
+const R = require("../reminders.js");
 
 const CURSOR_KEY = "outreach:cron:cursor";
 const STATUS_KEY = "outreach:cron:status";
@@ -90,6 +91,12 @@ module.exports = async (req, res) => {
     };
     const done = processed >= accounts.length;
 
+    // 회신 없는 건에 대한 자동 리마인드 — 회신 데이터를 방금 갱신했으니 이제 처리한다.
+    // 남은 예산(함수 60초 안)만큼만 보내고, 다 못 보내면 다음 실행이 이어받는다.
+    let reminders = null;
+    try { reminders = await R.sendDue({ budgetMs: Math.max(6000, (deadline + 11e3) - Date.now()) }); }
+    catch (e) { reminders = { error: String((e && e.message) || e) }; }
+
     const status = {
       at: new Date().toISOString(),
       accounts: accounts.length,
@@ -97,6 +104,7 @@ module.exports = async (req, res) => {
       // 한 바퀴를 다 돌았는지 — 못 돌았으면 다음 실행이 이어받는다
       complete: done,
       totals,
+      reminders,
       errors: results.filter(r => r.error).map(r => ({ user: r.user, error: r.error }))
     };
 

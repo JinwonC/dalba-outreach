@@ -117,6 +117,11 @@
       "받는 사람이 아직 없습니다": "No recipients yet",
       "이미 보낸 사람에게도": "Send even to people already contacted —",
       "강제 발송": "force send",
+      "회신 없으면": "If no reply,",
+      "자동 리마인드": "auto follow-up",
+      "일마다,": "days apart,",
+      "최대": "up to",
+      "번": "times",
       "네, 보냅니다": "Yes, send",
       "📨 발송할까요?": "📨 Send now?",
       "보낸 메일은 되돌릴 수 없습니다. 발신자·수신자·금액을 다시 확인하세요.":
@@ -417,6 +422,11 @@
       "받는 사람이 아직 없습니다": "Chưa có người nhận",
       "이미 보낸 사람에게도": "Gửi cả cho người đã liên hệ —",
       "강제 발송": "gửi cưỡng chế",
+      "회신 없으면": "Nếu không trả lời,",
+      "자동 리마인드": "tự động nhắc lại",
+      "일마다,": "ngày một lần,",
+      "최대": "tối đa",
+      "번": "lần",
       "네, 보냅니다": "Vâng, gửi",
       "📨 발송할까요?": "📨 Gửi ngay?",
       "보낸 메일은 되돌릴 수 없습니다. 발신자·수신자·금액을 다시 확인하세요.":

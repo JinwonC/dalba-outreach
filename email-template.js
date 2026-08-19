@@ -365,6 +365,18 @@
     body += '<tr><td style="padding:0 0 18px;font:800 22px/1.35 ' + FONT + ";color:" + C.gold + ';">' +
       "Hi " + esc(creator) + "! 👋</td></tr>";
 
+    // ── 리마인드(팔로업) — 첫 메일에 회신이 없을 때 짧게 다시 보낸다 ──
+    // 껍데기(로고 헤더·서명·푸터)는 그대로 두고 본문만 짧은 팔로업으로 바꾼다.
+    if (d.reminder) {
+      body += para(has(d.reminderNote) ? nl2br(d.reminderNote) :
+        "Just circling back on my note below about a <strong>" + esc(brand) + "</strong> collab — " +
+        "we'd still love to work with you. Would this be something you're up for? " +
+        "No pressure at all if the timing isn't right.");
+      body += ctaBlock(d);
+      // 서명으로 곧장 이어진다 (아래 공통 서명)
+      return shell();
+    }
+
     body += para(
       "We're <strong>" + esc(brand) + "</strong>" +
       (has(d.brandIntro) ? ", " + nl2br(d.brandIntro) : ", a Korean beauty brand working with creators on TikTok Shop.")
@@ -399,6 +411,10 @@
         nl2br(d.notes) + "</td></tr>";
     }
 
+    // 공통 마무리 — 서명 + 껍데기(헤더·푸터·MSO). 리마인드·일반 둘 다 여기로 모인다.
+    return shell();
+
+    function shell() {
     // 서명
     body += '<tr><td style="padding:30px 0 0;border-top:1px solid ' + C.line + ';"></td></tr>' +
       '<tr><td style="padding:18px 0 0;font:400 14px/1.65 ' + FONT + ";color:" + C.text + ';">' +
@@ -464,6 +480,7 @@
       "</table>" +
       "<!--[if mso]></td></tr></table><![endif]-->" +
       "</td></tr></table></body></html>";
+    }
   }
 
   // ─── 플레인 텍스트 대체본 (스팸 점수 · 접근성) ──────────────────
@@ -474,6 +491,17 @@
     const L = [];
     L.push("Hi " + creator + "!");
     L.push("");
+    if (d.reminder) {
+      L.push(has(d.reminderNote) ? d.reminderNote :
+        "Just circling back on my note below about a " + brand + " collab — we'd still love to work with you. " +
+        "Would this be something you're up for? No pressure at all if the timing isn't right.");
+      if (safeUrl(d.applyUrl)) { L.push(""); L.push((has(d.applyLabel) ? d.applyLabel : "Count me in") + ": " + String(d.applyUrl).trim()); }
+      L.push(""); L.push("Looking forward to hearing from you!");
+      if (has(d.senderName)) L.push(d.senderName);
+      if (has(d.senderTitle)) L.push(d.senderTitle);
+      if (has(d.senderEmail)) L.push(d.senderEmail);
+      return L.join("\n");
+    }
     L.push("We're " + brand + (has(d.brandIntro) ? ", " + d.brandIntro : ", a Korean beauty brand working with creators on TikTok Shop."));
     if (has(d.pitch)) { L.push(""); L.push(d.pitch); }
     if (has(d.whyYou)) { L.push(""); L.push(d.whyYou); }
@@ -522,7 +550,7 @@
   const FILLABLE = [
     "subject", "campaignTitle", "brandIntro", "pitch", "whyYou",
     "deliverables", "deadline", "location", "productDesc", "notes",
-    "paymentNote", "commissionNote", "applyLabel", "preheader", "videosNote", "stepsIntro"
+    "paymentNote", "commissionNote", "applyLabel", "preheader", "videosNote", "stepsIntro", "reminderNote"
   ];
 
   function varsOf(d) {
@@ -554,7 +582,10 @@
 
   function buildSubject(d) {
     const raw = has(d.subject) ? d.subject : DEFAULT_SUBJECT;
-    return fill(raw, varsOf(d)).replace(/\s{2,}/g, " ").replace(/\s*—\s*$/, "").trim();
+    const s = fill(raw, varsOf(d)).replace(/\s{2,}/g, " ").replace(/\s*—\s*$/, "").trim();
+    // 리마인드는 같은 스레드로 이어지도록 원 제목에 Re: 를 붙인다 (이미 있으면 그대로)
+    if (d.reminder) return /^re:/i.test(s) ? s : "Re: " + s;
+    return s;
   }
 
   // ─── 입력 검증 (서버·클라이언트 공통) ───────────────────────────

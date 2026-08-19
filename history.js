@@ -300,10 +300,53 @@ async function recordReply(rec, dedupeId) {
 async function readRaw(key) { return enabled() ? cmd(["GET", key]) : null; }
 async function writeRaw(key, val) { if (enabled()) await cmd(["SET", key, String(val)]); }
 
+// ─── 리마인드(자동 팔로업) 예약 ─────────────────────────────────
+// 첫 메일에 회신이 없을 때 며칠 뒤 다시 보낼 계획을 저장한다. 담당자+크리에이터 한 쌍당
+// 하나(HASH 필드)라 같은 사람에게 다시 보내면 계획이 갱신된다. 크론이 매일 훑어 처리한다.
+const REMIND_KEY = "outreach:reminders";        // HASH: key → 계획 JSON
+const REMIND_LOG_KEY = "outreach:reminders:log"; // 실제로 보낸 리마인드 기록 (관리자 표시용)
+const REMIND_LOG_MAX = 20000;
+
+function reminderKey(to, by) { return normEmail(to) + "|" + String(by || "").trim().toLowerCase(); }
+
+async function scheduleReminder(plan) {
+  if (!enabled()) return { skipped: true };
+  const key = reminderKey(plan.to, plan.by);
+  if (!normEmail(plan.to)) return { skipped: true };
+  await cmd(["HSET", REMIND_KEY, key, JSON.stringify(Object.assign({ key: key }, plan))]);
+  return { scheduled: true, key: key };
+}
+
+// Upstash REST 의 HGETALL 은 [field, value, field, value, …] 평면 배열로 온다.
+async function allReminders() {
+  if (!enabled()) return [];
+  const flat = await cmd(["HGETALL", REMIND_KEY]);
+  const out = [];
+  if (Array.isArray(flat)) {
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const p = parseRec(flat[i + 1]);
+      if (p) { p.key = p.key || flat[i]; out.push(p); }
+    }
+  } else if (flat && typeof flat === "object") {
+    Object.keys(flat).forEach(function (k) { const p = parseRec(flat[k]); if (p) { p.key = p.key || k; out.push(p); } });
+  }
+  return out;
+}
+
+async function saveReminder(key, plan) { if (enabled()) await cmd(["HSET", REMIND_KEY, key, JSON.stringify(Object.assign({ key: key }, plan))]); }
+async function cancelReminder(key) { if (enabled()) await cmd(["HDEL", REMIND_KEY, key]); }
+
+async function logReminderSent(rec) {
+  if (!enabled()) return;
+  await pipeline([["LPUSH", REMIND_LOG_KEY, JSON.stringify(rec)], ["LTRIM", REMIND_LOG_KEY, "0", String(REMIND_LOG_MAX - 1)]]);
+}
+function recentReminders(n) { return readList(REMIND_LOG_KEY, REMIND_LOG_MAX, n); }
+
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
   recordReply, recent, recentBlocked, recentReplies, count,
-  LOG_KEY, BLOCK_KEY, REPLY_KEY,
+  scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
+  LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

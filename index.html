@@ -403,6 +403,17 @@
             <input type="checkbox" id="forceSend" style="width:auto;margin:0" />
             <span>이미 보낸 사람에게도 <b>강제 발송</b></span>
           </label>
+          <!-- 회신이 없으면 자동으로 팔로업(리마인드)을 보낸다. 이력 저장소가 있어야 동작한다. -->
+          <div class="sendbar" id="remindWrap" style="display:none;font-size:12.5px;color:#666;flex-wrap:wrap;gap:6px;align-items:center">
+            <label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin:0">
+              <input type="checkbox" id="remindOn" style="width:auto;margin:0" />
+              <span>회신 없으면 <b>자동 리마인드</b></span>
+            </label>
+            <span id="remindOpts" style="display:none;align-items:center;gap:4px">
+              <input id="remindEvery" type="number" min="1" max="60" value="3" style="width:52px;padding:4px 6px" /> 일마다,
+              최대 <input id="remindMax" type="number" min="1" max="10" value="2" style="width:48px;padding:4px 6px" /> 번
+            </span>
+          </div>
           <div class="progress" id="progWrap" style="display:none"><div class="fill" id="progFill"></div></div>
           <div id="dupInfo"></div>
           <div id="sendResult"></div>
@@ -447,7 +458,7 @@ let DEAL = "paid";
 const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","brandIntro","pitch","subject","cc",
   "currency","amount","commission","paymentNote","commissionNote","deliverables","deadline","location",
   "product","productUrl","productImage","productDesc","v1u","v1l","v2u","v2l","v3u","v3l","videosNote",
-  "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes","bulkText"];
+  "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes","remindEvery","remindMax","bulkText"];
 /* 수신자마다 달라지는 값은 초안에서 제외 — 다음 사람에게 잘못 나가는 사고 방지 */
 const PER_RECIPIENT = ["creatorName","handle","to","whyYou"];
 
@@ -906,7 +917,12 @@ function campaign(){
     steps: ["s1","s2","s3","s4"].map(val).filter(Boolean),
     applyUrl: val("applyUrl"), applyLabel: val("applyLabel"), notes: val("notes"),
     senderName: a.name || "", senderEmail: a.email || "", senderTitle: a.title || "",
-    logoUrl: (CFG && CFG.logoUrl) || ""   // 미리보기가 실제 발송과 같은 로고를 쓰도록
+    logoUrl: (CFG && CFG.logoUrl) || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
+    followup: {                            // 회신 없을 때 자동 팔로업 (며칠마다·최대 몇 번)
+      enabled: !!$("remindOn").checked,    // ※ 템플릿의 d.reminder(불리언)와 이름이 겹치지 않게 followup 로 둔다
+      intervalDays: Math.max(1, Math.min(Number(val("remindEvery"))||3, 60)),
+      maxCount: Math.max(1, Math.min(Number(val("remindMax"))||2, 10))
+    }
   };
 }
 function recipients(){
@@ -1272,6 +1288,14 @@ async function boot(){
     $("imgUpBtn").addEventListener("click", () => $("imgUpFile").click());
     $("imgUpFile").addEventListener("change", onImgFile);
     $("imgUpClear").addEventListener("click", () => setImgData(""));
+    // 자동 리마인드 토글 — 켜면 주기·횟수 입력칸이 보인다. 상태를 브라우저에 저장한다.
+    try { if(localStorage.getItem("outreach_remind_on") === "1") $("remindOn").checked = true; } catch(e){}
+    const paintRemind = () => {
+      $("remindOpts").style.display = $("remindOn").checked ? "inline-flex" : "none";
+      try { localStorage.setItem("outreach_remind_on", $("remindOn").checked ? "1" : "0"); } catch(e){}
+    };
+    $("remindOn").addEventListener("change", paintRemind);
+    paintRemind();
   }
 
   // 관리자 페이지는 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
@@ -1288,6 +1312,9 @@ async function boot(){
     $("forceWrap").style.display = "none";
     if($("forceSend").checked) $("forceSend").checked = false;   // 혹시 남아 있던 체크 해제
   }
+
+  // 자동 리마인드는 이력 저장소가 있어야 동작한다(예약을 저장할 곳이 필요). 관리자 여부와 무관.
+  $("remindWrap").style.display = (CFG.history && CFG.history.enabled) ? "flex" : "none";
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.
   // probe 는 설정 여부만 확인하므로 페이지를 열 때마다 상품을 조회하지 않는다.
