@@ -240,8 +240,10 @@
       inner += '<div style="padding-top:14px;"><a href="' + url + '" style="font:700 14px/1.5 ' + FONT +
         ";color:" + C.gold + ';text-decoration:none;">' + esc(has(d.productUrlLabel) ? d.productUrlLabel : "See the product →") + "</a></div>";
     }
-    // "About d'Alba" 제목은 빼고 제품 박스만 둔다 (요청에 따라 제거)
-    return infoBox(inner, { align: img ? "center" : "left", pad: "22px 24px" });
+    // "About d'Alba" 제목은 뺐다(요청). 다만 그 제목이 주던 위쪽 여백까지 사라져서
+    // 앞 박스(캠페인 상세 등)에 딱 붙어 보이므로, 제목 대신 여백만 남긴다.
+    return '<tr><td style="height:26px;line-height:26px;">&nbsp;</td></tr>' +
+      infoBox(inner, { align: img ? "center" : "left", pad: "22px 24px" });
   }
 
   // ─── 바이럴 영상 (이미 잘 되고 있다는 증거 — 수락률에 가장 크게 기여) ──
