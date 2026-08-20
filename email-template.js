@@ -332,6 +332,51 @@
       "</td></tr></table></td></tr>";
   }
 
+  // ─── 추가 안내 박스 (선택) ─────────────────────────────────────
+  // 메일 하단에 담당자가 직접 만든 안내 박스를 넣는다 (예: 선물 폼, 디스코드 초대).
+  // 각 박스는 제목·내용·버튼이름·버튼URL 을 담당자가 직접 채우고, 체크박스로 넣을지 고른다.
+  // extras: [{ enabled, title, body, buttonLabel, buttonUrl }, ...]
+  function extraButton(label, url) {
+    const u = safeUrl(url);
+    if (!u) return "";
+    // 박스 안 버튼은 왼쪽 정렬(참고 디자인과 동일) · 좁은 화면에서 눌리기 쉬운 크기
+    return '<div style="padding-top:16px;">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td align="center" style="background:' + C.dark + ';border-radius:999px;">' +
+      '<a href="' + u + '" style="display:inline-block;padding:13px 30px;font:700 14px/1.2 ' + FONT +
+      ';color:#ffffff;text-decoration:none;border-radius:999px;">' + esc(has(label) ? label : "Learn more →") + "</a>" +
+      "</td></tr></table></div>";
+  }
+
+  function normExtras(v) {
+    if (!Array.isArray(v)) return [];
+    // 켜짐 + 최소 한 가지(제목·내용·버튼)라도 있는 것만. 최대 4개.
+    return v.filter(function (x) {
+      return x && x.enabled && (has(x.title) || has(x.body) || safeUrl(x.buttonUrl));
+    }).slice(0, 4);
+  }
+
+  function extrasBlock(d) {
+    const items = normExtras(d.extras);
+    if (!items.length) return "";
+    let out = "";
+    items.forEach(function (x, i) {
+      let inner = "";
+      if (has(x.title)) {
+        inner += '<div style="font:700 12px/1.4 ' + FONT +
+          ';letter-spacing:.12em;text-transform:uppercase;color:' + C.gold + ';padding-bottom:10px;">' +
+          esc(x.title) + "</div>";
+      }
+      if (has(x.body)) {
+        inner += '<div style="font:400 14.5px/1.65 ' + FONT + ";color:" + C.text + ';">' + nl2br(x.body) + "</div>";
+      }
+      inner += extraButton(x.buttonLabel, x.buttonUrl);
+      out += (i ? '<tr><td style="height:12px;line-height:12px;">&nbsp;</td></tr>' : "") +
+        infoBox(inner, { align: "left", pad: "22px 24px" });
+    });
+    return out;
+  }
+
   // ─── 메일 전체 ─────────────────────────────────────────────────
   function buildHtml(d) {
     d = resolve(d);
@@ -405,6 +450,9 @@
     // 다음 단계 · CTA
     body += stepsBlock(d);
     body += ctaBlock(d);
+
+    // 담당자가 직접 만든 추가 안내 박스 (선물 폼·디스코드 초대 등)
+    body += extrasBlock(d);
 
     if (has(d.notes)) {
       body += '<tr><td style="padding:24px 0 0;font:400 13px/1.6 ' + FONT + ";color:" + C.muted + ';">' +
@@ -536,6 +584,13 @@
       tSteps.forEach(function (s, i) { L.push((i + 1) + ". " + s); });
     }
     if (safeUrl(d.applyUrl)) { L.push(""); L.push((has(d.applyLabel) ? d.applyLabel : "Count me in") + ": " + String(d.applyUrl).trim()); }
+    // 추가 안내 박스 (선물 폼·디스코드 등) — 텍스트 버전에도 담는다
+    normExtras(d.extras).forEach(function (x) {
+      L.push("");
+      if (has(x.title)) L.push(String(x.title).toUpperCase());
+      if (has(x.body)) L.push(x.body);
+      if (safeUrl(x.buttonUrl)) L.push((has(x.buttonLabel) ? x.buttonLabel : "Learn more") + ": " + String(x.buttonUrl).trim());
+    });
     if (has(d.notes)) { L.push(""); L.push(d.notes); }
     L.push(""); L.push("Looking forward to hearing from you!");
     if (has(d.senderName)) L.push(d.senderName);
@@ -574,6 +629,14 @@
     FILLABLE.forEach(function (k) { if (has(out[k])) out[k] = fill(out[k], vars); });
     // steps 는 문자열 배열이라 따로 처리한다
     if (Array.isArray(out.steps)) out.steps = out.steps.map(function (s) { return fill(s, vars); });
+    // extras 의 제목·내용·버튼이름도 {{name}} 등 치환을 받는다 (원본은 안 건드림)
+    if (Array.isArray(out.extras)) out.extras = out.extras.map(function (x) {
+      return Object.assign({}, x, {
+        title: fill(x && x.title, vars),
+        body: fill(x && x.body, vars),
+        buttonLabel: fill(x && x.buttonLabel, vars)
+      });
+    });
     return out;
   }
 

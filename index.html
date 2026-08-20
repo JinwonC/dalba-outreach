@@ -429,6 +429,41 @@
         <label class="f"><span>맺음말 <i>— 선택</i></span>
           <textarea id="notes" rows="2" placeholder=""></textarea></label>
       </div>
+
+      <!-- 추가 안내 박스 (선택) — 메일 하단에 별도 박스로. 체크한 박스만 나간다 -->
+      <div class="panel">
+        <h2>추가 안내 박스 — 선물 폼 · 디스코드 등</h2>
+        <div class="hint">
+          메일 <b>맨 아래</b>에 별도 박스로 들어갑니다. <b>체크한 박스만</b> 발송돼요.<br />
+          제목 · 내용 · 버튼 문구 · 버튼 링크를 직접 채우고, {{name}} 같은 개인화도 쓸 수 있습니다.
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#333;cursor:pointer;margin-bottom:8px">
+          <input type="checkbox" id="extra1On" style="width:auto;margin:0" /> <b>박스 1 넣기</b>
+        </label>
+        <div id="extra1Box" style="display:none">
+          <label class="f"><span>제목</span><input id="extra1Title" type="text" placeholder="🎁 A gift set for you" /></label>
+          <label class="f"><span>내용</span>
+            <textarea id="extra1Body" rows="2" placeholder="Please take a quick moment to fill out the form below so we can prepare your gifts:"></textarea></label>
+          <div class="grid2">
+            <label class="f"><span>버튼 문구 <i>— 선택</i></span><input id="extra1Btn" type="text" placeholder="Share your details →" /></label>
+            <label class="f"><span>버튼 링크(URL) <i>— 선택</i></span><input id="extra1Url" type="text" placeholder="https://forms.gle/..." /></label>
+          </div>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#333;cursor:pointer;margin:14px 0 8px;padding-top:12px;border-top:1px solid #f0f0ee">
+          <input type="checkbox" id="extra2On" style="width:auto;margin:0" /> <b>박스 2 넣기</b>
+        </label>
+        <div id="extra2Box" style="display:none">
+          <label class="f"><span>제목</span><input id="extra2Title" type="text" placeholder="🎉 Join our creator Discord" /></label>
+          <label class="f"><span>내용</span>
+            <textarea id="extra2Body" rows="2" placeholder="We just launched our official Discord — an exclusive space for our creator community."></textarea></label>
+          <div class="grid2">
+            <label class="f"><span>버튼 문구 <i>— 선택</i></span><input id="extra2Btn" type="text" placeholder="Join the Discord →" /></label>
+            <label class="f"><span>버튼 링크(URL) <i>— 선택</i></span><input id="extra2Url" type="text" placeholder="https://discord.gg/..." /></label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── 오른쪽: 미리보기 + 발송 ── -->
@@ -535,7 +570,8 @@ const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","br
   "currency","amount","commission","paymentNote","commissionNote","deliverables","deadline","location",
   "product","productUrl","productImage","productDesc","v1u","v1l","v2u","v2l","v3u","v3l","videosNote",
   "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes",
-  "remindEvery","remindMsg1","remindMsg2","remindMsg3","bulkText"];
+  "remindEvery","remindMsg1","remindMsg2","remindMsg3",
+  "extra1Title","extra1Body","extra1Btn","extra1Url","extra2Title","extra2Body","extra2Btn","extra2Url","bulkText"];
 /* 수신자마다 달라지는 값은 초안에서 제외 — 다음 사람에게 잘못 나가는 사고 방지 */
 const PER_RECIPIENT = ["creatorName","handle","to","whyYou"];
 
@@ -1000,7 +1036,14 @@ function campaign(){
       intervalDays: Math.max(1, Math.min(Number(val("remindEvery"))||3, 60)),
       // 회차별 문구 — 채운 만큼(1차부터 연속으로) 리마인드가 나간다. 몇 번 보낼지는 서버가 이걸로 정한다.
       messages: [val("remindMsg1"), val("remindMsg2"), val("remindMsg3")]
-    }
+    },
+    // 하단 추가 안내 박스 — 체크한 것만 enabled. 템플릿이 enabled 아닌 건 걸러낸다.
+    extras: [
+      { enabled: !!$("extra1On").checked, title: val("extra1Title"), body: val("extra1Body"),
+        buttonLabel: val("extra1Btn"), buttonUrl: val("extra1Url") },
+      { enabled: !!$("extra2On").checked, title: val("extra2Title"), body: val("extra2Body"),
+        buttonLabel: val("extra2Btn"), buttonUrl: val("extra2Url") }
+    ]
   };
 }
 function recipients(){
@@ -1502,6 +1545,19 @@ async function boot(){
     };
     $("remindOn").addEventListener("change", paintRemind);
     paintRemind();
+
+    // 하단 추가 안내 박스 — 체크하면 입력칸이 보이고, 상태를 브라우저에 저장한다.
+    ["extra1","extra2"].forEach(k => {
+      try { if(localStorage.getItem("outreach_"+k+"_on") === "1") $(k+"On").checked = true; } catch(e){}
+      const paint = () => {
+        const on = $(k+"On").checked;
+        $(k+"Box").style.display = on ? "block" : "none";
+        try { localStorage.setItem("outreach_"+k+"_on", on ? "1" : "0"); } catch(e){}
+        renderPreview();
+      };
+      $(k+"On").addEventListener("change", paint);
+      paint();
+    });
   }
 
   // 관리자 페이지는 관리자만 볼 수 있다 — 버튼도 관리자에게만 띄운다.
