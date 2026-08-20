@@ -448,15 +448,28 @@
             <span>이미 보낸 사람에게도 <b>강제 발송</b></span>
           </label>
           <!-- 회신이 없으면 자동으로 팔로업(리마인드)을 보낸다. 이력 저장소가 있어야 동작한다. -->
-          <div class="sendbar" id="remindWrap" style="display:none;font-size:12.5px;color:#666;flex-wrap:wrap;gap:6px;align-items:center">
-            <label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin:0">
-              <input type="checkbox" id="remindOn" style="width:auto;margin:0" />
-              <span>회신 없으면 <b>자동 리마인드</b></span>
-            </label>
-            <span id="remindOpts" style="display:none;align-items:center;gap:4px">
-              <input id="remindEvery" type="number" min="1" max="60" value="3" style="width:52px;padding:4px 6px" /> 일마다,
-              최대 <input id="remindMax" type="number" min="1" max="10" value="2" style="width:48px;padding:4px 6px" /> 번
-            </span>
+          <div id="remindWrap" style="display:none;font-size:12.5px;color:#666">
+            <div class="sendbar" style="flex-wrap:wrap;gap:6px;align-items:center">
+              <label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin:0">
+                <input type="checkbox" id="remindOn" style="width:auto;margin:0" />
+                <span>회신 없으면 <b>자동 리마인드</b></span>
+              </label>
+              <span id="remindOpts" style="display:none;align-items:center;gap:4px">
+                <input id="remindEvery" type="number" min="1" max="60" value="3" style="width:52px;padding:4px 6px" /> 일마다
+              </span>
+            </div>
+            <!-- 회차별 문구 — 채운 회차만, 1차부터 차례로 나간다. 비우면 그 회차부터 멈춘다. -->
+            <div id="remindMsgs" style="display:none;margin-top:8px">
+              <div style="font-size:11.5px;color:#999;margin-bottom:6px">
+                채운 회차만 순서대로 나갑니다 (1차 → 2차 → 3차). 첫 메일 스레드에 <b>Re:</b> 로 이어집니다.
+              </div>
+              <label class="f" style="margin-bottom:8px"><span>1차 리마인드 문구</span>
+                <textarea id="remindMsg1" rows="2" placeholder="Just circling back on my note below — we'd still love to work with you. Would this be something you're up for?"></textarea></label>
+              <label class="f" style="margin-bottom:8px"><span>2차 리마인드 문구 <i>— 선택</i></span>
+                <textarea id="remindMsg2" rows="2" placeholder="Following up once more — happy to adjust the offer if that helps. Let me know either way!"></textarea></label>
+              <label class="f" style="margin-bottom:0"><span>3차 리마인드 문구 <i>— 선택</i></span>
+                <textarea id="remindMsg3" rows="2" placeholder="Last note from me on this — the door stays open anytime if you'd like to revisit."></textarea></label>
+            </div>
           </div>
           <div class="progress" id="progWrap" style="display:none"><div class="fill" id="progFill"></div></div>
           <div id="dupInfo"></div>
@@ -521,7 +534,8 @@ let DEAL = "paid";
 const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","brandIntro","pitch","subject","cc",
   "currency","amount","commission","paymentNote","commissionNote","deliverables","deadline","location",
   "product","productUrl","productImage","productDesc","v1u","v1l","v2u","v2l","v3u","v3l","videosNote",
-  "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes","remindEvery","remindMax","bulkText"];
+  "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes",
+  "remindEvery","remindMsg1","remindMsg2","remindMsg3","bulkText"];
 /* 수신자마다 달라지는 값은 초안에서 제외 — 다음 사람에게 잘못 나가는 사고 방지 */
 const PER_RECIPIENT = ["creatorName","handle","to","whyYou"];
 
@@ -981,10 +995,11 @@ function campaign(){
     applyUrl: val("applyUrl"), applyLabel: val("applyLabel"), notes: val("notes"),
     senderName: a.name || "", senderEmail: a.email || "", senderTitle: a.title || "",
     logoUrl: (CFG && CFG.logoUrl) || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
-    followup: {                            // 회신 없을 때 자동 팔로업 (며칠마다·최대 몇 번)
+    followup: {                            // 회신 없을 때 자동 팔로업 (며칠마다 · 회차별 문구)
       enabled: !!$("remindOn").checked,    // ※ 템플릿의 d.reminder(불리언)와 이름이 겹치지 않게 followup 로 둔다
       intervalDays: Math.max(1, Math.min(Number(val("remindEvery"))||3, 60)),
-      maxCount: Math.max(1, Math.min(Number(val("remindMax"))||2, 10))
+      // 회차별 문구 — 채운 만큼(1차부터 연속으로) 리마인드가 나간다. 몇 번 보낼지는 서버가 이걸로 정한다.
+      messages: [val("remindMsg1"), val("remindMsg2"), val("remindMsg3")]
     }
   };
 }
@@ -1471,8 +1486,10 @@ async function boot(){
     // 자동 리마인드 토글 — 켜면 주기·횟수 입력칸이 보인다. 상태를 브라우저에 저장한다.
     try { if(localStorage.getItem("outreach_remind_on") === "1") $("remindOn").checked = true; } catch(e){}
     const paintRemind = () => {
-      $("remindOpts").style.display = $("remindOn").checked ? "inline-flex" : "none";
-      try { localStorage.setItem("outreach_remind_on", $("remindOn").checked ? "1" : "0"); } catch(e){}
+      const on = $("remindOn").checked;
+      $("remindOpts").style.display = on ? "inline-flex" : "none";
+      $("remindMsgs").style.display = on ? "block" : "none";
+      try { localStorage.setItem("outreach_remind_on", on ? "1" : "0"); } catch(e){}
     };
     $("remindOn").addEventListener("change", paintRemind);
     paintRemind();

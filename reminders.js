@@ -99,11 +99,16 @@ async function sendDue(opts) {
       const account = A.findByEmail(plan.by);
       if (!account || !account.appPassword) { await H.cancelReminder(plan.key); summary.skipped++; continue; }
 
+      // 이번에 보내는 회차의 문구를 고른다 — sentCount 는 지금까지 보낸 수라, 이번은 (sentCount+1)차.
+      // reminderNotes[sentCount] 가 0-based 로 그 회차 문구다. 비었으면 템플릿 기본 문구로 나간다.
+      const notes = Array.isArray(plan.reminderNotes) ? plan.reminderNotes : [];
+      const roundNote = String(notes[sentCount] || plan.reminderNote || "").trim();
+
       const data = {
         reminder: true,
         to: plan.to, creatorName: plan.creatorName || "", handle: plan.handle || "",
         brand: plan.brand || "d'Alba", campaignTitle: plan.campaignTitle || "",
-        subject: plan.subject || "", reminderNote: plan.reminderNote || "",
+        subject: plan.subject || "", reminderNote: roundNote,
         applyUrl: plan.applyUrl || "", applyLabel: plan.applyLabel || "",
         senderName: account.name, senderEmail: account.email, senderTitle: account.title || "",
         logoUrl: logoUrl()

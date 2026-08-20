@@ -242,7 +242,16 @@ module.exports = async (req, res) => {
     const rem = campaign.followup || {};
     const remindOn = Boolean(rem.enabled) && H.enabled() && !dryRun;
     const remindEvery = Math.max(1, Math.min(Number(rem.intervalDays) || 3, 60));
-    const remindMax = Math.max(1, Math.min(Number(rem.maxCount) || 2, 10));
+    // 회차별 문구 — 담당자가 1차·2차·3차를 직접 적는다. 채운 만큼(1차부터 연속으로) 보낸다:
+    // 1차만 적으면 1번, 1·2차면 2번… 중간이 비면 거기서 멈춘다. 하나도 안 적으면 기본 문구로 2번.
+    const remindNotes = (Array.isArray(rem.messages) ? rem.messages : [])
+      .map(s => String(s == null ? "" : s).trim());
+    let filled = 0;
+    for (const m of remindNotes) { if (m) filled++; else break; }
+    const remindMax = filled > 0
+      ? filled
+      : Math.max(1, Math.min(Number(rem.maxCount) || 2, 10));
+    const remindPlanNotes = remindNotes.slice(0, remindMax);
     // 로고 파일 — 실제 발송에서는 인라인(cid) 첨부, 미리보기(dryRun)에서는 data URL
     const logoAtt = dryRun ? null : logoAttachment();
     // 첨부는 수신자와 무관하게 같으므로 한 번만 만든다 (로고 + 업로드한 제품 이미지)
@@ -400,7 +409,7 @@ module.exports = async (req, res) => {
               by: account.email, byName: account.name, senderTitle: account.title || "",
               brand: d.brand || "", campaignTitle: d.campaignTitle || "",
               subject: built.subject, applyUrl: d.applyUrl || "", applyLabel: d.applyLabel || "",
-              intervalDays: remindEvery, maxCount: remindMax, sentCount: 0,
+              intervalDays: remindEvery, maxCount: remindMax, reminderNotes: remindPlanNotes, sentCount: 0,
               nextAt: new Date(now + remindEvery * 86400e3).toISOString(),
               createdAt: new Date(now).toISOString()
             });
