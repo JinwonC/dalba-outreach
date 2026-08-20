@@ -240,8 +240,8 @@
       inner += '<div style="padding-top:14px;"><a href="' + url + '" style="font:700 14px/1.5 ' + FONT +
         ";color:" + C.gold + ';text-decoration:none;">' + esc(has(d.productUrlLabel) ? d.productUrlLabel : "See the product →") + "</a></div>";
     }
-    return sectionLabel("🧴", "About " + (has(d.brand) ? d.brand : "the product")) +
-      infoBox(inner, { align: img ? "center" : "left", pad: "22px 24px" });
+    // "About d'Alba" 제목은 빼고 제품 박스만 둔다 (요청에 따라 제거)
+    return infoBox(inner, { align: img ? "center" : "left", pad: "22px 24px" });
   }
 
   // ─── 바이럴 영상 (이미 잘 되고 있다는 증거 — 수락률에 가장 크게 기여) ──
@@ -334,15 +334,21 @@
 
   // ─── 추가 안내 박스 (선택) ─────────────────────────────────────
   // 메일 하단에 담당자가 직접 만든 안내 박스를 넣는다 (예: 선물 폼, 디스코드 초대).
-  // 각 박스는 제목·내용·버튼이름·버튼URL 을 담당자가 직접 채우고, 체크박스로 넣을지 고른다.
-  // extras: [{ enabled, title, body, buttonLabel, buttonUrl }, ...]
-  function extraButton(label, url) {
+  // 각 박스는 제목·내용·버튼이름·버튼URL·색상을 담당자가 직접 정하고, 체크박스로 넣을지 고른다.
+  // extras: [{ enabled, accent, title, body, buttonLabel, buttonUrl }, ...]
+  //   accent: "purple"(디스코드 보라) | "gold"(크림·기본)
+  const EXTRA_THEMES = {
+    gold:   { bg: C.box,     line: C.boxLine, head: C.gold,   btn: C.dark },
+    purple: { bg: "#eef0fc", line: "#d6dbf7", head: "#4f57d4", btn: "#5865f2" }
+  };
+
+  function extraButton(label, url, btnColor) {
     const u = safeUrl(url);
     if (!u) return "";
     // 박스 안 버튼은 왼쪽 정렬(참고 디자인과 동일) · 좁은 화면에서 눌리기 쉬운 크기
     return '<div style="padding-top:16px;">' +
       '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
-      '<td align="center" style="background:' + C.dark + ';border-radius:999px;">' +
+      '<td align="center" style="background:' + btnColor + ';border-radius:999px;">' +
       '<a href="' + u + '" style="display:inline-block;padding:13px 30px;font:700 14px/1.2 ' + FONT +
       ';color:#ffffff;text-decoration:none;border-radius:999px;">' + esc(has(label) ? label : "Learn more →") + "</a>" +
       "</td></tr></table></div>";
@@ -361,18 +367,23 @@
     if (!items.length) return "";
     let out = "";
     items.forEach(function (x, i) {
+      const th = EXTRA_THEMES[x.accent] || EXTRA_THEMES.gold;
       let inner = "";
       if (has(x.title)) {
         inner += '<div style="font:700 12px/1.4 ' + FONT +
-          ';letter-spacing:.12em;text-transform:uppercase;color:' + C.gold + ';padding-bottom:10px;">' +
+          ';letter-spacing:.12em;text-transform:uppercase;color:' + th.head + ';padding-bottom:10px;">' +
           esc(x.title) + "</div>";
       }
       if (has(x.body)) {
         inner += '<div style="font:400 14.5px/1.65 ' + FONT + ";color:" + C.text + ';">' + nl2br(x.body) + "</div>";
       }
-      inner += extraButton(x.buttonLabel, x.buttonUrl);
+      inner += extraButton(x.buttonLabel, x.buttonUrl, th.btn);
+      // infoBox 는 색이 고정이라, 박스 색을 테마대로 직접 그린다
       out += (i ? '<tr><td style="height:12px;line-height:12px;">&nbsp;</td></tr>' : "") +
-        infoBox(inner, { align: "left", pad: "22px 24px" });
+        '<tr><td style="padding:0;">' +
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+        'style="background:' + th.bg + ";border:1px solid " + th.line + ';border-radius:12px;">' +
+        '<tr><td class="bx" style="padding:22px 24px;text-align:left;">' + inner + "</td></tr></table></td></tr>";
     });
     return out;
   }

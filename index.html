@@ -453,6 +453,11 @@
             <label class="f"><span>버튼 문구 <i>— 선택</i></span><input id="extra1Btn" type="text" placeholder="Share your details →" /></label>
             <label class="f"><span>버튼 링크(URL) <i>— 선택</i></span><input id="extra1Url" type="text" placeholder="https://forms.gle/..." /></label>
           </div>
+          <label class="f"><span>박스 색상</span>
+            <select id="extra1Color">
+              <option value="purple">보라 (디스코드)</option>
+              <option value="gold">크림 (기본)</option>
+            </select></label>
         </div>
 
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#333;cursor:pointer;margin:14px 0 8px;padding-top:12px;border-top:1px solid #f0f0ee">
@@ -466,6 +471,11 @@
             <label class="f"><span>버튼 문구 <i>— 선택</i></span><input id="extra2Btn" type="text" placeholder="Join the Discord →" /></label>
             <label class="f"><span>버튼 링크(URL) <i>— 선택</i></span><input id="extra2Url" type="text" placeholder="https://discord.gg/..." /></label>
           </div>
+          <label class="f"><span>박스 색상</span>
+            <select id="extra2Color">
+              <option value="gold">크림 (기본)</option>
+              <option value="purple">보라 (디스코드)</option>
+            </select></label>
         </div>
       </div>
     </div>
@@ -575,7 +585,8 @@ const FIELDS = ["creatorName","handle","to","whyYou","brand","campaignTitle","br
   "product","productUrl","productImage","productDesc","v1u","v1l","v2u","v2l","v3u","v3l","videosNote",
   "stepsIntro","s1","s2","s3","s4","applyUrl","applyLabel","notes",
   "remindEvery","remindMsg1","remindMsg2","remindMsg3",
-  "extra1Title","extra1Body","extra1Btn","extra1Url","extra2Title","extra2Body","extra2Btn","extra2Url","bulkText"];
+  "extra1Title","extra1Body","extra1Btn","extra1Url","extra1Color",
+  "extra2Title","extra2Body","extra2Btn","extra2Url","extra2Color","bulkText"];
 /* 수신자마다 달라지는 값은 초안에서 제외 — 다음 사람에게 잘못 나가는 사고 방지 */
 const PER_RECIPIENT = ["creatorName","handle","to","whyYou"];
 
@@ -1045,9 +1056,11 @@ function campaign(){
     },
     // 하단 추가 안내 박스 — 체크한 것만 enabled. 템플릿이 enabled 아닌 건 걸러낸다.
     extras: [
-      { enabled: !!$("extra1On").checked, title: val("extra1Title"), body: val("extra1Body"),
+      { enabled: !!$("extra1On").checked, accent: val("extra1Color") || "gold",
+        title: val("extra1Title"), body: val("extra1Body"),
         buttonLabel: val("extra1Btn"), buttonUrl: val("extra1Url") },
-      { enabled: !!$("extra2On").checked, title: val("extra2Title"), body: val("extra2Body"),
+      { enabled: !!$("extra2On").checked, accent: val("extra2Color") || "gold",
+        title: val("extra2Title"), body: val("extra2Body"),
         buttonLabel: val("extra2Btn"), buttonUrl: val("extra2Url") }
     ]
   };
@@ -1537,6 +1550,7 @@ async function boot(){
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
     $("productUrl").addEventListener("input", syncPid);
     $("currency").addEventListener("change", schedulePreview);
+    ["extra1Color","extra2Color"].forEach(id => { if($(id)) $(id).addEventListener("change", schedulePreview); });
     $("forceSend").addEventListener("change", paintDup);
     $("imgUpBtn").addEventListener("click", () => $("imgUpFile").click());
     $("imgUpFile").addEventListener("change", onImgFile);
