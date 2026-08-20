@@ -378,8 +378,9 @@
         inner += '<div style="font:400 14.5px/1.65 ' + FONT + ";color:" + C.text + ';">' + nl2br(x.body) + "</div>";
       }
       inner += extraButton(x.buttonLabel, x.buttonUrl, th.btn);
-      // infoBox 는 색이 고정이라, 박스 색을 테마대로 직접 그린다
-      out += (i ? '<tr><td style="height:12px;line-height:12px;">&nbsp;</td></tr>' : "") +
+      // 첫 박스는 위(CTA 등)와 붙지 않게 넉넉히 띄우고, 박스끼리는 12px 로 벌린다
+      out += '<tr><td style="height:' + (i ? "12" : "26") + 'px;line-height:' + (i ? "12" : "26") + 'px;">&nbsp;</td></tr>' +
+        // infoBox 는 색이 고정이라, 박스 색을 테마대로 직접 그린다
         '<tr><td style="padding:0;">' +
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
         'style="background:' + th.bg + ";border:1px solid " + th.line + ';border-radius:12px;">' +
