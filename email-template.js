@@ -594,9 +594,8 @@
     if (!has(d.to)) errs.push("크리에이터 이메일이 없습니다");
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.to).trim())) errs.push("이메일 형식이 올바르지 않습니다: " + d.to);
     if (!has(d.campaignTitle)) errs.push("캠페인 제목이 없습니다");
-    const type = d.dealType || "paid";
-    if ((type === "paid" || type === "both") && !has(d.amount)) errs.push("유상 협업인데 금액이 없습니다");
-    if ((type === "affiliate" || type === "both") && !has(d.commission)) errs.push("어필리에이트인데 커미션율이 없습니다");
+    // 협업 조건(유상/어필리에이트)과 금액·커미션은 **선택**이다. 비워 두면 메일의 금액 박스가
+    // 빠질 뿐 발송은 막지 않는다 — 조건을 나중에 협의하는 아웃리치도 있기 때문.
     return errs;
   }
 
