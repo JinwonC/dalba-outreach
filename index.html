@@ -337,21 +337,25 @@
           <button type="button" id="dt-paid" onclick="setDeal('paid')">유상 협업</button>
           <button type="button" id="dt-affiliate" onclick="setDeal('affiliate')">어필리에이트</button>
           <button type="button" id="dt-both" onclick="setDeal('both')">유상 + 어필리에이트</button>
+          <button type="button" id="dt-none" onclick="setDeal('none')">없음</button>
         </div>
-        <div class="grid3">
-          <label class="f"><span>통화</span>
-            <select id="currency">
-              <option value="USD">USD $</option><option value="KRW">KRW ₩</option>
-              <option value="GBP">GBP £</option><option value="EUR">EUR €</option><option value="JPY">JPY ¥</option>
-            </select></label>
-          <label class="f"><span>금액</span><input id="amount" type="text" inputmode="numeric" placeholder="500" /></label>
-          <label class="f"><span>커미션 %</span><input id="commission" type="text" inputmode="decimal" placeholder="20" /></label>
-        </div>
-        <div class="grid2">
-          <label class="f"><span>지급 조건 <i>— 금액 박스 아래 문구</i></span>
-            <input id="paymentNote" type="text" placeholder="Paid after your content goes live and is approved." /></label>
-          <label class="f"><span>커미션 부연 <i>— 선택</i></span>
-            <input id="commissionNote" type="text" placeholder="no cap, paid out by TikTok Shop." /></label>
+        <!-- "없음" 을 고르면 금액·커미션 관련 입력이 통째로 숨고, 메일에서도 보상 섹션이 빠진다 -->
+        <div id="dealFields">
+          <div class="grid3">
+            <label class="f"><span>통화</span>
+              <select id="currency">
+                <option value="USD">USD $</option><option value="KRW">KRW ₩</option>
+                <option value="GBP">GBP £</option><option value="EUR">EUR €</option><option value="JPY">JPY ¥</option>
+              </select></label>
+            <label class="f"><span>금액</span><input id="amount" type="text" inputmode="numeric" placeholder="500" /></label>
+            <label class="f"><span>커미션 %</span><input id="commission" type="text" inputmode="decimal" placeholder="20" /></label>
+          </div>
+          <div class="grid2">
+            <label class="f"><span>지급 조건 <i>— 금액 박스 아래 문구</i></span>
+              <input id="paymentNote" type="text" placeholder="Paid after your content goes live and is approved." /></label>
+            <label class="f"><span>커미션 부연 <i>— 선택</i></span>
+              <input id="commissionNote" type="text" placeholder="no cap, paid out by TikTok Shop." /></label>
+          </div>
         </div>
         <label class="f"><span>요청 산출물</span>
           <textarea id="deliverables" rows="2" placeholder="1 TikTok video (30–60s) + keep our affiliate link in your bio for 2 weeks"></textarea></label>
@@ -693,7 +697,9 @@ function setMode(m){
 }
 function setDeal(d){
   DEAL = d;
-  ["paid","affiliate","both"].forEach(k => $("dt-"+k).classList.toggle("on", k===d));
+  ["paid","affiliate","both","none"].forEach(k => $("dt-"+k).classList.toggle("on", k===d));
+  // "없음" 이면 금액·커미션 입력을 숨긴다 (메일에서도 보상 섹션이 빠진다)
+  if($("dealFields")) $("dealFields").style.display = d === "none" ? "none" : "";
   localStorage.setItem("outreach_deal", d);
   renderPreview();
 }

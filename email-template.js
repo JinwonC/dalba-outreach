@@ -474,9 +474,12 @@
       "</td></tr>";
 
     // 프리헤더 = 받은편지함 미리보기 첫 줄 (열람률에 직결)
+    // 협업 조건이 "없음" 이면 금액 얘기를 빼고 담백하게 둔다.
     const preheader = has(d.preheader) ? d.preheader :
-      ((has(d.amount) && (d.dealType !== "affiliate") ? money(d.currency, d.amount) + " paid collab" : "Paid collab") +
-        " with " + brand + " — details inside.");
+      (d.dealType === "none"
+        ? "Collab with " + brand + " — details inside."
+        : (has(d.amount) && (d.dealType !== "affiliate") ? money(d.currency, d.amount) + " paid collab" : "Paid collab") +
+          " with " + brand + " — details inside.");
 
     return '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">' +
       '<html xmlns="http://www.w3.org/1999/xhtml"><head>' +
