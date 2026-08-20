@@ -161,25 +161,29 @@ async function reserve(r, meta, force) {
     return { ok: true, forced: true, record: rec };
   }
 
-  // 첫 키를 NX 로 잡아본다. 실패면 이미 보낸 사람이다.
-  const got = await cmd(["SET", keys[0], val, "NX", "EX", String(TTL_SEC)]);
-  if (!got) {
-    const prior = parseRec(await cmd(["GET", keys[0]]));
+  // 중복은 **다른 담당자**가 이미 보낸 경우에만 막는다. 본인이 이미 보낸 크리에이터에게
+  // 직접 후속(재발송)을 보내는 건 막지 않는다 — 그 자리는 덮어쓰고 그대로 보낸다.
+  const me = normEmail((meta && meta.by) || "");
+  const created = [];                 // 이번에 **새로** 잡은 키 (실패 시 반납 대상)
+  let resent = false;                 // 본인 자리 위에 다시 보낸 경우
+
+  for (let i = 0; i < keys.length; i++) {
+    const got = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
+    if (got) { created.push(keys[i]); continue; }
+
+    const prior = parseRec(await cmd(["GET", keys[i]]));
+    // 본인이 이미 잡은 자리면 재발송 허용 — 덮어쓰고 계속 (기록의 주인은 그대로 본인)
+    if (prior && me && normEmail(prior.by) === me) {
+      await cmd(["SET", keys[i], val, "EX", String(TTL_SEC)]);
+      resent = true;
+      continue;
+    }
+    // 다른 담당자 자리 → 이번에 새로 잡은 것만 반납하고 보류 (본인 자리는 건드리지 않는다)
+    if (created.length) await pipeline(created.map(k => ["DEL", k]));
     return { ok: false, prior };
   }
 
-  // 나머지 키(핸들)도 잡는다. 하나라도 남이 갖고 있으면 방금 잡은 걸 반납한다 —
-  // 주소는 새 주소지만 핸들이 같은, 즉 이미 접촉한 크리에이터인 경우다.
-  for (let i = 1; i < keys.length; i++) {
-    const ok2 = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
-    if (!ok2) {
-      const prior = parseRec(await cmd(["GET", keys[i]]));
-      await pipeline(keys.slice(0, i).map(k => ["DEL", k]));
-      return { ok: false, prior };
-    }
-  }
-
-  return { ok: true, record: rec };
+  return { ok: true, record: rec, resent: resent || undefined };
 }
 
 // 발송이 실패했으면 자리를 반납한다 — 실패한 주소가 90일간 막히면 안 된다

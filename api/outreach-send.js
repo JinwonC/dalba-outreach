@@ -358,7 +358,9 @@ module.exports = async (req, res) => {
           });
           continue;
         }
-        reserved = !rv.skipped;
+        // 본인 재발송(resent)은 이미 있던 자리를 덮어쓴 것이라, 발송이 실패해도 그 자리를
+        // 반납하면 안 된다 (원래 보냈던 기록까지 사라진다). 새로 잡은 경우만 실패 시 반납한다.
+        reserved = !rv.skipped && !rv.resent;
       } catch (e) {
         // 저장소가 죽으면 이미 보낸 사람인지 알 수 없다. 이럴 때 그냥 보내면
         // 중복 발송이 나가므로 기본은 **보내지 않는다**. 다만 담당자가 [강제 발송] 을

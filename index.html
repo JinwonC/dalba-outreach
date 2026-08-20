@@ -959,7 +959,7 @@ function renderBulkTable(){
 
   let h = '<table class="rcp"><thead><tr><th>#</th><th>이메일</th><th>이름</th><th>핸들</th><th>금액</th><th>커미션</th><th>개인화</th></tr></thead><tbody>';
   rows.forEach((r,i) => {
-    const p = priorOf(r.to);
+    const p = heldPriorOf(r.to);   // 다른 담당자가 보낸 경우만 보류 표시 (본인 재발송은 그대로 나감)
     h += '<tr'+(p ? ' style="background:#fffaf0"' : '')+'><td>'+(i+1)+'</td><td>'+esc(r.to)+
          (p ? ' <span class="holdtag" title="'+esc(priorText(p))+'">⏸ 보류</span>' : '') +
          '</td><td>'+esc(r.creatorName||'')+'</td><td>'+esc(r.handle||'')+
@@ -1157,6 +1157,15 @@ const dupKey = e => {
   return loc + "@" + dom;
 };
 function priorOf(to){ return DUP[dupKey(to)] || null; }
+/* 내 발신 주소 (accounts 모드면 로그인 계정, byo 면 저장한 계정) */
+function myEmail(){ const a = acct(); return a && a.email ? String(a.email).toLowerCase() : ""; }
+/* 보류 대상인가 — **다른 담당자**가 이미 보낸 경우만. 본인 재발송은 서버가 그대로 보내므로
+   보류가 아니다 (미리보기가 "보류"라고 잘못 겁주지 않도록 여기서도 본인 것은 뺀다). */
+function heldPriorOf(to){
+  const p = priorOf(to);
+  if(!p) return null;
+  return String(p.by || "").toLowerCase() === myEmail() ? null : p;
+}
 
 function scheduleDupCheck(){
   if(!(CFG.history && CFG.history.enabled)) return;
@@ -1195,17 +1204,17 @@ function priorText(p){
 
 function paintDup(){
   const list = recipients();
-  const held = list.filter(r => priorOf(r.to));
+  const held = list.filter(r => heldPriorOf(r.to));   // 다른 담당자가 보낸 경우만 보류
   if(!held.length){ $("dupInfo").innerHTML = ""; return; }
   const forced = $("forceSend").checked;
   $("dupInfo").innerHTML =
     '<div class="' + (forced ? "err" : "hold") + '" style="margin-top:10px">' +
       (forced
-        ? '⚠️ 이미 보낸 <b>'+held.length+'명</b> 에게도 <b>강제 발송</b>합니다.'
-        : '⏸ 이미 보낸 <b>'+held.length+'명</b> 은 보류됩니다 (나머지만 발송).') +
+        ? '⚠️ 다른 담당자가 이미 보낸 <b>'+held.length+'명</b> 에게도 <b>강제 발송</b>합니다.'
+        : '⏸ 다른 담당자가 이미 보낸 <b>'+held.length+'명</b> 은 보류됩니다 (나머지만 발송).') +
     '</div>' +
     '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
-    held.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td>'+esc(priorText(priorOf(r.to)))+'</td></tr>').join("") +
+    held.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td>'+esc(priorText(heldPriorOf(r.to)))+'</td></tr>').join("") +
     '</tbody></table></div>';
 }
 
@@ -1220,14 +1229,14 @@ function startSend(){
   const built = T.build(d);
 
   const forced = $("forceSend").checked;
-  const held = forced ? [] : list.filter(r => priorOf(r.to));
+  const held = forced ? [] : list.filter(r => heldPriorOf(r.to));   // 다른 담당자 것만 보류
   const going = list.length - held.length;
 
   $("confirmBody").innerHTML =
     '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
-    (held.length ? ' <span style="color:#a8801f">(이미 보낸 '+held.length+'명 보류)</span>' : '') +
-    (forced && list.some(r => priorOf(r.to))
-      ? '<br /><span style="color:#a23b2e">⚠️ 이미 보낸 사람에게도 강제 발송합니다.</span>' : '') +
+    (held.length ? ' <span style="color:#a8801f">(다른 담당자가 보낸 '+held.length+'명 보류)</span>' : '') +
+    (forced && list.some(r => heldPriorOf(r.to))
+      ? '<br /><span style="color:#a23b2e">⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.</span>' : '') +
     '<br /><br />' +
     '<span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +
     '<span style="color:#999">받는 사람</span><br />' +
