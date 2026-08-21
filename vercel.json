@@ -27,6 +27,9 @@
     "api/schedule.js": {
       "maxDuration": 30
     },
+    "api/lookup.js": {
+      "maxDuration": 60
+    },
     "api/videos.js": {
       "maxDuration": 30
     }

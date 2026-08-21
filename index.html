@@ -273,10 +273,11 @@
     </div>
   </div>
 
-  <!-- 화면 전환 — 발송 / Mail Pipeline. 파이프라인은 로그인 + 이력 저장소가 있을 때만 뜬다 -->
+  <!-- 화면 전환 — 발송 / Mail Pipeline / 중복 검사. 이력 저장소가 있을 때만 뜬다 -->
   <div class="viewtabs" id="viewTabs" style="display:none">
     <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
-    <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')">🗂 Mail Pipeline</div>
+    <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')" style="display:none">🗂 Mail Pipeline</div>
+    <div class="vtab" id="vtabCheck" onclick="setView('check')" style="display:none">🔎 중복 검사</div>
   </div>
 
   <div id="sendView">
@@ -573,6 +574,23 @@
       <span class="muted" id="pipeMsg"></span>
     </div>
     <div id="pipeBody"></div>
+  </div>
+
+  <!-- 중복 검사 — 핸들/이메일로 전 담당자(관리자 포함) 발송 이력을 조회 -->
+  <div id="checkView" style="display:none">
+    <div class="panel" style="margin-top:16px;max-width:760px">
+      <h2>🔎 중복 검사 — 이미 보낸 크리에이터인지 확인</h2>
+      <div class="hint">
+        크리에이터 <b>핸들</b> 또는 <b>이메일</b>을 넣으면, <b>전체 담당자(관리자 포함)</b>가
+        이 사람에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <input id="checkQ" type="text" placeholder="@handle 또는 creator@example.com" style="flex:1;min-width:220px"
+               onkeydown="if(event.key==='Enter')runCheck()" />
+        <button class="btn dark" onclick="runCheck()">검사</button>
+      </div>
+      <div id="checkResult" style="margin-top:14px"></div>
+    </div>
   </div>
 </div>
 
@@ -1524,9 +1542,60 @@ function setView(v){
   VIEW = v;
   $("vtabSend").classList.toggle("active", v==="send");
   $("vtabPipeline").classList.toggle("active", v==="pipeline");
+  $("vtabCheck").classList.toggle("active", v==="check");
   $("sendView").style.display = v==="send" ? "" : "none";
   $("pipelineView").style.display = v==="pipeline" ? "" : "none";
+  $("checkView").style.display = v==="check" ? "" : "none";
   if(v==="pipeline" && !PIPE_LOADED) loadPipeline();
+  if(v==="check") $("checkQ").focus();
+}
+
+/* ── 중복 검사 ──
+   핸들/이메일로 전 담당자(관리자 포함) 발송 이력을 조회한다. 발송 화면의 즉석 중복 확인과
+   달리 "누가누가 보냈나" 전부를 보여준다 — 조율·중복 방지용. /api/lookup 이 로그를 훑는다. */
+async function runCheck(){
+  const q = ($("checkQ").value||"").trim();
+  const box = $("checkResult");
+  if(!q){ box.innerHTML = '<div class="muted">핸들 또는 이메일을 입력하세요.</div>'; return; }
+  box.innerHTML = '<div class="muted">조회 중…</div>';
+  try {
+    const r = await fetch("/api/lookup?q="+encodeURIComponent(q), { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    renderCheck(d);
+  } catch(e){
+    box.innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
+  }
+}
+function renderCheck(d){
+  const box = $("checkResult");
+  if(!d.found){
+    box.innerHTML =
+      '<div class="ok">✅ <b>발송 이력 없음</b> — "'+esc(d.query)+'" 에게 보낸 기록이 없습니다. 안심하고 발송하세요.</div>' +
+      (d.replyCount ? '<div class="muted" style="margin-top:8px">회신 기록은 '+d.replyCount+'건 있습니다.</div>' : '');
+    return;
+  }
+  const senders = (d.senders||[]).map(esc).join(", ");
+  let h = '<div class="hold">⏸ <b>이미 발송됨</b> — 총 <b>'+d.sentCount+'건</b>' +
+    (senders ? ' · 담당자: <b>'+senders+'</b>' : '') +
+    (d.replyCount ? ' · 회신 '+d.replyCount+'건' : '') + '</div>';
+  h += '<div class="scroll" style="margin-top:10px"><table class="rcp"><thead><tr>' +
+    '<th>발송일</th><th>담당자</th><th>대상</th><th>캠페인</th></tr></thead><tbody>' +
+    d.sent.slice(0,100).map(s =>
+      '<tr><td class="'+(s.forced?'':'')+'">'+esc(fmtAt(s.at))+(s.forced?' <span class="holdtag">강제</span>':'')+'</td>' +
+      '<td>'+esc(s.byName||s.by||'—')+'</td>' +
+      '<td>'+esc(s.name||s.to||'')+(s.handle?' <span class="muted">@'+esc(String(s.handle).replace(/^@/,''))+'</span>':'')+'</td>' +
+      '<td class="muted">'+esc(s.campaign||'')+'</td></tr>').join("") +
+    '</tbody></table></div>';
+  if(d.replies && d.replies.length){
+    h += '<div style="font:700 12px/1.4 inherit;color:#888;margin:12px 0 6px">💬 회신 기록</div>' +
+      '<div class="scroll"><table class="rcp"><thead><tr><th>회신일</th><th>제목</th></tr></thead><tbody>' +
+      d.replies.slice(0,30).map(r =>
+        '<tr><td>'+esc(fmtAt(r.at))+'</td><td>'+esc(r.subject||'(제목 없음)')+'</td></tr>').join("") +
+      '</tbody></table></div>';
+  }
+  box.innerHTML = h;
 }
 
 const PIPE_STAGES = [
@@ -1734,11 +1803,16 @@ async function boot(){
     loadSchedules();
   }
 
-  // Mail Pipeline 탭 — 로그인 방식(본인을 식별해야 본인 것만 줄 수 있다) + 이력 저장소가 있어야 뜬다.
-  // 파이프라인이 켜질 때마다 최신으로 다시 불러오게 한다.
+  // 상단 화면 전환 탭.
+  //  · Mail Pipeline — 로그인 방식(본인 식별) + 이력 저장소가 있어야 (본인 것만 보여주므로)
+  //  · 중복 검사 — 이력 저장소만 있으면 (BYO 방식이어도 공용 이력을 조회할 수 있다)
   const canPipe = AUTH_MODE === "accounts" && CFG.history && CFG.history.enabled;
-  $("viewTabs").style.display = canPipe ? "flex" : "none";
+  const canCheck = Boolean(CFG.history && CFG.history.enabled);
+  $("vtabPipeline").style.display = canPipe ? "" : "none";
+  $("vtabCheck").style.display = canCheck ? "" : "none";
+  $("viewTabs").style.display = (canPipe || canCheck) ? "flex" : "none";
   if(!canPipe && VIEW === "pipeline") setView("send");
+  if(!canCheck && VIEW === "check") setView("send");
   PIPE_LOADED = false;
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.
