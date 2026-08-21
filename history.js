@@ -346,10 +346,40 @@ async function logReminderSent(rec) {
 }
 function recentReminders(n) { return readList(REMIND_LOG_KEY, REMIND_LOG_MAX, n); }
 
+// ─── 예약 발송 ───────────────────────────────────────────────────
+// 담당자가 "이 시각(크리에이터 현지 시간)에 보내 달라" 고 맡겨둔 발송 작업.
+// HASH 하나에 작업 id → JSON 으로 둔다. 크론(15분 간격)이 기한이 된 것을 꺼내 보낸다.
+// 캠페인 전문(스냅샷)을 그대로 저장한다 — 예약 후 화면에서 폼을 바꿔도 예약분은 안 변한다.
+const SCHED_KEY = "outreach:schedule";
+
+async function saveSchedule(job) {
+  if (!enabled()) return { skipped: true };
+  await cmd(["HSET", SCHED_KEY, String(job.id), JSON.stringify(job)]);
+  return { saved: true };
+}
+
+async function allSchedules() {
+  if (!enabled()) return [];
+  const flat = await cmd(["HGETALL", SCHED_KEY]);
+  const out = [];
+  if (Array.isArray(flat)) {
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const p = parseRec(flat[i + 1]);
+      if (p) { p.id = p.id || flat[i]; out.push(p); }
+    }
+  } else if (flat && typeof flat === "object") {
+    Object.keys(flat).forEach(function (k) { const p = parseRec(flat[k]); if (p) { p.id = p.id || k; out.push(p); } });
+  }
+  return out;
+}
+
+async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY, String(id)]); }
+
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
   recordReply, recent, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
+  saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX

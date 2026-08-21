@@ -121,10 +121,15 @@ async function sendDue(opts) {
       lastAt = Date.now();
 
       try {
+        // 첫 메일에 걸었던 참조(CC)를 리마인드에도 그대로 싣는다 — 참조로 지켜보던
+        // 스레드가 리마인드부터 끊기지 않도록. 예약에 저장된 주소만 쓴다.
+        const ccList = (Array.isArray(plan.cc) ? plan.cc : [])
+          .map(s => cleanHeader(s)).filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
         await getT(account).sendMail({
           from: { name: cleanHeader(account.name), address: account.email },
           to: toName ? { name: toName, address: to } : to,
           replyTo: account.email,
+          cc: ccList.length ? ccList : undefined,
           bcc: process.env.NW_BCC || undefined,
           subject: cleanHeader(built.subject),
           text: built.text, html: built.html,

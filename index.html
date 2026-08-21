@@ -496,6 +496,26 @@
             <input type="checkbox" id="forceSend" style="width:auto;margin:0" />
             <span>이미 보낸 사람에게도 <b>강제 발송</b></span>
           </label>
+          <!-- 예약 발송 — 크리에이터 현지 시간 기준. 로그인 방식 + 이력 저장소가 있어야 동작 -->
+          <div id="schedWrap" style="display:none;font-size:12.5px;color:#666">
+            <label class="sendbar" style="cursor:pointer;gap:6px">
+              <input type="checkbox" id="schedOn" style="width:auto;margin:0" />
+              <span>⏰ <b>나중에 보내기</b> (크리에이터 현지 시간 기준 예약)</span>
+            </label>
+            <div id="schedOpts" style="display:none;margin-top:8px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <select id="schedTz" style="width:auto;min-width:180px"></select>
+                <input id="schedDate" type="date" style="width:auto" />
+                <input id="schedTime" type="time" value="09:00" style="width:auto" />
+                <span class="muted" id="schedHint"></span>
+              </div>
+              <div style="font-size:11.5px;color:#999;margin-top:6px">
+                고른 시간대의 <b>현지 시각</b>에 나갑니다 (오차 최대 15분). 예약 후 폼을 바꿔도 예약분은 안 바뀝니다.
+              </div>
+            </div>
+          </div>
+          <!-- 내 예약 목록 -->
+          <div id="schedList" style="display:none;margin-top:10px"></div>
           <!-- 회신이 없으면 자동으로 팔로업(리마인드)을 보낸다. 이력 저장소가 있어야 동작한다. -->
           <div id="remindWrap" style="display:none;font-size:12.5px;color:#666">
             <div class="sendbar" style="flex-wrap:wrap;gap:6px;align-items:center">
@@ -1283,6 +1303,81 @@ function paintDup(){
     '</tbody></table></div>';
 }
 
+/* ── 예약 발송 ──
+   크리에이터 현지 시간(고른 시간대) 기준으로 서버에 맡겨 둔다. 크론(15분 간격)이 기한이
+   되면 즉시 발송과 같은 코드로 보낸다 — 중복 차단·리마인드·CC 전부 동일하게 적용된다. */
+let TZS = [];        // 서버가 주는 시간대 선택지 (서버와 목록이 어긋나지 않게 fetch)
+function schedActive(){ return $("schedOn") && $("schedOn").checked; }
+
+function paintSched(){
+  const on = schedActive();
+  $("schedOpts").style.display = on ? "block" : "none";
+  $("sendBtn").textContent = on ? "⏰ 예약하기" : "발송";
+}
+
+async function loadSchedules(){
+  try {
+    const r = await fetch("/api/schedule", { cache:"no-store", headers: authHeaders() });
+    if(!r.ok) return;
+    const d = await r.json();
+    if(Array.isArray(d.timezones) && d.timezones.length && !TZS.length){
+      TZS = d.timezones;
+      $("schedTz").innerHTML = TZS.map(t => '<option value="'+esc(t.tz)+'">'+esc(t.label)+'</option>').join("");
+    }
+    renderSchedules(d.jobs || []);
+  } catch(e){ /* 목록 못 불러도 발송은 계속 가능 */ }
+}
+
+function renderSchedules(jobs){
+  const box = $("schedList");
+  const pending = jobs.filter(j => j.status === "pending");
+  const recent = jobs.filter(j => j.status !== "pending").slice(-3);   // 끝난 건 최근 3개만
+  if(!pending.length && !recent.length){ box.style.display="none"; box.innerHTML=""; return; }
+  box.style.display = "";
+  const row = j =>
+    '<tr><td>'+esc(j.local || String(j.at||"").slice(0,16).replace("T"," ")+" UTC")+'</td>' +
+    '<td>'+esc(j.campaign||"")+'</td><td>'+j.recipients+'명</td>' +
+    '<td>'+(j.status==="pending" ? '<span style="color:#8a6d1f">대기</span>'
+          : j.status==="done" ? '<span class="rowok">발송됨 '+(j.sent||0)+(j.held?' · 보류 '+j.held:'')+'</span>'
+          : '<span class="rowbad" title="'+esc(j.error||"")+'">실패</span>')+'</td>' +
+    '<td>'+(j.status==="pending" ? '<button class="rm" style="border:none;background:none;color:#c0392b;cursor:pointer;text-decoration:underline;font:inherit" onclick="cancelSchedule(\''+esc(j.id)+'\')">취소</button>' : '')+'</td></tr>';
+  box.innerHTML =
+    '<div style="font:700 12px/1.4 inherit;color:#888;margin-bottom:6px">⏰ 예약된 발송</div>' +
+    '<div class="scroll" style="max-height:180px"><table class="rcp"><thead><tr><th>현지 시각</th><th>캠페인</th><th>인원</th><th>상태</th><th></th></tr></thead><tbody>' +
+    pending.map(row).join("") + recent.map(row).join("") + '</tbody></table></div>';
+}
+
+async function cancelSchedule(id){
+  try {
+    const r = await fetch("/api/schedule?id="+encodeURIComponent(id), { method:"DELETE", headers: authHeaders() });
+    const d = await r.json();
+    if(d.error) alert(d.error);
+  } catch(e){ alert(String(e.message||e)); }
+  loadSchedules();
+}
+
+async function doSchedule(list){
+  $("sendBtn").disabled = true;
+  $("sendResult").innerHTML = "";
+  try {
+    const r = await fetch("/api/schedule", {
+      method:"POST",
+      headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+      body: JSON.stringify({
+        campaign: campaign(), recipients: list, force: $("forceSend").checked,
+        when: { date: val("schedDate"), time: val("schedTime"), tz: val("schedTz") }
+      })
+    });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 — '+esc(d.job.local)+' 에 발송됩니다.</div>';
+    loadSchedules();
+  } catch(e){
+    $("sendResult").innerHTML = '<div class="err">예약 실패: '+esc(String(e.message||e))+'</div>';
+  } finally { $("sendBtn").disabled = false; }
+}
+
 /* ── 발송 ── */
 let confirmAction = null;
 function closeConfirm(){ $("confirmModal").style.display="none"; confirmAction = null; }
@@ -1292,6 +1387,27 @@ function startSend(){
   if(!list.length || !a) return;
   const d = Object.assign({}, campaign(), list[0]);
   const built = T.build(d);
+
+  // 예약 모드 — 시각·시간대를 확인시키고, 서버에 맡긴다
+  if(schedActive()){
+    if(!val("schedDate") || !val("schedTime") || !val("schedTz")){
+      $("sendResult").innerHTML = '<div class="err">예약 날짜·시각·시간대를 먼저 고르세요.</div>';
+      return;
+    }
+    const tzLabel = (TZS.find(t => t.tz === val("schedTz"))||{}).label || val("schedTz");
+    $("confirmBody").innerHTML =
+      '<b>' + esc(a.email) + '</b> 에서 <b>' + list.length + '명</b> 에게 <b>예약 발송</b>합니다.' +
+      '<br /><br /><span style="color:#999">발송 시각 (현지)</span><br />' +
+      '<b>' + esc(val("schedDate") + " " + val("schedTime")) + '</b> · ' + esc(tzLabel) +
+      '<br /><br /><span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +
+      '<span style="color:#999">받는 사람</span><br />' +
+      esc(list.slice(0,3).map(r => r.to).join(", ")) + (list.length > 3 ? ' 외 ' + (list.length-3) + '명' : '') +
+      '<br /><br /><span style="color:#8a6d1f">중복 확인은 발송 시각에 다시 합니다 — 그 사이 다른 담당자가 먼저 보내면 그 건은 보류됩니다.</span>';
+    $("confirmModal").style.display = "flex";
+    confirmAction = () => { closeConfirm(); doSchedule(list); };
+    $("confirmGo").onclick = () => { if(confirmAction) confirmAction(); };
+    return;
+  }
 
   const forced = $("forceSend").checked;
   const held = forced ? [] : list.filter(r => heldPriorOf(r.to));   // 다른 담당자 것만 보류
@@ -1601,6 +1717,22 @@ async function boot(){
   // 자동 리마인드는 이력 저장소가 있어야 동작한다(예약을 저장할 곳이 필요). 관리자 여부와 무관.
   // block 으로 둔다 — 안에 [토글 줄] + [회차별 문구]가 세로로 쌓여야 한다(flex 면 옆으로 붙는다).
   $("remindWrap").style.display = (CFG.history && CFG.history.enabled) ? "block" : "none";
+
+  // 예약 발송 — 로그인 방식(서버가 앱 비밀번호 보유) + 이력 저장소가 있어야 동작한다.
+  const canSched = AUTH_MODE === "accounts" && CFG.history && CFG.history.enabled;
+  $("schedWrap").style.display = canSched ? "block" : "none";
+  if(canSched){
+    if(!$("schedDate").value){
+      const t = new Date(Date.now() + 86400e3);   // 기본값: 내일
+      $("schedDate").value = t.toISOString().slice(0,10);
+    }
+    if(!$("schedWrap").dataset.wired){
+      $("schedWrap").dataset.wired = "1";
+      $("schedOn").addEventListener("change", paintSched);
+      paintSched();
+    }
+    loadSchedules();
+  }
 
   // Mail Pipeline 탭 — 로그인 방식(본인을 식별해야 본인 것만 줄 수 있다) + 이력 저장소가 있어야 뜬다.
   // 파이프라인이 켜질 때마다 최신으로 다시 불러오게 한다.

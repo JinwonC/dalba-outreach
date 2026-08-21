@@ -21,6 +21,7 @@ const A = require("../auth.js");
 const H = require("../history.js");
 const S = require("../sync.js");
 const R = require("../reminders.js");
+const Sch = require("../scheduled.js");
 
 const CURSOR_KEY = "outreach:cron:cursor";
 const STATUS_KEY = "outreach:cron:status";
@@ -71,6 +72,14 @@ module.exports = async (req, res) => {
     const contacted = await S.contactedMap();
     const deadline = Date.now() + BUDGET_MS;
 
+    // ─── 예약 발송을 **먼저** 처리한다 ──────────────────────────
+    // 예약은 시각 약속이라 가장 시간에 민감하다. 동기화가 예산을 다 먹으면 예약이
+    // 다음 실행(15분 뒤)으로 밀리므로, 기한이 된 예약부터 보낸다. 큰 예약은 예산만큼
+    // 보내고 남은 수신자를 되써 두므로(leftover) 여기서 전부 끝나지 않아도 이어진다.
+    let scheduled = null;
+    try { scheduled = await Sch.processDue({ budgetMs: Math.min(25e3, deadline - Date.now()) }); }
+    catch (e) { scheduled = { error: String((e && e.message) || e) }; }
+
     const results = [];
     let i = start, processed = 0;
     // 한 바퀴를 넘지 않게, 그리고 예산이 남아 있는 동안만
@@ -104,6 +113,7 @@ module.exports = async (req, res) => {
       // 한 바퀴를 다 돌았는지 — 못 돌았으면 다음 실행이 이어받는다
       complete: done,
       totals,
+      scheduled,
       reminders,
       errors: results.filter(r => r.error).map(r => ({ user: r.user, error: r.error }))
     };

@@ -24,6 +24,9 @@
     "api/pipeline.js": {
       "maxDuration": 60
     },
+    "api/schedule.js": {
+      "maxDuration": 30
+    },
     "api/videos.js": {
       "maxDuration": 30
     }
@@ -31,7 +34,7 @@
   "crons": [
     {
       "path": "/api/cron",
-      "schedule": "0 22 * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }
