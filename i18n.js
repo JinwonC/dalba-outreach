@@ -60,6 +60,11 @@
       "🗂 내 파이프라인": "🗂 My pipeline",
       "🔎 중복 검사": "🔎 Duplicate check",
       "🔎 중복 검사 — 이미 보낸 크리에이터인지 확인": "🔎 Duplicate check — has this creator been contacted?",
+      "핸들 또는 이메일을 한 줄에 하나씩(또는 콤마로 구분) 붙여넣으면 한 번에 검사합니다.":
+        "Paste handles or emails, one per line (or comma-separated), to check them all at once.",
+      "전체 담당자(관리자 포함)가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.":
+        "Finds whether any teammate (admins included) has contacted them — who and when.",
+      "@handle1\ncreator@example.com\n@handle2\n...": "@handle1\ncreator@example.com\n@handle2\n...",
       "검사": "Check",
       "발송일": "Sent",
       "회신 기록": "Replies",
@@ -270,7 +275,7 @@
       "담당자": "Staff",
       "담당자 전체": "All staff",
       "내 메일함": "My mailbox",
-      "전체 (2026-07-01~)": "All (from 2026-07-01)",
+      "전체 (2026-05-01~)": "All (from 2026-05-01)",
       "최근 7일": "Last 7 days",
       "최근 14일": "Last 14 days",
       "최근 30일": "Last 30 days",
@@ -338,7 +343,7 @@
       // ── 관리자 화면의 긴 안내문 (JS 로 만든다) ──
       "자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. 눌러서":
         "Auto-sync (daily 07:00 KST) has not run yet. Press to pull in sends and replies from",
-      "2026-07-01 이후": "2026-07-01 onward",
+      "2026-05-01 이후": "2026-05-01 onward",
       "발송·회신을 지금 바로 가져오세요.": "right now.",
       "이후": "onward",
       "담당자 메일함을 훑어": "Scans staff mailboxes and fills in sends and replies from",
@@ -357,7 +362,7 @@
       "동기화 끝 (일부 실패)": "Sync finished (some failed)",
       "· 새 발송": "· new sends",
       "· 새 회신": "· new replies",
-      "(2026-07-01 이후, 이미 있던 건 건너뜀)": "(from 2026-07-01; existing records skipped)",
+      "(2026-05-01 이후, 이미 있던 건 건너뜀)": "(from 2026-05-01; existing records skipped)",
       "실패:": "Failed:",
       "등록된 담당자가 없습니다 (NW_ACCOUNTS).": "No staff registered (NW_ACCOUNTS).",
       "시간 초과 — 메일이 많아 한 번에 못 끝냈습니다. 다시 누르면 이어서 처리됩니다.":
@@ -377,8 +382,8 @@
       "연결하면 KV_REST_API_URL / KV_REST_API_TOKEN 이 자동으로 들어갑니다. 무료 티어로 충분합니다.":
         "Connecting injects KV_REST_API_URL / KV_REST_API_TOKEN automatically. The free tier is enough.",
       "붙이고 나면 담당자별 화면의": "Once connected, use",
-      "로 2026-07-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
-        "on the By-staff screen to fill sends and replies from 2026-07-01 onward.",
+      "로 2026-05-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
+        "on the By-staff screen to fill sends and replies from 2026-05-01 onward.",
       "먼저 위에서 제품을 고르세요.": "Pick a product above first.",
       "이 제품의 영상이 시트에 없습니다.": "No videos for this product in the sheet.",
       "영상 칸 3개가 다 찼습니다. 하나를 비우고 다시 고르세요.": "All 3 video slots are full. Clear one and pick again.",
@@ -423,6 +428,10 @@
       "🗂 내 파이프라인": "🗂 Pipeline của tôi",
       "🔎 중복 검사": "🔎 Kiểm tra trùng",
       "🔎 중복 검사 — 이미 보낸 크리에이터인지 확인": "🔎 Kiểm tra trùng — đã liên hệ nhà sáng tạo này chưa?",
+      "핸들 또는 이메일을 한 줄에 하나씩(또는 콤마로 구분) 붙여넣으면 한 번에 검사합니다.":
+        "Dán handle hoặc email, mỗi dòng một mục (hoặc phân tách bằng dấu phẩy) để kiểm tra tất cả cùng lúc.",
+      "전체 담당자(관리자 포함)가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.":
+        "Tìm xem có nhân viên nào (kể cả quản trị) đã liên hệ họ chưa — ai và khi nào.",
       "검사": "Kiểm tra",
       "발송일": "Ngày gửi",
       "회신 기록": "Phản hồi",
@@ -633,7 +642,7 @@
       "담당자": "Nhân viên",
       "담당자 전체": "Tất cả nhân viên",
       "내 메일함": "Hộp thư của tôi",
-      "전체 (2026-07-01~)": "Tất cả (từ 2026-07-01)",
+      "전체 (2026-05-01~)": "Tất cả (từ 2026-05-01)",
       "최근 7일": "7 ngày gần đây",
       "최근 14일": "14 ngày gần đây",
       "최근 30일": "30 ngày gần đây",
@@ -701,7 +710,7 @@
       // ── Các câu hướng dẫn dài (tạo bằng JS) ──
       "자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. 눌러서":
         "Đồng bộ tự động (07:00 KST hằng ngày) chưa từng chạy. Bấm để lấy dữ liệu gửi và phản hồi từ",
-      "2026-07-01 이후": "từ 2026-07-01",
+      "2026-05-01 이후": "từ 2026-05-01",
       "발송·회신을 지금 바로 가져오세요.": "ngay bây giờ.",
       "이후": "trở đi",
       "담당자 메일함을 훑어": "Quét hộp thư nhân viên và điền dữ liệu gửi, phản hồi từ",
@@ -719,7 +728,7 @@
       "동기화 끝 (일부 실패)": "Đồng bộ xong (một số lỗi)",
       "· 새 발송": "· lượt gửi mới",
       "· 새 회신": "· phản hồi mới",
-      "(2026-07-01 이후, 이미 있던 건 건너뜀)": "(từ 2026-07-01; bỏ qua bản ghi đã có)",
+      "(2026-05-01 이후, 이미 있던 건 건너뜀)": "(từ 2026-05-01; bỏ qua bản ghi đã có)",
       "실패:": "Lỗi:",
       "등록된 담당자가 없습니다 (NW_ACCOUNTS).": "Chưa đăng ký nhân viên nào (NW_ACCOUNTS).",
       "시간 초과 — 메일이 많아 한 번에 못 끝냈습니다. 다시 누르면 이어서 처리됩니다.":
@@ -736,8 +745,8 @@
       "연결하면 KV_REST_API_URL / KV_REST_API_TOKEN 이 자동으로 들어갑니다. 무료 티어로 충분합니다.":
         "Kết nối sẽ tự thêm KV_REST_API_URL / KV_REST_API_TOKEN. Gói miễn phí là đủ.",
       "붙이고 나면 담당자별 화면의": "Sau khi kết nối, dùng",
-      "로 2026-07-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
-        "ở màn hình Theo nhân viên để điền dữ liệu từ 2026-07-01 trở đi.",
+      "로 2026-05-01 이후 발송·회신을 메일함에서 채울 수 있습니다.":
+        "ở màn hình Theo nhân viên để điền dữ liệu từ 2026-05-01 trở đi.",
       "먼저 위에서 제품을 고르세요.": "Hãy chọn sản phẩm ở trên trước.",
       "이 제품의 영상이 시트에 없습니다.": "Không có video cho sản phẩm này trong sheet.",
       "영상 칸 3개가 다 찼습니다. 하나를 비우고 다시 고르세요.": "Đã đầy 3 ô video. Hãy xóa bớt rồi chọn lại.",

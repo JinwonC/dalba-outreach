@@ -6,7 +6,7 @@
 //
 //   POST /api/backfill { user, since, dryRun:true }  → 미리보기 (쓰지 않음)
 //   POST /api/backfill { user, since }               → 실제 가져오기
-//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-07-01)
+//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-05-01)
 //
 // ─── 왜 미리보기가 먼저인가 ──────────────────────────────────────
 // 보낸편지함에는 아웃리치가 아닌 메일이 섞여 있다. 그대로 밀어 넣으면 동료·거래처
@@ -63,7 +63,7 @@ module.exports = async (req, res) => {
       if (!account) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + wanted }); return; }
     }
 
-    // 언제부터 가져올지. 기본은 HISTORY_SINCE(없으면 2026-07-01) — 이 도구를 쓰기 전
+    // 언제부터 가져올지. 기본은 HISTORY_SINCE(없으면 2026-05-01) — 이 도구를 쓰기 전
     // 기간까지 이력에 넣어야 중복 판정과 실적 집계가 그 날부터 맞는다.
     const since = String(body.since || S.SINCE_DEFAULT);
     const limit = Math.max(1, Math.min(Number(body.limit) || 2000, 20000));

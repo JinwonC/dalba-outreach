@@ -13,7 +13,7 @@ const H = require("./history.js");
 const M = require("./mail.js");
 
 // 이력을 어느 날부터 채울지. 그 전 메일은 읽지 않는다.
-const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-07-01";
+const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-05-01";
 
 const COMPANY_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
   .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);

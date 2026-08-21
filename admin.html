@@ -150,7 +150,7 @@
     <div class="filters" id="filters">
       <input type="search" id="q" placeholder="이메일 · 이름 · 핸들 · 캠페인 검색…" oninput="debounced()" />
       <select id="days" onchange="load()">
-        <option value="0">전체 (2026-07-01~)</option>
+        <option value="0">전체 (2026-05-01~)</option>
         <option value="7">최근 7일</option>
         <option value="14">최근 14일</option>
         <option value="30">최근 30일</option>
@@ -271,7 +271,7 @@ function setupGuide(d){
     '<span class="muted">연결하면 KV_REST_API_URL / KV_REST_API_TOKEN 이 자동으로 들어갑니다. ' +
     '무료 티어로 충분합니다.</span></div>' +
     '<div class="note">붙이고 나면 담당자별 화면의 <b>[🔄 메일함에서 동기화]</b> 로 ' +
-    '<b>2026-07-01 이후</b> 발송·회신을 메일함에서 채울 수 있습니다.</div>';
+    '<b>2026-05-01 이후</b> 발송·회신을 메일함에서 채울 수 있습니다.</div>';
 }
 
 async function loadAdmin(){
@@ -302,7 +302,7 @@ async function loadAdmin(){
 function cronNote(d){
   const c = d.cron;
   if(!c) return '자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. ' +
-           '눌러서 <b>2026-07-01 이후</b> 발송·회신을 지금 바로 가져오세요.';
+           '눌러서 <b>2026-05-01 이후</b> 발송·회신을 지금 바로 가져오세요.';
   const when = fmt(c.at);
   const rem = c.reminders;
   return '마지막 자동 동기화 <b>'+esc(when)+'</b>' +
@@ -317,7 +317,7 @@ function emptyNote(d){
   if((d.totals && d.totals.sent) || (d.rows && d.rows.length)) return "";
   return '<div class="note"><b>아직 기록이 없습니다.</b><br />' +
     '자동 동기화는 <b>매일 07:00(KST)</b>에 돕니다. 아직 한 번도 안 돌았다면, 담당자별 탭의 ' +
-    '<b>[🔄 메일함에서 동기화]</b> 로 <b>2026-07-01 이후</b> 발송·회신을 지금 바로 가져올 수 있습니다.<br />' +
+    '<b>[🔄 메일함에서 동기화]</b> 로 <b>2026-05-01 이후</b> 발송·회신을 지금 바로 가져올 수 있습니다.<br />' +
     '<span class="muted">담당자 수에 따라 몇 분 걸립니다. 이 도구로 새로 보내는 메일은 기다리지 않아도 바로 잡힙니다.</span></div>';
 }
 
@@ -347,7 +347,7 @@ function renderSummary(d){
       // 동기화가 끝나면 load() 가 이 패널을 다시 그린다. 결과를 여기 담아 두지 않으면
       // 방금 무슨 일이 있었는지가 그 순간 지워진다.
       '<span class="muted" id="syncMsg">' + (SYNC_RESULT || cronNote(d) ||
-        '담당자 메일함을 훑어 <b>2026-07-01 이후</b> 발송·회신을 채웁니다. 누르기 전까지 갱신되지 않습니다.') +
+        '담당자 메일함을 훑어 <b>2026-05-01 이후</b> 발송·회신을 채웁니다. 누르기 전까지 갱신되지 않습니다.') +
       '</span>' +
     '</div>' +
     '<div class="cards">' +
@@ -598,7 +598,7 @@ function renderThread(d){
   $("threadHead").innerHTML = esc(d.staff||"") + ' <span class="muted">↔</span> ' + esc(d.peer||"");
   const rows = d.rows || [];
   if(!rows.length){
-    $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">이 대화의 메일을 찾지 못했습니다. (기간이 2026-07-01 이후인지 확인하세요)</div>';
+    $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">이 대화의 메일을 찾지 못했습니다. (기간이 2026-05-01 이후인지 확인하세요)</div>';
     return;
   }
   $("threadBody").innerHTML = rows.map(m => {
@@ -667,7 +667,7 @@ function renderPipeline(d){
 
    보낸편지함에는 아웃리치가 아닌 메일이 섞여 있다. 사내 도메인 수신자와
    여러 명에게 보낸 메일(6명 이상)은 서버가 자동으로 걸러낸다. */
-const SYNC_SINCE = "2026-07-01";
+const SYNC_SINCE = "2026-05-01";
 let SYNC_RESULT = null;   // 마지막 동기화 결과 — 화면을 다시 그려도 남아 있어야 한다
 
 async function syncAll(){
@@ -719,7 +719,7 @@ async function syncAll(){
 
   SYNC_RESULT = (failed.length ? '동기화 끝 (일부 실패)' : '동기화 완료') +
     ' · 새 발송 <b>'+sent+'</b>건 · 새 회신 <b>'+replies+'</b>건' +
-    ' <span class="muted">(2026-07-01 이후, 이미 있던 건 건너뜀)</span>' +
+    ' <span class="muted">(2026-05-01 이후, 이미 있던 건 건너뜀)</span>' +
     (failed.length ? '<br /><span style="color:#a23b2e">실패: '+esc(failed.join(" / "))+'</span>' : '');
   msg.innerHTML = SYNC_RESULT;
   btn.disabled = false;

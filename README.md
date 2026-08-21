@@ -55,7 +55,7 @@ dalba-outreach/
 | `LOGO_URL` | 선택 | 메일 헤더 로고 이미지의 **공개 절대주소**. 없으면 텍스트 워드마크로 그린다 |
 | `KV_REST_API_URL`<br />`KV_REST_API_TOKEN` | **권장** | 발송 이력 저장소. 중복 발송 차단이 여기에 달려 있다 (아래 참고). Vercel 마켓플레이스가 자동 주입 |
 | `HISTORY_DAYS` | 선택 | 재발송 차단 기간, 기본 `90` 일 |
-| `HISTORY_SINCE` | 선택 | 메일함에서 이력을 채울 시작일, 기본 `2026-07-01` |
+| `HISTORY_SINCE` | 선택 | 메일함에서 이력을 채울 시작일, 기본 `2026-05-01` |
 | `HISTORY_LOG_MAX` | 선택 | 발송 이력 보관 상한, 기본 `100000` 건. 담당자가 많아 더 쌓이면 키운다 |
 | `CRON_SECRET` | **권장** | 자동 동기화(`/api/cron`)를 아무나 못 부르게 하는 비밀값. Vercel 이 자동으로 헤더에 실어 보낸다 |
 | `ADMIN_EMAILS` | 선택 | 관리자 화면을 볼 수 있는 이메일 **여러 명**. 콤마·세미콜론·공백·줄바꿈 아무거로 구분해도 된다. 비우면 **아무도 관리자가 아니다** |
@@ -251,7 +251,7 @@ quinn|Qu1nnX7!|Quinn|quinn@dalbausa.com|wxyz 1234 5678 9012|Creator Partnerships
 
 담당자별 화면의 **[🔄 메일함에서 동기화]** 하나로 두 가지를 채운다.
 
-1. **보낸편지함 → 발송 이력** — `2026-07-01` 이후 보낸 메일을 이력에 넣는다
+1. **보낸편지함 → 발송 이력** — `2026-05-01` 이후 보낸 메일을 이력에 넣는다
 2. **받은편지함 → 회신 기록** — 그중 **우리가 보낸 적 있는 주소에서 온 메일**만
 
 발송에 쓰는 그 **외부 앱 비밀번호가 IMAP 에도 그대로 통한다.** 새로 등록할 것은 없다.
@@ -564,7 +564,7 @@ Outlook 데스크톱(Word 엔진)은 `max-width` 를 무시해 본문이 창 너
 | `GET /api/admin?view=replies` | 회신 기록 (담당자·검색어로 거르기) |
 | `GET /api/admin?view=daily&tz=-540` | 일별 발송 건수. `tz` 는 브라우저 시차(분) — 없으면 UTC 기준이라 날짜가 밀린다 |
 | `GET /api/admin?view=people\|sent\|blocked` | 크리에이터별 / 발송 이력 / 중복 시도. `by` `q` `days` `limit` 로 거르기 |
-| `POST /api/backfill` | 보낸편지함 → 발송 이력. `since` 기본 `2026-07-01`, `dryRun:true`(기본)면 미리보기만 |
+| `POST /api/backfill` | 보낸편지함 → 발송 이력. `since` 기본 `2026-05-01`, `dryRun:true`(기본)면 미리보기만 |
 | `GET /api/products` | 판매중 상품 목록 (썸네일·가격·재고) |
 | `GET /api/products?probe=1` | 자격증명 설정 여부만 확인 (상품 조회 안 함) |
 | `GET /api/videos?pid=<상품ID>` | 그 제품의 **매출 상위 영상** (핸들·GMV·영상ID·URL). `limit` 기본 20 |

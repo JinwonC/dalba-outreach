@@ -6,7 +6,7 @@
 //
 //   POST /api/replies { user, since }        → 그 담당자 받은편지함을 훑어 기록
 //   POST /api/replies { all:true, since }    → 등록된 담당자 전원 (관리자만)
-//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-07-01)
+//   since 는 YYYY-MM-DD. 생략하면 HISTORY_SINCE (기본 2026-05-01)
 //
 // ─── 무엇을 기록하나 ─────────────────────────────────────────────
 // 발신자가 **우리가 보낸 적 있는 주소**일 때만. 그 외 메일은 읽고 버린다.
