@@ -1330,6 +1330,33 @@ function paintDup(){
 let TZS = [];        // 서버가 주는 시간대 선택지 (서버와 목록이 어긋나지 않게 fetch)
 function schedActive(){ return $("schedOn") && $("schedOn").checked; }
 
+/* "약 N분 후"/"약 N시간 후" — 예약 시각이 지금으로부터 얼마나 뒤인지. 시간대를 잘못 골라
+   엉뚱한 시각에 잡히면 여기서 "약 13시간 후" 처럼 바로 티가 난다. */
+function fromNow(iso){
+  const ms = (typeof iso === "number" ? iso : Date.parse(iso)) - Date.now();
+  if(!isFinite(ms)) return "";
+  const m = Math.round(ms/60000);
+  if(m < 1) return "곧";
+  if(m < 90) return "약 " + m + "분 후";
+  const h = Math.round(m/60);
+  if(h < 48) return "약 " + h + "시간 후";
+  return "약 " + Math.round(h/24) + "일 후";
+}
+/* 고른 날짜·시각(고른 시간대)이 UTC 로 언제인지 — 서버 계산과 같은 로직(미리보기용).
+   서버가 최종 판단하지만, 확인창에서 "약 N분 후" 를 미리 보여줘 시간대 실수를 잡는다. */
+function wallInZone(ts, tz){
+  const p = new Intl.DateTimeFormat("en-US",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).formatToParts(new Date(ts));
+  const g = t => Number((p.find(x=>x.type===t)||{}).value);
+  return Date.UTC(g("year"),g("month")-1,g("day"),g("hour")%24,g("minute"),g("second"));
+}
+function utcFromZoned(dateStr, timeStr, tz){
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr||""), tm = /^(\d{1,2}):(\d{2})$/.exec(timeStr||"");
+  if(!dm || !tm) return NaN;
+  try { const wall = Date.UTC(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);
+    let ts = wall; for(let i=0;i<2;i++) ts += wall - wallInZone(ts, tz); return ts;
+  } catch(e){ return NaN; }
+}
+
 function paintSched(){
   const on = schedActive();
   $("schedOpts").style.display = on ? "block" : "none";
@@ -1342,8 +1369,13 @@ async function loadSchedules(){
     if(!r.ok) return;
     const d = await r.json();
     if(Array.isArray(d.timezones) && d.timezones.length && !TZS.length){
-      TZS = d.timezones;
+      TZS = d.timezones.slice();
+      // 기본값은 **브라우저(본인) 시간대** — 목록에 없으면 맨 앞에 넣고 그걸 선택한다.
+      // (기본이 뉴욕이면 한국에서 "8시" 로 예약해도 뉴욕 8시로 잡혀 한참 뒤에 나간다)
+      let myTz = ""; try { myTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch(e){}
+      if(myTz && !TZS.some(t => t.tz === myTz)) TZS.unshift({ tz:myTz, label:"🕒 내 시간대 (" + myTz + ")" });
       $("schedTz").innerHTML = TZS.map(t => '<option value="'+esc(t.tz)+'">'+esc(t.label)+'</option>').join("");
+      if(myTz) $("schedTz").value = myTz;
     }
     renderSchedules(d.jobs || []);
   } catch(e){ /* 목록 못 불러도 발송은 계속 가능 */ }
@@ -1419,7 +1451,8 @@ async function doSchedule(list){
     if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
     const d = await parseSend(r);
     if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
-    $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 — '+esc(d.job.local)+' 에 발송됩니다.</div>';
+    $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 — '+esc(d.job.local)+
+      ' 에 발송됩니다. <b>('+fromNow(d.job.at)+')</b></div>';
     loadSchedules();
   } catch(e){
     $("sendResult").innerHTML = '<div class="err">예약 실패: '+esc(String(e.message||e))+'</div>';
@@ -1443,10 +1476,16 @@ function startSend(){
       return;
     }
     const tzLabel = (TZS.find(t => t.tz === val("schedTz"))||{}).label || val("schedTz");
+    const at = utcFromZoned(val("schedDate"), val("schedTime"), val("schedTz"));
+    const rel = isFinite(at) ? fromNow(at) : "";
+    // 지금으로부터 너무 뒤(12시간+)면 시간대를 잘못 골랐을 수 있으니 눈에 띄게 경고
+    const farOff = isFinite(at) && (at - Date.now()) > 12*3600e3;
     $("confirmBody").innerHTML =
       '<b>' + esc(a.email) + '</b> 에서 <b>' + list.length + '명</b> 에게 <b>예약 발송</b>합니다.' +
       '<br /><br /><span style="color:#999">발송 시각 (현지)</span><br />' +
       '<b>' + esc(val("schedDate") + " " + val("schedTime")) + '</b> · ' + esc(tzLabel) +
+      (rel ? ' <b style="color:'+(farOff?'#a23b2e':'#256b43')+'">('+esc(rel)+')</b>' : '') +
+      (farOff ? '<br /><span style="color:#a23b2e">⚠️ 지금으로부터 꽤 뒤입니다 — 시간대가 맞는지 확인하세요.</span>' : '') +
       '<br /><br /><span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +
       '<span style="color:#999">받는 사람</span><br />' +
       esc(list.slice(0,3).map(r => r.to).join(", ")) + (list.length > 3 ? ' 외 ' + (list.length-3) + '명' : '') +
