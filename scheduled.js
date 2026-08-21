@@ -25,8 +25,11 @@ async function processDue(opts) {
   const now = o.now ? new Date(o.now).getTime() : Date.now();
   const deadline = Date.now() + Math.max(5000, Number(o.budgetMs) || 30000);
 
+  // onlyBy 가 있으면 그 담당자의 예약만 처리한다 (본인이 화면에서 "지금 처리" 를 누른 경우)
+  const onlyBy = o.onlyBy ? String(o.onlyBy).toLowerCase() : "";
   const jobs = (await H.allSchedules())
     .filter(j => j && j.status === "pending")
+    .filter(j => !onlyBy || String(j.by || "").toLowerCase() === onlyBy)
     .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));   // 이른 예약부터
 
   const summary = { due: 0, jobs: 0, sent: 0, held: 0, failed: 0, partial: 0 };

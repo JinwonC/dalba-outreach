@@ -17,6 +17,7 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
+const Sch = require("../scheduled.js");
 
 const MAX_RECIPIENTS = 500;          // 예약 하나당 수신자 상한 (크론이 여러 번에 나눠 보낸다)
 const MAX_AHEAD_DAYS = 60;           // 너무 먼 미래는 실수일 가능성이 크다
@@ -128,6 +129,23 @@ module.exports = async (req, res) => {
     }
 
     if (req.method !== "POST") { res.status(405).json({ error: "method not allowed" }); return; }
+
+    // ─── POST { action:"run" }: 지금 바로 처리 ───────────────────
+    // 크론(15분)이 아직 안 돌았거나 흔들릴 때, 본인이 기한 도래한 자기 예약을 즉시 보낸다.
+    // 미래 예약은 건드리지 않는다(processDue 가 기한 도래분만 보냄). 남의 예약도 안 건드린다.
+    {
+      const peek = readBody(req);
+      if (peek && peek.action === "run") {
+        let summary = null;
+        try { summary = await Sch.processDue({ onlyBy: meEmail, budgetMs: 25000 }); }
+        catch (e) { res.status(502).json({ error: "예약 처리 중 오류: " + String((e && e.message) || e) }); return; }
+        const jobs = (await H.allSchedules())
+          .filter(j => String(j.by || "").toLowerCase() === meEmail)
+          .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+        res.status(200).json({ ran: true, summary, jobs: jobs.map(publicJob) });
+        return;
+      }
+    }
 
     // ─── POST: 예약 생성 ─────────────────────────────────────────
     const body = readBody(req);

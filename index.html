@@ -1362,10 +1362,37 @@ function renderSchedules(jobs){
           : j.status==="done" ? '<span class="rowok">발송됨 '+(j.sent||0)+(j.held?' · 보류 '+j.held:'')+'</span>'
           : '<span class="rowbad" title="'+esc(j.error||"")+'">실패</span>')+'</td>' +
     '<td>'+(j.status==="pending" ? '<button class="rm" style="border:none;background:none;color:#c0392b;cursor:pointer;text-decoration:underline;font:inherit" onclick="cancelSchedule(\''+esc(j.id)+'\')">취소</button>' : '')+'</td></tr>';
+  // 기한이 이미 지난 대기 건이 있으면 "지금 처리" 를 눈에 띄게 안내한다 (크론이 아직/안 돌았을 때)
+  const overdue = pending.filter(j => Date.parse(j.at||"") <= Date.now()).length;
   box.innerHTML =
-    '<div style="font:700 12px/1.4 inherit;color:#888;margin-bottom:6px">⏰ 예약된 발송</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span style="font:700 12px/1.4 inherit;color:#888">⏰ 예약된 발송</span>' +
+      (pending.length ? '<button class="btn" style="padding:3px 10px;font-size:12px" onclick="runSchedulesNow()">⏱ 지금 발송 시도</button>' : '') +
+      (overdue ? '<span class="holdtag">기한 지난 대기 '+overdue+'건</span>' : '') +
+      '<span class="muted" id="schedRunMsg"></span></div>' +
     '<div class="scroll" style="max-height:180px"><table class="rcp"><thead><tr><th>현지 시각</th><th>캠페인</th><th>인원</th><th>상태</th><th></th></tr></thead><tbody>' +
     pending.map(row).join("") + recent.map(row).join("") + '</tbody></table></div>';
+}
+
+/* 크론을 기다리지 않고 기한 도래한 내 예약을 지금 바로 보낸다 (진단 겸 안전장치).
+   미래 예약은 안 건드리고, 남의 예약도 안 건드린다. */
+async function runSchedulesNow(){
+  const msg = $("schedRunMsg"); if(msg) msg.textContent = "처리 중…";
+  try {
+    const r = await fetch("/api/schedule", {
+      method:"POST", headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+      body: JSON.stringify({ action:"run" })
+    });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
+    const s = d.summary || {};
+    if(msg) msg.textContent = (s.due ? ("기한 도래 "+s.due+"건 · 발송 "+(s.sent||0)+(s.held?" · 보류 "+s.held:"")+(s.failed?" · 실패 "+s.failed:"")) : "기한이 된 예약이 없습니다 (미래 예약은 그대로 대기).");
+    renderSchedules(d.jobs || []);
+  } catch(e){
+    if(msg) msg.textContent = "";
+    alert("처리 실패: " + String(e.message||e));
+  }
 }
 
 async function cancelSchedule(id){
