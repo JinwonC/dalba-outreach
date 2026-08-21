@@ -581,13 +581,16 @@
     <div class="panel" style="margin-top:16px;max-width:760px">
       <h2>🔎 중복 검사 — 이미 보낸 크리에이터인지 확인</h2>
       <div class="hint">
-        크리에이터 <b>핸들</b> 또는 <b>이메일</b>을 넣으면, <b>전체 담당자(관리자 포함)</b>가
-        이 사람에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.
+        핸들 또는 이메일을 <b>한 줄에 하나씩</b>(또는 콤마로 구분) 붙여넣으면 <b>한 번에</b> 검사합니다.
+        <b>전체 담당자(관리자 포함)</b>가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
-        <input id="checkQ" type="text" placeholder="@handle 또는 creator@example.com" style="flex:1;min-width:220px"
-               onkeydown="if(event.key==='Enter')runCheck()" />
+      <textarea id="checkQ" rows="6" placeholder="@handle1&#10;creator@example.com&#10;@handle2&#10;..." style="width:100%"
+                oninput="paintCheckCount()"
+                onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')runCheck()"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
         <button class="btn dark" onclick="runCheck()">검사</button>
+        <button class="btn" onclick="$('checkQ').value='';$('checkResult').innerHTML='';paintCheckCount()">지우기</button>
+        <span class="muted" id="checkCount"></span>
       </div>
       <div id="checkResult" style="margin-top:14px"></div>
     </div>
@@ -1563,55 +1566,96 @@ function setView(v){
   $("pipelineView").style.display = v==="pipeline" ? "" : "none";
   $("checkView").style.display = v==="check" ? "" : "none";
   if(v==="pipeline" && !PIPE_LOADED) loadPipeline();
-  if(v==="check") $("checkQ").focus();
+  if(v==="check"){ $("checkQ").focus(); paintCheckCount(); }
 }
 
-/* ── 중복 검사 ──
-   핸들/이메일로 전 담당자(관리자 포함) 발송 이력을 조회한다. 발송 화면의 즉석 중복 확인과
-   달리 "누가누가 보냈나" 전부를 보여준다 — 조율·중복 방지용. /api/lookup 이 로그를 훑는다. */
+/* ── 중복 검사 (여러 개 한 번에) ──
+   핸들/이메일을 한 줄에 하나씩(또는 콤마) 붙여넣으면 전 담당자(관리자 포함) 발송 이력을
+   한 번에 조회한다. 서버는 로그를 딱 한 번 읽어 전부 대조한다(/api/lookup POST). */
+let CHECK_DATA = null;
+let CHECK_FILTER = "all";   // all | dup | clean
+
+function parseChecks(text){
+  // 줄바꿈·콤마·세미콜론·공백으로 나눈다 (핸들·이메일엔 공백이 없다)
+  const seen = new Set(), out = [];
+  String(text||"").split(/[\s,;]+/).forEach(s => {
+    const v = s.trim(); if(!v) return;
+    const k = v.toLowerCase();
+    if(seen.has(k)) return; seen.add(k); out.push(v);
+  });
+  return out;
+}
+function paintCheckCount(){
+  const n = parseChecks($("checkQ") ? $("checkQ").value : "").length;
+  if($("checkCount")) $("checkCount").textContent = n ? (n + "개 입력됨") : "";
+}
+
 async function runCheck(){
-  const q = ($("checkQ").value||"").trim();
+  const items = parseChecks($("checkQ").value);
   const box = $("checkResult");
-  if(!q){ box.innerHTML = '<div class="muted">핸들 또는 이메일을 입력하세요.</div>'; return; }
-  box.innerHTML = '<div class="muted">조회 중…</div>';
+  if(!items.length){ box.innerHTML = '<div class="muted">핸들 또는 이메일을 입력하세요.</div>'; return; }
+  box.innerHTML = '<div class="muted">'+items.length+'개 조회 중…</div>';
   try {
-    const r = await fetch("/api/lookup?q="+encodeURIComponent(q), { cache:"no-store", headers: authHeaders() });
+    const r = await fetch("/api/lookup", {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+      body: JSON.stringify({ queries: items })
+    });
     if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
-    const d = await r.json();
-    if(d.error) throw new Error(d.error);
-    renderCheck(d);
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
+    CHECK_DATA = d; CHECK_FILTER = "all";
+    renderChecks();
   } catch(e){
     box.innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
   }
 }
-function renderCheck(d){
-  const box = $("checkResult");
-  if(!d.found){
-    box.innerHTML =
-      '<div class="ok">✅ <b>발송 이력 없음</b> — "'+esc(d.query)+'" 에게 보낸 기록이 없습니다. 안심하고 발송하세요.</div>' +
-      (d.replyCount ? '<div class="muted" style="margin-top:8px">회신 기록은 '+d.replyCount+'건 있습니다.</div>' : '');
-    return;
-  }
-  const senders = (d.senders||[]).map(esc).join(", ");
-  let h = '<div class="hold">⏸ <b>이미 발송됨</b> — 총 <b>'+d.sentCount+'건</b>' +
-    (senders ? ' · 담당자: <b>'+senders+'</b>' : '') +
-    (d.replyCount ? ' · 회신 '+d.replyCount+'건' : '') + '</div>';
-  h += '<div class="scroll" style="margin-top:10px"><table class="rcp"><thead><tr>' +
-    '<th>발송일</th><th>담당자</th><th>대상</th><th>캠페인</th></tr></thead><tbody>' +
-    d.sent.slice(0,100).map(s =>
-      '<tr><td class="'+(s.forced?'':'')+'">'+esc(fmtAt(s.at))+(s.forced?' <span class="holdtag">강제</span>':'')+'</td>' +
-      '<td>'+esc(s.byName||s.by||'—')+'</td>' +
-      '<td>'+esc(s.name||s.to||'')+(s.handle?' <span class="muted">@'+esc(String(s.handle).replace(/^@/,''))+'</span>':'')+'</td>' +
-      '<td class="muted">'+esc(s.campaign||'')+'</td></tr>').join("") +
-    '</tbody></table></div>';
-  if(d.replies && d.replies.length){
-    h += '<div style="font:700 12px/1.4 inherit;color:#888;margin:12px 0 6px">💬 회신 기록</div>' +
-      '<div class="scroll"><table class="rcp"><thead><tr><th>회신일</th><th>제목</th></tr></thead><tbody>' +
-      d.replies.slice(0,30).map(r =>
-        '<tr><td>'+esc(fmtAt(r.at))+'</td><td>'+esc(r.subject||'(제목 없음)')+'</td></tr>').join("") +
-      '</tbody></table></div>';
-  }
-  box.innerHTML = h;
+
+function setCheckFilter(f){ CHECK_FILTER = f; renderChecks(); }
+
+async function copyChecks(kind){
+  const rows = (CHECK_DATA && CHECK_DATA.results) || [];
+  const list = (kind === "clean" ? rows.filter(r=>!r.found) : rows.filter(r=>r.found)).map(r=>r.query);
+  if(!list.length){ return; }
+  try { await navigator.clipboard.writeText(list.join("\n"));
+    const el = $("copyMsg"); if(el){ el.textContent = "복사됨 ("+list.length+"개)"; setTimeout(()=>{ if(el) el.textContent=""; }, 2000); }
+  } catch(e){ alert("복사 실패: "+(e.message||e)); }
+}
+
+function renderChecks(){
+  const d = CHECK_DATA; if(!d) return;
+  const rows = d.results || [];
+  const dups = rows.filter(r=>r.found), clean = rows.filter(r=>!r.found);
+  // 전체 보기에선 '이미 보냄'을 위로 올린다 (확인이 필요한 쪽)
+  let list = CHECK_FILTER==="dup" ? dups : CHECK_FILTER==="clean" ? clean
+    : rows.slice().sort((a,b)=> (b.found?1:0)-(a.found?1:0));
+
+  const btn = (f,label,n) => '<button class="pvtab'+(CHECK_FILTER===f?' active':'')+'" onclick="setCheckFilter(\''+f+'\')">'+label+' '+n+'</button>';
+  let h = '<div class="'+(d.foundCount?'hold':'ok')+'">' +
+    '총 <b>'+d.count+'개</b> · ⏸ 이미 보냄 <b>'+d.foundCount+'</b> · ✅ 없음 <b>'+d.cleanCount+'</b>' +
+    (d.truncated ? ' <span class="muted">(입력이 많아 일부만 검사됨)</span>' : '') + '</div>';
+  h += '<div class="pvbar" style="margin-top:10px;flex-wrap:wrap">' +
+    btn("all","전체",d.count) + btn("dup","이미 보냄",d.foundCount) + btn("clean","없음",d.cleanCount) +
+    '<span style="flex:1"></span>' +
+    '<button class="btn" onclick="copyChecks(\'clean\')">✅ 안 보낸 것 복사</button>' +
+    '<button class="btn" onclick="copyChecks(\'dup\')">⏸ 이미 보낸 것 복사</button>' +
+    '<span class="muted" id="copyMsg"></span></div>';
+
+  const CAP = 500;
+  h += '<div class="scroll" style="margin-top:10px;max-height:460px"><table class="rcp"><thead><tr>' +
+    '<th>입력</th><th>상태</th><th>담당자</th><th>최근 발송</th><th>회신</th></tr></thead><tbody>' +
+    list.slice(0, CAP).map(r =>
+      '<tr'+(r.found?' style="background:#fffaf0"':'')+'>' +
+      '<td><b>'+esc(r.query)+'</b>'+(r.found && r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+'</td>' +
+      '<td>'+(r.found
+          ? '<span class="rowbad">⏸ 이미 보냄 '+r.sentCount+'건</span>'+(r.forced?' <span class="holdtag">강제</span>':'')
+          : '<span class="rowok">✅ 없음</span>')+'</td>' +
+      '<td>'+esc((r.senders||[]).join(", "))+'</td>' +
+      '<td class="muted">'+esc(r.found?fmtAt(r.lastAt):'')+(r.lastCampaign?'<div class="muted">'+esc(r.lastCampaign)+'</div>':'')+'</td>' +
+      '<td class="muted">'+(r.replyCount?r.replyCount+'건':'')+'</td></tr>').join("") +
+    '</tbody></table></div>' +
+    (list.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 복사 버튼으로 받으세요.</div>' : '');
+  $("checkResult").innerHTML = h;
 }
 
 const PIPE_STAGES = [
