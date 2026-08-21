@@ -107,7 +107,14 @@ module.exports = async (req, res) => {
       const jobs = (await H.allSchedules())
         .filter(j => all || String(j.by || "").toLowerCase() === meEmail)
         .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
-      res.status(200).json({ timezones: TZ_PRESETS, jobs: jobs.map(publicJob) });
+      // 크론이 살아있는지 화면에서 보이도록 마지막 자동 실행 시각을 함께 내보낸다.
+      // (예약이 안 나갈 때 "크론이 안 도는 건지"부터 가릴 수 있게 — 시각만, 메일 내용 없음)
+      let cron = null;
+      try {
+        const raw = await H.readRaw("outreach:cron:status");
+        if (raw) { const st = JSON.parse(raw); cron = { at: st.at || null, scheduled: st.scheduled || null }; }
+      } catch (_) {}
+      res.status(200).json({ timezones: TZ_PRESETS, jobs: jobs.map(publicJob), cron });
       return;
     }
 
