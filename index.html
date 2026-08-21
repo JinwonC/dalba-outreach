@@ -1387,8 +1387,8 @@ async function doSchedule(list){
       })
     });
     if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
-    const d = await r.json();
-    if(d.error) throw new Error(d.error);
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
     $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 — '+esc(d.job.local)+' 에 발송됩니다.</div>';
     loadSchedules();
   } catch(e){
@@ -1445,6 +1445,20 @@ function startSend(){
   $("confirmGo").onclick = () => { if(confirmAction) confirmAction(); };
 }
 
+/* 응답을 JSON 으로 읽되, JSON 이 아니면(플랫폼 오류 페이지 등) 상태코드와 본문 앞부분을
+   담은 error 로 바꿔 준다. 504=시간 초과, 502/500=서버 오류, 413=본문이 너무 큼 등을 구분한다. */
+async function parseSend(r){
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch(_){
+    const snippet = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+    const hint = r.status === 504 ? "발송이 제한시간을 넘겼습니다 — 한 번에 보내는 인원을 줄이거나 잠시 후 다시 시도하세요"
+      : r.status === 413 ? "요청이 너무 큽니다 — 제품 이미지를 더 작게 하거나 URL 방식으로 바꿔보세요"
+      : (r.status >= 500 ? "서버 함수 오류 — 잠시 후 다시 시도하세요" : "");
+    return { error: "서버 오류 (HTTP " + r.status + ")" + (snippet ? ": " + snippet : ""), hint };
+  }
+}
+
 async function doSend(list){
   const a = acct();
   const chunkSize = CFG.maxPerRequest || 25;
@@ -1472,7 +1486,9 @@ async function doSend(list){
         ))
       });
       if(r.status === 401){ showGate(AUTH_MODE === "accounts" ? "다시 로그인해 주세요." : "비밀번호가 올바르지 않습니다."); break; }
-      const data = await r.json();
+      // 서버가 JSON 이 아닌 오류 페이지(크래시·타임아웃 등)를 줄 수도 있다. 그럴 때
+      // "not valid JSON" 대신 실제 상태코드와 본문 앞부분을 보여줘 원인을 알 수 있게 한다.
+      const data = await parseSend(r);
       if(data.error){
         chunk.forEach(c => all.push({ to:c.to, ok:false, error:data.error + (data.hint ? " — " + data.hint : "") }));
       } else {

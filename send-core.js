@@ -190,12 +190,15 @@ async function sendBatch(opts) {
     } catch (e) {
       // 저장소 장애 — 기본은 보내지 않는다(중복 방지). force 면 위험을 감수하고 진행.
       if (!force) {
-        results.push({
-          to, ok: false,
-          error: "이력 확인 실패로 보내지 않았습니다 (중복 방지). 잠시 후 다시 시도하거나, " +
-                 "그래도 보내려면 [강제 발송] 을 켜세요 — " + String((e && e.message) || e)
-        });
-        continue;
+        // 저장소 장애는 **모든 수신자**에 영향이다. 한 명씩 다시 시도하면 그때마다 저장소
+        // 제한시간이 쌓여 함수 전체가 죽으므로, 여기서 배치를 멈추고 남은 사람은 미발송으로
+        // 표시한다. 잠시 뒤 다시 [발송] 을 누르면 안 나간 사람만 처리된다(나간 사람은 이력에 있음).
+        const msg = "이력 저장소에 연결하지 못해 보내지 않았습니다 (중복 방지). 잠시 후 다시 [발송] 을 " +
+                    "누르면 남은 사람만 나갑니다 — " + String((e && e.message) || e);
+        for (let k = i; k < recipients.length; k++) {
+          results.push({ to: cleanHeader(compose(recipients[k]).to), ok: false, error: msg });
+        }
+        break;
       }
     }
 

@@ -47,14 +47,31 @@ function conf() {
 function enabled() { return Boolean(conf()); }
 
 // ─── Redis REST ──────────────────────────────────────────────────
+// 저장소 호출에는 **반드시 제한시간**을 둔다. 없으면 Upstash 가 느리거나 안 닿을 때 fetch 가
+// 끝없이 매달려, 발송 함수 전체가 Vercel 제한시간(60초)에 걸려 죽는다(응답이 JSON 도 아니게 됨).
+// 여기서 빨리 실패시키면 호출한 쪽이 잡아 "이력 확인 실패" 로 깔끔히 처리할 수 있다.
+const KV_TIMEOUT_MS = Number(process.env.KV_TIMEOUT_MS) || 10000;
+
+async function kvFetch(url, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), KV_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { authorization: "Bearer " + conf().token, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("이력 저장소 응답이 없습니다 (" + KV_TIMEOUT_MS + "ms 초과)");
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
 async function cmd(args) {
   const c = conf();
   if (!c) return null;
-  const r = await fetch(c.url, {
-    method: "POST",
-    headers: { authorization: "Bearer " + c.token, "content-type": "application/json" },
-    body: JSON.stringify(args)
-  });
+  const r = await kvFetch(c.url, args);
   const d = await r.json();
   if (d && d.error) throw new Error("이력 저장소 오류: " + d.error);
   return d ? d.result : null;
@@ -63,11 +80,7 @@ async function cmd(args) {
 async function pipeline(cmds) {
   const c = conf();
   if (!c || !cmds.length) return [];
-  const r = await fetch(c.url + "/pipeline", {
-    method: "POST",
-    headers: { authorization: "Bearer " + c.token, "content-type": "application/json" },
-    body: JSON.stringify(cmds)
-  });
+  const r = await kvFetch(c.url + "/pipeline", cmds);
   const d = await r.json();
   if (!Array.isArray(d)) throw new Error("이력 저장소 오류: " + ((d && d.error) || "예상 밖 응답"));
   return d.map(x => (x && x.error ? null : x && x.result));
