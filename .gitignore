@@ -7,3 +7,5 @@ tokens.json
 ads_tokens.json
 *.png
 !logo-black.png
+*.txt
+!requirements*.txt
