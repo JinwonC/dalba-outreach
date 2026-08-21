@@ -5,3 +5,5 @@ node_modules/
 service_account.json
 tokens.json
 ads_tokens.json
+*.png
+!logo-black.png
