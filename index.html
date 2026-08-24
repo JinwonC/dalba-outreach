@@ -1332,6 +1332,14 @@ function schedActive(){ return $("schedOn") && $("schedOn").checked; }
 
 /* "약 N분 후"/"약 N시간 후" — 예약 시각이 지금으로부터 얼마나 뒤인지. 시간대를 잘못 골라
    엉뚱한 시각에 잡히면 여기서 "약 13시간 후" 처럼 바로 티가 난다. */
+/* 예약 목록/확인창의 "2026-08-26 09:00 · 🇰🇷 한국 (서울)" 에서 시간대 라벨을 별도 노드로
+   떼어낸다 — 그래야 번역기가 라벨(🇰🇷 한국 (서울))만 사전에서 바꿔 준다. 날짜·시각은 언어 무관. */
+function localHtml(local){
+  const s = String(local || "");
+  const i = s.indexOf(" · ");
+  if(i < 0) return esc(s);
+  return esc(s.slice(0, i)) + ' · <span class="tzl">' + esc(s.slice(i + 3)) + '</span>';
+}
 function agoText(ms){
   const m = Math.floor(ms/60000);
   if(m < 1) return "방금";
@@ -1381,7 +1389,7 @@ async function loadSchedules(){
       // 기본값은 **브라우저(본인) 시간대** — 목록에 없으면 맨 앞에 넣고 그걸 선택한다.
       // (기본이 뉴욕이면 한국에서 "8시" 로 예약해도 뉴욕 8시로 잡혀 한참 뒤에 나간다)
       let myTz = ""; try { myTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch(e){}
-      if(myTz && !TZS.some(t => t.tz === myTz)) TZS.unshift({ tz:myTz, label:"🕒 내 시간대 (" + myTz + ")" });
+      if(myTz && !TZS.some(t => t.tz === myTz)) TZS.unshift({ tz:myTz, label:"🕒 " + myTz });
       $("schedTz").innerHTML = TZS.map(t => '<option value="'+esc(t.tz)+'">'+esc(t.label)+'</option>').join("");
       if(myTz) $("schedTz").value = myTz;
     }
@@ -1401,14 +1409,15 @@ function renderSchedules(jobs, cron){
   if(cron && cron.at){
     const ago = Date.now() - Date.parse(cron.at);
     const stale = !(ago >= 0 && ago < 30*60000);
+    // 접두어("자동 실행:")·시각("9분 전")·경고(⚠️)를 각각 별도 노드로 — 번역기가 조각별로 바꿀 수 있게
     cronTag = '<span class="muted" style="'+(stale?'color:#c0392b;font-weight:700':'')+'" '+
       'title="크론(15분마다 자동 실행)이 마지막으로 돈 시각. 이게 오래됐으면 예약이 제때 안 나갑니다.">'+
-      '자동 실행: '+(isFinite(ago)?agoText(ago):'—')+(stale?' ⚠️':'')+'</span>';
-  } else if(cron !== undefined && cron === null){
+      '자동 실행: <span>'+(isFinite(ago)?agoText(ago):'—')+'</span>'+(stale?' ⚠️':'')+'</span>';
+  } else if(cron === null){
     cronTag = '<span class="muted" style="color:#c0392b;font-weight:700" title="크론이 한 번도 돈 기록이 없습니다.">자동 실행 기록 없음 ⚠️</span>';
   }
   const row = j =>
-    '<tr><td>'+esc(j.local || String(j.at||"").slice(0,16).replace("T"," ")+" UTC")+'</td>' +
+    '<tr><td>'+localHtml(j.local || String(j.at||"").slice(0,16).replace("T"," ")+" UTC")+'</td>' +
     '<td>'+esc(j.campaign||"")+'</td><td>'+j.recipients+'명</td>' +
     '<td>'+(j.status==="pending" ? '<span style="color:#8a6d1f">대기</span>'
           : j.status==="done" ? '<span class="rowok">발송됨 '+(j.sent||0)+(j.held?' · 보류 '+j.held:'')+'</span>'
@@ -1472,8 +1481,8 @@ async function doSchedule(list){
     if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
     const d = await parseSend(r);
     if(d.error) throw new Error(d.error + (d.hint ? " — " + d.hint : ""));
-    $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 — '+esc(d.job.local)+
-      ' 에 발송됩니다. <b>('+fromNow(d.job.at)+')</b></div>';
+    $("sendResult").innerHTML = '<div class="ok">⏰ <b>'+d.job.recipients+'명</b> 예약 완료 <b>('+fromNow(d.job.at)+')</b>'+
+      '<br /><span class="muted">'+localHtml(d.job.local)+'</span></div>';
     loadSchedules();
   } catch(e){
     $("sendResult").innerHTML = '<div class="err">예약 실패: '+esc(String(e.message||e))+'</div>';
@@ -1504,7 +1513,7 @@ function startSend(){
     $("confirmBody").innerHTML =
       '<b>' + esc(a.email) + '</b> 에서 <b>' + list.length + '명</b> 에게 <b>예약 발송</b>합니다.' +
       '<br /><br /><span style="color:#999">발송 시각 (현지)</span><br />' +
-      '<b>' + esc(val("schedDate") + " " + val("schedTime")) + '</b> · ' + esc(tzLabel) +
+      '<b>' + esc(val("schedDate") + " " + val("schedTime")) + '</b> · <span class="tzl">' + esc(tzLabel) + '</span>' +
       (rel ? ' <b style="color:'+(farOff?'#a23b2e':'#256b43')+'">('+esc(rel)+')</b>' : '') +
       (farOff ? '<br /><span style="color:#a23b2e">⚠️ 지금으로부터 꽤 뒤입니다 — 시간대가 맞는지 확인하세요.</span>' : '') +
       '<br /><br /><span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +

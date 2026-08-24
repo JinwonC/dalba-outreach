@@ -190,6 +190,34 @@
       "보낸 메일은 되돌릴 수 없습니다. 발신자·수신자·금액을 다시 확인하세요.":
         "Sent mail cannot be undone. Double-check sender, recipients and amount.",
 
+      // ── 예약 발송 · 시간대 · 크론 ──
+      "⏱ 지금 발송 시도": "⏱ Send due now",
+      "예약 발송": "Scheduled send",
+      "예약 완료": "Scheduled",
+      "발송 시각 (현지)": "Send time (local)",
+      "에게": "to",
+      "(곧)": "(soon)",
+      "자동 실행:": "Auto-run:",
+      "방금": "just now",
+      "자동 실행 기록 없음 ⚠️": "No auto-run yet ⚠️",
+      "⚠️ 지금으로부터 꽤 뒤입니다 — 시간대가 맞는지 확인하세요.":
+        "⚠️ That's quite far out — check the timezone is right.",
+      "중복 확인은 발송 시각에 다시 합니다 — 그 사이 다른 담당자가 먼저 보내면 그 건은 보류됩니다.":
+        "The duplicate check runs again at send time — if a teammate sends first in the meantime, that one is held.",
+      "크론(15분마다 자동 실행)이 마지막으로 돈 시각. 이게 오래됐으면 예약이 제때 안 나갑니다.":
+        "When the cron (auto-runs every 15 min) last ran. If this is stale, scheduled sends go out late.",
+      "크론이 한 번도 돈 기록이 없습니다.": "The cron has never run.",
+      "예약 날짜·시각·시간대를 먼저 고르세요.": "Pick the schedule date, time and timezone first.",
+      "🇺🇸 미국 동부 (뉴욕)": "🇺🇸 US East (New York)",
+      "🇺🇸 미국 중부 (시카고)": "🇺🇸 US Central (Chicago)",
+      "🇺🇸 미국 산악 (덴버)": "🇺🇸 US Mountain (Denver)",
+      "🇺🇸 미국 서부 (LA)": "🇺🇸 US West (LA)",
+      "🇬🇧 영국 (런던)": "🇬🇧 UK (London)",
+      "🇻🇳 베트남 (호치민)": "🇻🇳 Vietnam (Ho Chi Minh)",
+      "🇸🇬 싱가포르": "🇸🇬 Singapore",
+      "🇯🇵 일본 (도쿄)": "🇯🇵 Japan (Tokyo)",
+      "🇰🇷 한국 (서울)": "🇰🇷 Korea (Seoul)",
+
       // ── 도움말 ──
       "— 메일 첫 줄 \"Hi ○○!\"": "— first line of the email, \"Hi ○○!\"",
       "— 왜 이 사람인지. 응답률에 가장 큰 영향": "— why them. The biggest driver of reply rate",
@@ -307,6 +335,11 @@
       "· 매일 07:00(KST) 자동 실행": "· runs daily at 07:00 KST",
       "(전원을 다 못 돌아 다음 실행이 이어받습니다)": "(did not finish everyone; the next run continues)",
       "이미 다른 담당자가 보낸 크리에이터라서": "Creators another staff member already contacted, so these were",
+      "이미 발송된 크리에이터라서": "Creators already contacted, so these are",
+      "시도입니다.": "attempts.",
+      "다른 담당자와 겹친 것": "Overlap with another teammate",
+      "이 명단 배분을 조정할 신호입니다.": "is a signal to rebalance the lists.",
+      "⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Force-sending even to people another teammate already contacted.",
       "발송되지 않은": "not sent",
       "시도입니다. 같은 사람이 자주 겹친다면 명단 배분을 조정할 신호입니다.":
         "attempts. Frequent overlap on the same person is a signal to rebalance the lists.",
@@ -557,6 +590,34 @@
       "보낸 메일은 되돌릴 수 없습니다. 발신자·수신자·금액을 다시 확인하세요.":
         "Email đã gửi không thể thu hồi. Hãy kiểm tra lại người gửi, người nhận và số tiền.",
 
+      // ── Hẹn giờ · Múi giờ · Cron ──
+      "⏱ 지금 발송 시도": "⏱ Gửi mục đến hạn ngay",
+      "예약 발송": "Gửi theo lịch",
+      "예약 완료": "Đã hẹn giờ",
+      "발송 시각 (현지)": "Giờ gửi (địa phương)",
+      "에게": "cho",
+      "(곧)": "(sắp)",
+      "자동 실행:": "Tự động chạy:",
+      "방금": "vừa xong",
+      "자동 실행 기록 없음 ⚠️": "Chưa từng chạy tự động ⚠️",
+      "⚠️ 지금으로부터 꽤 뒤입니다 — 시간대가 맞는지 확인하세요.":
+        "⚠️ Khá xa so với hiện tại — hãy kiểm tra đúng múi giờ.",
+      "중복 확인은 발송 시각에 다시 합니다 — 그 사이 다른 담당자가 먼저 보내면 그 건은 보류됩니다.":
+        "Kiểm tra trùng sẽ chạy lại vào giờ gửi — nếu trong lúc đó nhân viên khác gửi trước thì mục đó bị giữ lại.",
+      "크론(15분마다 자동 실행)이 마지막으로 돈 시각. 이게 오래됐으면 예약이 제때 안 나갑니다.":
+        "Lần cuối cron (tự chạy mỗi 15 phút) đã chạy. Nếu quá cũ, thư hẹn giờ sẽ gửi trễ.",
+      "크론이 한 번도 돈 기록이 없습니다.": "Cron chưa từng chạy.",
+      "예약 날짜·시각·시간대를 먼저 고르세요.": "Hãy chọn ngày, giờ và múi giờ hẹn trước.",
+      "🇺🇸 미국 동부 (뉴욕)": "🇺🇸 Miền Đông Mỹ (New York)",
+      "🇺🇸 미국 중부 (시카고)": "🇺🇸 Miền Trung Mỹ (Chicago)",
+      "🇺🇸 미국 산악 (덴버)": "🇺🇸 Miền núi Mỹ (Denver)",
+      "🇺🇸 미국 서부 (LA)": "🇺🇸 Miền Tây Mỹ (LA)",
+      "🇬🇧 영국 (런던)": "🇬🇧 Anh (London)",
+      "🇻🇳 베트남 (호치민)": "🇻🇳 Việt Nam (TP.HCM)",
+      "🇸🇬 싱가포르": "🇸🇬 Singapore",
+      "🇯🇵 일본 (도쿄)": "🇯🇵 Nhật Bản (Tokyo)",
+      "🇰🇷 한국 (서울)": "🇰🇷 Hàn Quốc (Seoul)",
+
       // ── Trợ giúp ──
       "— 메일 첫 줄 \"Hi ○○!\"": "— dòng đầu email, \"Hi ○○!\"",
       "— 왜 이 사람인지. 응답률에 가장 큰 영향": "— lý do chọn họ. Ảnh hưởng lớn nhất đến tỷ lệ phản hồi",
@@ -674,6 +735,11 @@
       "· 매일 07:00(KST) 자동 실행": "· chạy tự động 07:00 (KST) mỗi ngày",
       "(전원을 다 못 돌아 다음 실행이 이어받습니다)": "(chưa xong hết; lần chạy sau sẽ tiếp tục)",
       "이미 다른 담당자가 보낸 크리에이터라서": "Creator mà nhân viên khác đã liên hệ, nên các lượt này",
+      "이미 발송된 크리에이터라서": "Creator đã được liên hệ nên đây là",
+      "시도입니다.": "lượt thử.",
+      "다른 담당자와 겹친 것": "Trùng với nhân viên khác",
+      "이 명단 배분을 조정할 신호입니다.": "là dấu hiệu cần chia lại danh sách.",
+      "⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Gửi cưỡng chế cả cho người nhân viên khác đã liên hệ.",
       "발송되지 않은": "không được gửi",
       "시도입니다. 같은 사람이 자주 겹친다면 명단 배분을 조정할 신호입니다.":
         ". Nếu cùng một người bị trùng nhiều lần, đó là dấu hiệu cần chia lại danh sách.",
@@ -798,7 +864,18 @@
       "{x} — 이메일 형식 오류 (줄 {n})": "{x} — invalid email format (line {n})",
       "{x} — 이메일 없음 (줄 {n})": "{x} — no email (line {n})",
       "{e} — 이메일 형식 오류 (줄 {n})": "{e} — invalid email format (line {n})",
-      "{e} — 이메일 없음 (줄 {n})": "{e} — no email (line {n})"
+      "{e} — 이메일 없음 (줄 {n})": "{e} — no email (line {n})",
+      // ── 예약 발송 · 자동 실행 ──
+      "기한 지난 대기 {n}건": "{n} overdue",
+      "발송됨 {n}": "Sent {n}",
+      "발송됨 {n} · 보류 {n}": "Sent {n} · held {n}",
+      "{n}분 전": "{n} min ago",
+      "{n}시간 전": "{n} h ago",
+      "{n}일 전": "{n} d ago",
+      "(약 {n}분 후)": "(~{n} min)",
+      "(약 {n}시간 후)": "(~{n} h)",
+      "(약 {n}일 후)": "(~{n} d)",
+      "외 {n}명": "+{n} more"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -831,7 +908,18 @@
       "{x} — 이메일 형식 오류 (줄 {n})": "{x} — sai định dạng email (dòng {n})",
       "{x} — 이메일 없음 (줄 {n})": "{x} — thiếu email (dòng {n})",
       "{e} — 이메일 형식 오류 (줄 {n})": "{e} — sai định dạng email (dòng {n})",
-      "{e} — 이메일 없음 (줄 {n})": "{e} — thiếu email (dòng {n})"
+      "{e} — 이메일 없음 (줄 {n})": "{e} — thiếu email (dòng {n})",
+      // ── Hẹn giờ · Tự động chạy ──
+      "기한 지난 대기 {n}건": "{n} quá hạn",
+      "발송됨 {n}": "Đã gửi {n}",
+      "발송됨 {n} · 보류 {n}": "Đã gửi {n} · giữ {n}",
+      "{n}분 전": "{n} phút trước",
+      "{n}시간 전": "{n} giờ trước",
+      "{n}일 전": "{n} ngày trước",
+      "(약 {n}분 후)": "(~{n} phút)",
+      "(약 {n}시간 후)": "(~{n} giờ)",
+      "(약 {n}일 후)": "(~{n} ngày)",
+      "외 {n}명": "+{n} nữa"
     }
   };
 
