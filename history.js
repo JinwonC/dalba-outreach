@@ -234,10 +234,10 @@ function remainingTtl(at) {
 async function importSend(rec, dedupeId) {
   if (!enabled()) return { skipped: true };
 
-  if (dedupeId) {
-    const seen = await cmd(["SISMEMBER", IMPORTED_KEY, String(dedupeId)]);
-    if (seen === 1) return { duplicate: true };
-  }
+  // 같은 메일을 두 번 **기록(로그)** 하지 않으려는 표시. 단, 차단키는 아래에서 항상 다시
+  // 확인한다 — 차단 기간(HISTORY_DAYS)을 늘린 뒤 재동기화하면, 예전에 가져와 만료된
+  // 크리에이터도 다시 차단되도록. (여기서 그냥 return 하면 만료된 차단이 되살아나지 않는다)
+  const seen = dedupeId ? (await cmd(["SISMEMBER", IMPORTED_KEY, String(dedupeId)]) === 1) : false;
 
   const val = JSON.stringify(rec);
   const ttl = remainingTtl(rec.at);
@@ -246,10 +246,14 @@ async function importSend(rec, dedupeId) {
   let blocked = false;
   if (ttl > 0) {
     const keys = keysOf(rec);
-    // 이미 기록이 있으면 덮어쓰지 않는다(NX) — 도구로 보낸 정확한 기록이 우선
+    // 이미 기록이 있으면 덮어쓰지 않는다(NX) — 도구로 보낸 정확한 기록이 우선.
+    // 없거나 만료된 자리만 새로 잡는다 → 재동기화가 만료된 차단을 되살린다.
     const out = await pipeline(keys.map(k => ["SET", k, val, "NX", "EX", String(ttl)]));
     blocked = out.some(r => r === "OK");
   }
+
+  // 이미 가져온 메일이면 로그는 다시 안 쌓는다 (차단키는 위에서 이미 갱신됨)
+  if (seen) return { duplicate: true, blocking: blocked };
 
   const tail = [["LPUSH", LOG_KEY, val], ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]];
   if (dedupeId) tail.unshift(["SADD", IMPORTED_KEY, String(dedupeId)]);
