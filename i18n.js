@@ -298,6 +298,12 @@
       // ── 관리자 화면 ──
       "담당자별": "By staff",
       "📈 일별": "📈 Daily",
+      "📅 주차별": "📅 Weekly",
+      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽":
+        "Weeks are Mon–Sun (KST) · replies counted by messages received that week · admins excluded · latest week on the left",
+      "이번주": "this week",
+      "합계": "Total",
+      "전체": "All",
       "발송 이력": "Sent history",
       "⏸ 중복 시도": "⏸ Blocked attempts",
       "담당자": "Staff",
@@ -698,6 +704,12 @@
       // ── Bảng quản trị ──
       "담당자별": "Theo nhân viên",
       "📈 일별": "📈 Theo ngày",
+      "📅 주차별": "📅 Theo tuần",
+      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽":
+        "Tuần tính Thứ 2–CN (giờ KST) · phản hồi đếm theo số thư nhận trong tuần đó · không tính quản trị · tuần mới nhất bên trái",
+      "이번주": "tuần này",
+      "합계": "Tổng",
+      "전체": "Tất cả",
       "발송 이력": "Lịch sử gửi",
       "⏸ 중복 시도": "⏸ Bị chặn trùng",
       "담당자": "Nhân viên",
@@ -875,7 +887,8 @@
       "(약 {n}분 후)": "(~{n} min)",
       "(약 {n}시간 후)": "(~{n} h)",
       "(약 {n}일 후)": "(~{n} d)",
-      "외 {n}명": "+{n} more"
+      "외 {n}명": "+{n} more",
+      "회신 {n}": "{n} replies"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -919,7 +932,8 @@
       "(약 {n}분 후)": "(~{n} phút)",
       "(약 {n}시간 후)": "(~{n} giờ)",
       "(약 {n}일 후)": "(~{n} ngày)",
-      "외 {n}명": "+{n} nữa"
+      "외 {n}명": "+{n} nữa",
+      "회신 {n}": "{n} phản hồi"
     }
   };
 

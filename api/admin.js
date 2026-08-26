@@ -169,6 +169,69 @@ function daily(sent, blocked, replies, tzMin, days) {
   return fillDays(m, days, tzMin, 180);
 }
 
+// ─── 주차별 집계 ─────────────────────────────────────────────────
+// 담당자 한 명당 한 줄, 주(월~일)마다 아웃리치 수·회신 수. 일별과 같은 이유로 tz 로 보정한다
+// (한국 아침 발송이 UTC 로 전날이라 주가 밀리지 않게). 주 시작은 월요일, ISO 주차로 라벨을 단다.
+function localMonday(at, tzMin) {
+  const t = Date.parse(at || "");
+  if (!isFinite(t)) return null;
+  const d = new Date(t - tzMin * 60000);
+  const u = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  u.setUTCDate(u.getUTCDate() - ((u.getUTCDay() + 6) % 7));   // 그 주의 월요일
+  return u.toISOString().slice(0, 10);
+}
+function isoWeekOf(mondayKey) {
+  const th = new Date(mondayKey + "T00:00:00Z");
+  th.setUTCDate(th.getUTCDate() + 3);                          // 그 주 목요일이 주차를 정한다
+  const yStart = new Date(Date.UTC(th.getUTCFullYear(), 0, 1));
+  const week = 1 + Math.round(((th - yStart) / 86400000 - 3 + ((yStart.getUTCDay() + 6) % 7)) / 7);
+  return { year: th.getUTCFullYear(), week };
+}
+function addDaysKey(key, n) {
+  const t = new Date(key + "T00:00:00Z");
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+function weekly(sent, replies, tzMin, numWeeks) {
+  // 오늘(로컬) 기준 최근 numWeeks 주 — 최신 주가 앞에 오도록
+  const todayMon = localMonday(new Date().toISOString(), tzMin);
+  const weeks = [];
+  const inWindow = new Set();
+  for (let i = 0, key = todayMon; i < numWeeks; i++, key = addDaysKey(key, -7)) {
+    const w = isoWeekOf(key);
+    weeks.push({ key, week: w.week, year: w.year, start: key, end: addDaysKey(key, 6) });
+    inWindow.add(key);
+  }
+
+  const blank = () => { const c = {}; weeks.forEach(w => { c[w.key] = { sent: 0, replied: 0 }; }); return c; };
+  const rows = new Map();
+  // 등록된 직원(관리자 제외)은 0건이어도 줄을 만든다 — 누가 안 움직였는지도 현황이다
+  roster().forEach(a => rows.set(String(a.email).toLowerCase(),
+    { email: a.email, name: a.name, cells: blank(), totalSent: 0, totalReplied: 0 }));
+  const ensure = (by, byName) => {
+    const k = String(by || "").toLowerCase() || "(알 수 없음)";
+    if (!rows.has(k)) rows.set(k, { email: by || k, name: byName || k, cells: blank(), totalSent: 0, totalReplied: 0 });
+    return rows.get(k);
+  };
+
+  sent.forEach(r => {
+    const mk = localMonday(r.at, tzMin);
+    if (!mk || !inWindow.has(mk)) return;
+    const row = ensure(r.by, r.byName); row.cells[mk].sent++; row.totalSent++;
+  });
+  // 회신은 **받은 날**이 속한 주에 센다 (통수 기준). 담당자는 보낸 사람/받은편지함 주인.
+  replies.forEach(r => {
+    const mk = localMonday(r.at, tzMin);
+    if (!mk || !inWindow.has(mk)) return;
+    const row = ensure(r.by || r.inbox, r.byName); row.cells[mk].replied++; row.totalReplied++;
+  });
+
+  const list = [...rows.values()]
+    .sort((a, b) => b.totalSent - a.totalSent || String(a.name).localeCompare(String(b.name)));
+  return { weeks, rows: list };
+}
+
 // 담당자 목록은 **등록된 직원 명단(NW_ACCOUNTS)** 에서 시작한다.
 // 발송 기록에서만 뽑으면 아직 이 도구로 안 보낸 사람이 목록에 없고, 그러면
 // 그 사람의 지난 발송을 가져오려 해도 고를 수가 없다 — 순환에 걸린다.
@@ -281,7 +344,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "people" || view === "conversations" || view === "pipeline";
+    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -330,6 +393,12 @@ module.exports = async (req, res) => {
         rows: daily(sent, blocked, replies, tzMin, days),
         staff: [...new Set(sent.map(r => r.byName || r.by).filter(Boolean))]
       }));
+      return;
+    }
+    if (view === "weekly") {
+      const tzMin = Number.isFinite(Number(q.tz)) ? Number(q.tz) : 0;
+      const numWeeks = Math.max(1, Math.min(Number(q.weeks) || 8, 26));
+      res.status(200).json(Object.assign(base, weekly(sent, replies, tzMin, numWeeks)));
       return;
     }
     if (view === "sent") { res.status(200).json(Object.assign(base, { rows: sent })); return; }

@@ -140,6 +140,7 @@
   <div class="tabs">
     <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
+    <button class="tab" data-v="weekly" onclick="go('weekly')">📅 주차별</button>
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
@@ -280,7 +281,7 @@ async function loadAdmin(){
   if($("days").value !== "0") qs.set("days", $("days").value);
   if($("by").value) qs.set("by", $("by").value);
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
-  if(VIEW === "daily") qs.set("tz", String(new Date().getTimezoneOffset()));
+  if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
   const d = await fetchJson("/api/admin?" + qs);
 
   if(d.historyEnabled === false){
@@ -288,6 +289,7 @@ async function loadAdmin(){
     return "";
   }
   if(VIEW === "daily")   return renderDaily(d);
+  if(VIEW === "weekly")  return renderWeekly(d);
   if(VIEW === "summary") return renderSummary(d);
   if(VIEW === "sent")    return renderSent(d);
   if(VIEW === "blocked") return renderBlocked(d);
@@ -496,6 +498,54 @@ function wireTips(rows){
     });
     el.addEventListener("mouseleave", () => tip.classList.remove("on"));
   });
+}
+
+/* ── 주차별 (담당자 × 주) ──
+   주(월~일)마다 담당자별 아웃리치 수와 회신 수. 관리자는 서버에서 이미 빠져 있다.
+   회신은 그 주에 '받은' 통수 기준. 최신 주가 왼쪽. */
+function mdRange(start, end){
+  const md = s => { const p = String(s).split("-"); return p.length===3 ? (Number(p[1])+"/"+Number(p[2])) : s; };
+  return md(start) + "–" + md(end);
+}
+function renderWeekly(d){
+  const weeks = d.weeks || [];
+  const rows = d.rows || [];
+  if(!weeks.length){ $("body").innerHTML = emptyNote(d); return ""; }
+
+  const note = '<div class="note">주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽' +
+    (cronNote(d) ? '<br /><span class="muted">'+cronNote(d)+'</span>' : '') + '</div>';
+
+  const cell = c => {
+    c = c || { sent:0, replied:0 };
+    if(!c.sent && !c.replied) return '<td class="mono muted">0</td>';
+    return '<td class="mono"><b>'+c.sent+'</b>'+
+      (c.replied ? '<div class="muted" style="font-size:11px">회신 '+c.replied+'</div>' : '')+'</td>';
+  };
+
+  let h = note + '<div class="scroll"><table><thead><tr><th>담당자</th>' +
+    weeks.map((w,i) => '<th style="text-align:right">W'+w.week+
+      (i===0 ? ' <span class="muted" style="font-weight:400">(<span>이번주</span>)</span>' : '')+
+      '<div class="muted" style="font-weight:400;font-size:11px">'+mdRange(w.start, w.end)+'</div></th>').join("") +
+    '<th style="text-align:right">합계</th></tr></thead><tbody>' +
+    rows.map(r =>
+      '<tr><td><b>'+esc(r.name||r.email)+'</b><div class="muted">'+esc(r.email)+'</div></td>' +
+      weeks.map(w => cell(r.cells && r.cells[w.key])).join("") +
+      '<td class="mono"><b>'+(r.totalSent||0)+'</b>'+
+        (r.totalReplied ? '<div class="muted" style="font-size:11px">회신 '+r.totalReplied+'</div>' : '')+'</td></tr>').join("") +
+    '</tbody>';
+
+  // 합계 행 — 주마다 팀 전체 아웃리치·회신
+  const colSent = weeks.map(w => rows.reduce((s,r)=>s+((r.cells&&r.cells[w.key]&&r.cells[w.key].sent)||0),0));
+  const colRep  = weeks.map(w => rows.reduce((s,r)=>s+((r.cells&&r.cells[w.key]&&r.cells[w.key].replied)||0),0));
+  h += '<tfoot><tr><th style="text-align:left">전체</th>' +
+    weeks.map((w,i) => '<th style="text-align:right" class="mono"><b>'+colSent[i]+'</b>'+
+      (colRep[i] ? '<div class="muted" style="font-weight:400;font-size:11px">회신 '+colRep[i]+'</div>' : '')+'</th>').join("") +
+    '<th style="text-align:right" class="mono"><b>'+colSent.reduce((a,b)=>a+b,0)+'</b>'+
+      '<div class="muted" style="font-weight:400;font-size:11px">회신 '+colRep.reduce((a,b)=>a+b,0)+'</div></th></tr></tfoot>';
+
+  h += '</table></div>';
+  $("body").innerHTML = h;
+  return "";
 }
 
 function renderSent(d){
