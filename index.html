@@ -1247,6 +1247,32 @@ function loadDraft(){
   setDeal(localStorage.getItem("outreach_deal") || "paid");
 }
 
+/* 관리자 페이지의 [중복 시도 → 강제 발송] 에서 넘어온 수신자를 명단칸에 채운다.
+   메일 본문은 저장하지 않으므로 내용은 여기서 새로 작성한다 — 수신자만 미리 채우고,
+   관리자면 [강제 발송] 을 켜 둔다(서버도 관리자만 force 를 인정). 한 번만 반영하고 지운다. */
+function loadPrefill(){
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem("outreach_prefill") || "null"); } catch(e){}
+  if(!o || !Array.isArray(o.recipients) || !o.recipients.length) return;
+  try { localStorage.removeItem("outreach_prefill"); } catch(e){}
+
+  setMode("bulk");
+  const rows = o.recipients.map(r =>
+    [String(r.to||""), String(r.name||""), String(r.handle||"")].join("\t"));
+  $("bulkText").value = ["email\tname\thandle"].concat(rows).join("\n");
+  try { $("bulkText").dispatchEvent(new Event("input")); } catch(e){}
+
+  const admin = Boolean(CFG.admin);
+  if(o.force && admin && $("forceWrap").style.display !== "none"){
+    $("forceSend").checked = true;
+    if(typeof paintDup === "function") paintDup();
+  }
+  $("sendResult").innerHTML = '<div class="ok"><b>' + o.recipients.length + '명</b> ' +
+    '<span>중복 시도에서 불러옴</span> — <span>' +
+    (admin ? '강제 발송이 켜져 있으니, 내용을 작성한 뒤 발송하세요.'
+           : '강제 발송은 관리자만 가능합니다.') + '</span></div>';
+}
+
 /* ── 중복 발송 확인 ──
    담당자가 10명이면 명단이 겹치는 건 시간 문제라, 명단을 넣는 즉시 이미 보낸 사람을
    표시한다. 실제 차단은 서버가 발송 직전에 다시 한다 — 확인과 발송 사이에 다른
@@ -1990,6 +2016,8 @@ async function boot(){
       .catch(e => { VIDEOS_WHY = String(e.message||e); paintVidBar(); });
   }
   paintWho();
+  // 관리자 페이지 중복 시도에서 넘어온 수신자가 있으면 명단칸에 채운다 (강제 발송 준비)
+  if(authed) loadPrefill();
   renderPreview();
   if(authed && AUTH_MODE !== "accounts" && !acct()) openAcct();
 }

@@ -580,12 +580,20 @@ function renderBlocked(d){
     (selfCount ? '<br /><span class="muted">"본인 재시도" ' + selfCount + '건은 예전 규칙(본인 것도 보류)에 막혔던 ' +
       '과거 기록입니다 — 지금은 본인이 보냈던 사람에게는 그대로 발송됩니다.</span>' : '') +
     '</div>' +
+    (rows.length ? '<div class="filters" style="margin-bottom:10px">' +
+      '<button class="btn dark" onclick="forceSelectedBlocked()">✅ 선택 → 강제 발송</button>' +
+      '<span class="muted">체크한 크리에이터를 발송 화면으로 보냅니다 (관리자 강제 발송).</span></div>' : '') +
     '<div class="scroll"><table><thead><tr>' +
+    '<th><input type="checkbox" onclick="toggleAllBlocked(this)" title="전체 선택" /></th>' +
     '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 보낸 사람</th><th>원래 발송</th>' +
     '</tr></thead><tbody>' +
     rows.map(r => {
       const p = r.prior || {};
-      return '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+      const noMail = !r.to;
+      return '<tr><td>' + (noMail
+          ? '<input type="checkbox" disabled title="이메일이 없어 발송할 수 없습니다" />'
+          : '<input type="checkbox" class="blkchk" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" />') + '</td>' +
+        '<td class="mono muted">'+esc(fmt(r.at))+'</td>' +
         '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
         '<td>'+person(r)+'</td>' +
         '<td>'+esc(p.byName||p.by||"—")+
@@ -595,6 +603,22 @@ function renderBlocked(d){
     '</tbody></table></div>' +
     (rows.length ? "" : '<div class="muted" style="padding:20px 0">중복 시도가 없습니다. 👍</div>');
   return rows.length + "건";
+}
+
+/* 중복으로 막혔던 크리에이터를 발송 화면으로 넘긴다 (관리자 강제 발송).
+   메일 본문은 저장하지 않으므로 내용은 발송 화면에서 새로 작성한다 — 여기서는 수신자만 넘긴다. */
+function toggleAllBlocked(cb){
+  document.querySelectorAll(".blkchk").forEach(c => { c.checked = cb.checked; });
+}
+function forceSelectedBlocked(){
+  const picks = [...document.querySelectorAll(".blkchk:checked")].map(c => ({
+    to: c.getAttribute("data-to") || "",
+    name: c.getAttribute("data-name") || "",
+    handle: c.getAttribute("data-handle") || ""
+  })).filter(p => p.to);
+  if(!picks.length){ alert("발송할 크리에이터를 선택하세요 (이메일이 있는 건만 가능)."); return; }
+  try { localStorage.setItem("outreach_prefill", JSON.stringify({ force:true, from:"blocked", recipients:picks })); } catch(e){}
+  location.href = "/";
 }
 
 /* ── 대화 (담당자 ↔ 크리에이터 협상) ──
