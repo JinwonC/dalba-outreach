@@ -45,6 +45,9 @@ async function buildIndex() {
   };
 
   (sentAll || []).forEach(r => {
+    // 제외 발신자(예: minju)의 발송은 중복 계산에 넣지 않는다 — 그 사람만 보낸 크리에이터는
+    // '아직 안 보낸 것'으로 취급돼 발송이 허용된다.
+    if (H.isIgnoredSender(r.by)) return;
     const rec = { by: r.by || "", byName: r.byName || r.by || "", at: r.at || "", campaign: r.campaign || "", forced: Boolean(r.forced), name: r.name || "", handle: r.handle || "" };
     const put = (map, key) => {
       if (!key) return;

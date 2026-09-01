@@ -104,6 +104,20 @@ function normHandle(h) {
   return String(h == null ? "" : h).trim().toLowerCase().replace(/^@+/, "").replace(/\s+/g, "");
 }
 
+// 중복(재발송) 계산에서 제외할 발신자.
+//   · 이 사람이 이미 보낸 크리에이터라도 **다른 사람의 발송을 막지 않는다**
+//   · 이 사람의 발송도 **남의 기록에 막히지 않는다**
+// 예: minju.kim@dalba.com 은 다른 종류의 아웃리치를 해서 팀 중복 판정과 섞이면 안 된다.
+// 환경변수 DEDUP_IGNORE_SENDERS 로 바꿀 수 있고(콤마·세미콜론·공백·줄바꿈 구분), 없으면 기본값을 쓴다.
+const IGNORE_SENDERS = new Set(
+  String(process.env.DEDUP_IGNORE_SENDERS != null && process.env.DEDUP_IGNORE_SENDERS !== ""
+    ? process.env.DEDUP_IGNORE_SENDERS : "minju.kim@dalba.com")
+    .split(/[\s,;]+/).map(s => normEmail(s)).filter(Boolean)
+);
+function isIgnoredSender(by) {
+  return IGNORE_SENDERS.has(normEmail(by));
+}
+
 const emailKey = e => "outreach:sent:e:" + normEmail(e);
 const handleKey = h => "outreach:sent:h:" + normHandle(h);
 
@@ -142,7 +156,8 @@ async function lookup(list) {
   return spans.map(s => {
     for (let i = 0; i < s.n; i++) {
       const rec = parseRec(out[s.at + i]);
-      if (rec) return rec;
+      // 제외 발신자(예: minju)의 기록은 '이미 보낸 것'으로 치지 않는다
+      if (rec && !isIgnoredSender(rec.by)) return rec;
     }
     return null;
   });
@@ -156,6 +171,10 @@ async function reserve(r, meta, force) {
 
   const keys = keysOf(r);
   if (!keys.length) return { ok: true, skipped: true };
+
+  // 제외 발신자(예: minju)는 중복 판정에서 빠진다 — 막히지도, 남을 막지도 않는다.
+  // 차단 키를 남기지 않아 이 발송은 다른 담당자의 발송을 가로막지 않는다.
+  if (isIgnoredSender(meta && meta.by)) return { ok: true, skipped: true };
 
   const rec = {
     to: String((r && r.to) || ""),
@@ -185,10 +204,11 @@ async function reserve(r, meta, force) {
     if (got) { created.push(keys[i]); continue; }
 
     const prior = parseRec(await cmd(["GET", keys[i]]));
-    // 본인이 이미 잡은 자리면 재발송 허용 — 덮어쓰고 계속 (기록의 주인은 그대로 본인)
-    if (prior && me && normEmail(prior.by) === me) {
+    // 제외 발신자(예: minju)가 잡아 둔 자리, 또는 본인이 잡은 자리면 발송 허용 —
+    // 덮어써서 새 발신자가 주인이 되게 하고 계속한다 (이후 진짜 중복은 이 발신자 기준으로 막힌다).
+    if (prior && (isIgnoredSender(prior.by) || (me && normEmail(prior.by) === me))) {
       await cmd(["SET", keys[i], val, "EX", String(TTL_SEC)]);
-      resent = true;
+      if (me && normEmail(prior.by) === me) resent = true;
       continue;
     }
     // 다른 담당자 자리 → 이번에 새로 잡은 것만 반납하고 보류 (본인 자리는 건드리지 않는다)
@@ -398,6 +418,6 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle,
+  normEmail, normHandle, isIgnoredSender,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };
