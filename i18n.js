@@ -312,6 +312,13 @@
       "중복 시도에서 불러옴": "loaded from blocked attempts",
       "강제 발송이 켜져 있으니, 내용을 작성한 뒤 발송하세요.": "Force send is on — write the content, then send.",
       "강제 발송은 관리자만 가능합니다.": "Only admins can force send.",
+      "☑︎ 선택 → 승인 (담당자가 직접 보냄)": "☑︎ Selected → approve (staff sends it)",
+      "✅ 선택 → 강제 발송 (관리자가 대신 보냄)": "✅ Selected → force send (admin sends it)",
+      "승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.":
+        "Approving lets that staff member resend from their own account. Force send sends now from the admin account.",
+      "승인됨": "Approved",
+      "이 담당자가 이 크리에이터에게 보낼 수 있게 승인됨": "Approved for this staff member to send to this creator",
+      "승인 중…": "Approving…",
       "발송 이력": "Sent history",
       "⏸ 중복 시도": "⏸ Blocked attempts",
       "담당자": "Staff",
@@ -726,6 +733,13 @@
       "중복 시도에서 불러옴": "lấy từ lượt bị chặn",
       "강제 발송이 켜져 있으니, 내용을 작성한 뒤 발송하세요.": "Đã bật gửi cưỡng chế — hãy soạn nội dung rồi gửi.",
       "강제 발송은 관리자만 가능합니다.": "Chỉ quản trị viên mới gửi cưỡng chế được.",
+      "☑︎ 선택 → 승인 (담당자가 직접 보냄)": "☑︎ Đã chọn → duyệt (nhân viên tự gửi)",
+      "✅ 선택 → 강제 발송 (관리자가 대신 보냄)": "✅ Đã chọn → gửi cưỡng chế (quản trị gửi thay)",
+      "승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.":
+        "Duyệt để nhân viên đó gửi lại từ tài khoản của họ. Gửi cưỡng chế sẽ gửi ngay từ tài khoản quản trị.",
+      "승인됨": "Đã duyệt",
+      "이 담당자가 이 크리에이터에게 보낼 수 있게 승인됨": "Đã duyệt cho nhân viên này gửi tới creator này",
+      "승인 중…": "Đang duyệt…",
       "발송 이력": "Lịch sử gửi",
       "⏸ 중복 시도": "⏸ Bị chặn trùng",
       "담당자": "Nhân viên",
@@ -904,7 +918,9 @@
       "(약 {n}시간 후)": "(~{n} h)",
       "(약 {n}일 후)": "(~{n} d)",
       "외 {n}명": "+{n} more",
-      "회신 {n}": "{n} replies"
+      "회신 {n}": "{n} replies",
+      "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "{n} approved · the staff member's resend will now go through.",
+      "{n}건 승인 · {n}건 건너뜀": "{n} approved · {n} skipped"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -949,7 +965,9 @@
       "(약 {n}시간 후)": "(~{n} giờ)",
       "(약 {n}일 후)": "(~{n} ngày)",
       "외 {n}명": "+{n} nữa",
-      "회신 {n}": "{n} phản hồi"
+      "회신 {n}": "{n} phản hồi",
+      "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "Đã duyệt {n} · nhân viên gửi lại sẽ được gửi đi.",
+      "{n}건 승인 · {n}건 건너뜀": "Đã duyệt {n} · bỏ qua {n}"
     }
   };
 

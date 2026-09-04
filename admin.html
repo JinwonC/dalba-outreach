@@ -581,8 +581,9 @@ function renderBlocked(d){
       '과거 기록입니다 — 지금은 본인이 보냈던 사람에게는 그대로 발송됩니다.</span>' : '') +
     '</div>' +
     (rows.length ? '<div class="filters" style="margin-bottom:10px">' +
-      '<button class="btn dark" onclick="forceSelectedBlocked()">✅ 선택 → 강제 발송</button>' +
-      '<span class="muted">체크한 크리에이터를 발송 화면으로 보냅니다 (관리자 강제 발송).</span></div>' : '') +
+      '<button class="btn" onclick="approveSelectedBlocked()">☑︎ 선택 → 승인 (담당자가 직접 보냄)</button>' +
+      '<button class="btn dark" onclick="forceSelectedBlocked()">✅ 선택 → 강제 발송 (관리자가 대신 보냄)</button>' +
+      '<span class="muted" id="blkMsg">승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.</span></div>' : '') +
     '<div class="scroll"><table><thead><tr>' +
     '<th><input type="checkbox" onclick="toggleAllBlocked(this)" title="전체 선택" /></th>' +
     '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 보낸 사람</th><th>원래 발송</th>' +
@@ -592,10 +593,11 @@ function renderBlocked(d){
       const noMail = !r.to;
       return '<tr><td>' + (noMail
           ? '<input type="checkbox" disabled title="이메일이 없어 발송할 수 없습니다" />'
-          : '<input type="checkbox" class="blkchk" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" />') + '</td>' +
+          : '<input type="checkbox" class="blkchk" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" data-by="'+esc(r.by||"")+'" />') + '</td>' +
         '<td class="mono muted">'+esc(fmt(r.at))+'</td>' +
         '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
-        '<td>'+person(r)+'</td>' +
+        '<td>'+person(r)+
+          (r.approved ? ' <span class="tag" style="background:#e7f0ff;color:#2f5fb0" title="이 담당자가 이 크리에이터에게 보낼 수 있게 승인됨">승인됨</span>' : '')+'</td>' +
         '<td>'+esc(p.byName||p.by||"—")+
           (isSelf(r) ? ' <span class="tag" style="background:#eef3ea;color:#4a6b45" title="예전 규칙에 막혔던 본인 재발송 — 지금은 허용됩니다">본인 재시도</span>' : '')+'</td>' +
         '<td class="mono muted">'+esc(fmt(p.at))+(p.campaign ? '<div class="muted">'+esc(p.campaign)+'</div>' : '')+'</td></tr>';
@@ -619,6 +621,32 @@ function forceSelectedBlocked(){
   if(!picks.length){ alert("발송할 크리에이터를 선택하세요 (이메일이 있는 건만 가능)."); return; }
   try { localStorage.setItem("outreach_prefill", JSON.stringify({ force:true, from:"blocked", recipients:picks })); } catch(e){}
   location.href = "/";
+}
+
+/* 선택한 막힌 건을 **승인** 한다 — 원래 시도했던 담당자가 자기 계정으로 다시 보내면 통과한다.
+   (관리자가 대신 보내는 강제 발송과 달리, 발신자는 그 담당자 그대로.) */
+async function approveSelectedBlocked(){
+  const items = [...document.querySelectorAll(".blkchk:checked")].map(c => ({
+    by: c.getAttribute("data-by") || "",
+    to: c.getAttribute("data-to") || "",
+    handle: c.getAttribute("data-handle") || "",
+    name: c.getAttribute("data-name") || ""
+  })).filter(x => x.by && (x.to || x.handle));
+  if(!items.length){ alert("승인할 건을 선택하세요 (시도한 담당자가 있는 건만 가능)."); return; }
+  const msg = $("blkMsg");
+  if(msg) msg.textContent = "승인 중…";
+  try {
+    const r = await fetch("/api/admin", {
+      method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, headers()),
+      body: JSON.stringify({ action:"approve", items })
+    });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); throw new Error("로그인이 필요합니다"); }
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    if(msg) msg.textContent = (d.approved||0) + "건 승인됨 · 담당자가 다시 보내면 발송됩니다.";
+    load();   // 목록 새로고침 → '승인됨' 배지 표시
+  } catch(e){ if(msg) msg.textContent = ""; alert("승인 실패: " + String(e.message||e)); }
 }
 
 /* ── 대화 (담당자 ↔ 크리에이터 협상) ──

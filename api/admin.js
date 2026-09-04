@@ -335,6 +335,35 @@ module.exports = async (req, res) => {
       return;
     }
 
+    const meEmail = String((me && me.email) || "").toLowerCase();
+
+    // ─── POST: 중복 시도 승인 ────────────────────────────────────
+    // 관리자가 막힌 담당자에게 그 크리에이터 발송을 허가한다. 이후 그 담당자가
+    // 자기 계정으로 다시 보내면 통과한다 (관리자가 대신 보내는 강제 발송과 다름).
+    if (req.method === "POST") {
+      let body = req.body;
+      if (typeof body === "string") { try { body = JSON.parse(body); } catch (_) { body = {}; } }
+      body = body || {};
+      if (body.action === "approve") {
+        const items = Array.isArray(body.items) ? body.items : [];
+        const admins = A.adminEmails();
+        let done = 0, skipped = 0;
+        for (const it of items) {
+          const staff = String((it && it.by) || "").toLowerCase();
+          const to = String((it && it.to) || "");
+          const handle = (it && it.handle) || "";
+          // 담당자 이메일 + 크리에이터 식별자가 있어야 하고, 관리자에게 주는 승인은 의미 없다
+          if (!staff || admins.includes(staff) || (!to && !handle)) { skipped++; continue; }
+          const rv = await H.approveSend({ to, handle, creatorName: it.name }, staff, { approvedBy: meEmail });
+          if (rv && rv.approved) done++; else skipped++;
+        }
+        res.status(200).json({ approved: done, skipped });
+        return;
+      }
+      res.status(400).json({ error: "알 수 없는 요청입니다" });
+      return;
+    }
+
     const q = req.query || {};
     const view = String(q.view || "summary");
     const displayLimit = Math.max(1, Math.min(Number(q.limit) || 1000, H.LOG_MAX));
@@ -402,7 +431,15 @@ module.exports = async (req, res) => {
       return;
     }
     if (view === "sent") { res.status(200).json(Object.assign(base, { rows: sent })); return; }
-    if (view === "blocked") { res.status(200).json(Object.assign(base, { rows: blocked })); return; }
+    if (view === "blocked") {
+      // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
+      const appr = await H.approvalsIndex();
+      const rows = blocked.map(r => Object.assign({}, r, {
+        approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f))
+      }));
+      res.status(200).json(Object.assign(base, { rows }));
+      return;
+    }
     if (view === "people") {
       res.status(200).json(Object.assign(base, { rows: groupByPerson(sent, blocked) }));
       return;

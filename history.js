@@ -198,6 +198,8 @@ async function reserve(r, meta, force) {
   const me = normEmail((meta && meta.by) || "");
   const created = [];                 // 이번에 **새로** 잡은 키 (실패 시 반납 대상)
   let resent = false;                 // 본인 자리 위에 다시 보낸 경우
+  let approved = false;               // 관리자 승인으로 통과한 경우
+  let approvalChecked = false;        // 승인 조회는 막힐 때 한 번만 한다
 
   for (let i = 0; i < keys.length; i++) {
     const got = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
@@ -211,12 +213,66 @@ async function reserve(r, meta, force) {
       if (me && normEmail(prior.by) === me) resent = true;
       continue;
     }
+    // 관리자가 이 담당자에게 이 크리에이터 발송을 **승인**했으면 통과한다.
+    // 자리를 이 담당자로 덮어써 주인이 되게 한다 (이후 재발송은 자유, 남은 그대로 막힌다).
+    if (me) {
+      if (!approvalChecked) { approved = await isApproved(r, me); approvalChecked = true; }
+      if (approved) { await cmd(["SET", keys[i], val, "EX", String(TTL_SEC)]); continue; }
+    }
     // 다른 담당자 자리 → 이번에 새로 잡은 것만 반납하고 보류 (본인 자리는 건드리지 않는다)
     if (created.length) await pipeline(created.map(k => ["DEL", k]));
     return { ok: false, prior };
   }
 
-  return { ok: true, record: rec, resent: resent || undefined };
+  return { ok: true, record: rec, resent: resent || undefined, approved: approved || undefined };
+}
+
+// ─── 관리자 승인 (막힌 담당자에게 그 크리에이터 발송을 허가) ───────
+// 중복으로 막힌 발송을 관리자가 승인하면, **그 담당자 본인이** 자기 계정으로 보낼 수 있다.
+// (관리자가 대신 보내는 '강제 발송' 과 달리, 발신자는 원래 담당자 그대로다.)
+// HASH 필드 "<담당자>::<차단키>" 에 승인을 남겨 두고, reserve 가 막을 때 이걸 확인한다.
+// 승인 후 담당자가 성공적으로 보내면 그 자리의 주인이 되므로, 그 뒤로는 재발송이 자유롭다.
+const APPROVE_KEY = "outreach:approvals";
+function approvalField(staff, key) { return normEmail(staff) + "::" + key; }
+function approvalFieldsOf(r, staff) { return keysOf(r).map(k => approvalField(staff, k)); }
+
+async function approveSend(r, staff, meta) {
+  if (!enabled()) return { skipped: true };
+  const keys = keysOf(r);
+  const s = normEmail(staff);
+  if (!keys.length || !s) return { skipped: true };
+  const rec = {
+    by: s, to: String((r && r.to) || ""), handle: normHandle(r && r.handle) || undefined,
+    name: (r && (r.creatorName || r.name)) || undefined,
+    at: new Date().toISOString(), approvedBy: (meta && meta.approvedBy) || ""
+  };
+  await pipeline(keys.map(k => ["HSET", APPROVE_KEY, approvalField(s, k), JSON.stringify(rec)]));
+  return { approved: true, keys: keys.length };
+}
+
+// 이 담당자(staff)가 이 크리에이터에게 보내도록 승인돼 있는가
+async function isApproved(r, staff) {
+  if (!enabled()) return false;
+  const fields = approvalFieldsOf(r, staff);
+  if (!fields.length || !normEmail(staff)) return false;
+  const out = await pipeline(fields.map(fld => ["HGET", APPROVE_KEY, fld]));
+  return out.some(v => v);
+}
+
+async function revokeApproval(r, staff) {
+  if (!enabled()) return;
+  const fields = approvalFieldsOf(r, staff);
+  if (fields.length) await pipeline(fields.map(fld => ["HDEL", APPROVE_KEY, fld]));
+}
+
+// 승인된 필드 전체를 Set 으로 (관리자 화면에서 '승인됨' 표시용 — 한 번만 읽는다)
+async function approvalsIndex() {
+  if (!enabled()) return new Set();
+  const flat = await cmd(["HGETALL", APPROVE_KEY]);
+  const set = new Set();
+  if (Array.isArray(flat)) { for (let i = 0; i < flat.length; i += 2) set.add(flat[i]); }
+  else if (flat && typeof flat === "object") { Object.keys(flat).forEach(k => set.add(k)); }
+  return set;
 }
 
 // 발송이 실패했으면 자리를 반납한다 — 실패한 주소가 90일간 막히면 안 된다
@@ -414,6 +470,7 @@ async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY,
 
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
+  approveSend, isApproved, revokeApproval, approvalsIndex, approvalFieldsOf,
   recordReply, recent, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
