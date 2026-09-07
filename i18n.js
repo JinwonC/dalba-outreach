@@ -60,6 +60,10 @@
       "🗂 내 파이프라인": "🗂 My pipeline",
       "🔎 중복 검사": "🔎 Duplicate check",
       "🤝 협업 리스트": "🤝 Collab list",
+      "🤝 협업 중": "🤝 Collaborating",
+      "이메일 — 대조 안 됨": "email — not checked",
+      "이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.":
+        "Emails aren't matched against the collab list (handles) — use 🔎 Duplicate check for send history too.",
       "🤝 달바 인하우스 협업 크리에이터 리스트": "🤝 d'Alba in-house collab creator list",
       "이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.":
         "Creator handles already collaborating with d'Alba — read automatically from the Google Sheet.",
@@ -85,6 +89,17 @@
         "Finds whether any teammate (admins included) has contacted them — who and when.",
       "@handle1\ncreator@example.com\n@handle2\n...": "@handle1\ncreator@example.com\n@handle2\n...",
       "검사": "Check",
+      "총": "Total",
+      "입력": "Input",
+      "최근 발송": "Recent send",
+      "✅ 없음": "✅ None",
+      "· ⏸ 이미 보냄": "· ⏸ Already sent",
+      "· ✅ 없음": "· ✅ None",
+      "· 🤝 협업 중": "· 🤝 Collaborating",
+      "✅ 안 보낸 것 복사": "✅ Copy not-sent",
+      "⏸ 이미 보낸 것 복사": "⏸ Copy already-sent",
+      "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
+        "Search multiple handles/emails (newline or comma) — empty shows the full list",
       "발송일": "Sent",
       "회신 기록": "Replies",
       "✉️ 발송": "✉️ Send",
@@ -501,6 +516,10 @@
       "🗂 내 파이프라인": "🗂 Pipeline của tôi",
       "🔎 중복 검사": "🔎 Kiểm tra trùng",
       "🤝 협업 리스트": "🤝 DS hợp tác",
+      "🤝 협업 중": "🤝 Đang hợp tác",
+      "이메일 — 대조 안 됨": "email — không đối chiếu",
+      "이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.":
+        "Email không đối chiếu với danh sách hợp tác (handle) — dùng 🔎 Kiểm tra trùng để xem cả lịch sử gửi.",
       "🤝 달바 인하우스 협업 크리에이터 리스트": "🤝 Danh sách creator đang hợp tác với d'Alba",
       "이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.":
         "Handle của creator đang hợp tác với d'Alba — đọc tự động từ Google Sheet.",
@@ -525,6 +544,17 @@
       "전체 담당자(관리자 포함)가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.":
         "Tìm xem có nhân viên nào (kể cả quản trị) đã liên hệ họ chưa — ai và khi nào.",
       "검사": "Kiểm tra",
+      "총": "Tổng",
+      "입력": "Nhập",
+      "최근 발송": "Gửi gần đây",
+      "✅ 없음": "✅ Không có",
+      "· ⏸ 이미 보냄": "· ⏸ Đã gửi",
+      "· ✅ 없음": "· ✅ Không có",
+      "· 🤝 협업 중": "· 🤝 Đang hợp tác",
+      "✅ 안 보낸 것 복사": "✅ Chép mục chưa gửi",
+      "⏸ 이미 보낸 것 복사": "⏸ Chép mục đã gửi",
+      "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
+        "Tìm nhiều handle/email (xuống dòng hoặc dấu phẩy) — để trống hiện toàn bộ",
       "발송일": "Ngày gửi",
       "회신 기록": "Phản hồi",
       "✉️ 발송": "✉️ Gửi thư",
@@ -960,7 +990,13 @@
       "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "{n} approved · the staff member's resend will now go through.",
       "{n}건 승인 · {n}건 건너뜀": "{n} approved · {n} skipped",
       "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
-        "🤝 {n} collaborating creators will be held (in-house list · admins only)."
+        "🤝 {n} collaborating creators will be held (in-house list · admins only).",
+      "{n}개 입력됨": "{n} entered",
+      "전체 {n}": "All {n}",
+      "이미 보냄 {n}": "Already sent {n}",
+      "없음 {n}": "None {n}",
+      "협업 중 {n}": "Collaborating {n}",
+      "⏸ 이미 보냄 {n}건": "⏸ Already sent {n}"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -1009,7 +1045,13 @@
       "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "Đã duyệt {n} · nhân viên gửi lại sẽ được gửi đi.",
       "{n}건 승인 · {n}건 건너뜀": "Đã duyệt {n} · bỏ qua {n}",
       "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
-        "🤝 {n} creator đang hợp tác sẽ bị giữ (danh sách in-house · chỉ quản trị)."
+        "🤝 {n} creator đang hợp tác sẽ bị giữ (danh sách in-house · chỉ quản trị).",
+      "{n}개 입력됨": "đã nhập {n}",
+      "전체 {n}": "Tất cả {n}",
+      "이미 보냄 {n}": "Đã gửi {n}",
+      "없음 {n}": "Không có {n}",
+      "협업 중 {n}": "Đang hợp tác {n}",
+      "⏸ 이미 보냄 {n}건": "⏸ Đã gửi {n}"
     }
   };
 

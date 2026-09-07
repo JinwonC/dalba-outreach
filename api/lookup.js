@@ -16,6 +16,7 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
+const IH = require("../inhouse.js");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_QUERIES = 5000;   // 한 번에 검사할 수 있는 최대 개수
@@ -71,17 +72,21 @@ async function buildIndex() {
   return { sEmail, sHandle, rEmail, rHandle };
 }
 
-// 한 입력(핸들 또는 이메일)에 대한 조회 결과
-function summarizeOne(q, idx) {
+// 한 입력(핸들 또는 이메일)에 대한 조회 결과.
+// inhouseSet 이 주어지면, 핸들이 인하우스 협업 리스트에 있는지도 함께 표시한다(발송 로그와 별개).
+function summarizeOne(q, idx, inhouseSet) {
   const isEmail = EMAIL_RE.test(q);
   const key = isEmail ? H.normEmail(q) : H.normHandle(q);
   const a = (isEmail ? idx.sEmail : idx.sHandle).get(key);
   const replyCount = (isEmail ? idx.rEmail : idx.rHandle).get(key) || 0;
+  // 인하우스는 핸들 기준이다. 이메일로 검사해도 핸들(a.handle)이 있으면 그걸로 대조한다.
+  const hh = isEmail ? H.normHandle(a && a.handle) : key;
+  const inhouse = Boolean(inhouseSet && hh && inhouseSet.has(hh));
   if (!a) {
-    return { query: q, kind: isEmail ? "email" : "handle", found: false, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, replyCount, name: "", handle: "" };
+    return { query: q, kind: isEmail ? "email" : "handle", found: inhouse, inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, replyCount, name: "", handle: "" };
   }
   return {
-    query: q, kind: isEmail ? "email" : "handle", found: true,
+    query: q, kind: isEmail ? "email" : "handle", found: true, inhouse,
     sentCount: a.count, senders: [...a.senders],
     lastAt: a.lastAt, lastBy: a.lastBy, lastCampaign: a.lastCampaign, forced: a.forced,
     replyCount, name: a.name, handle: a.handle
@@ -108,6 +113,10 @@ module.exports = async (req, res) => {
       return;
     }
 
+    // 인하우스 협업 리스트도 함께 대조한다 (핸들 기준). 못 읽어도 검사는 계속(빈 집합).
+    let inhouseSet = new Set();
+    try { inhouseSet = await IH.handleSet(); } catch (_) { inhouseSet = new Set(); }
+
     // ─── POST: 여러 개 한 번에 ───────────────────────────────────
     if (req.method === "POST") {
       const body = readBody(req);
@@ -127,13 +136,14 @@ module.exports = async (req, res) => {
       if (!queries.length) { res.status(400).json({ error: "검사할 핸들 또는 이메일을 입력하세요" }); return; }
 
       const idx = await buildIndex();
-      const results = queries.map(q => summarizeOne(q, idx));
+      const results = queries.map(q => summarizeOne(q, idx, inhouseSet));
       const foundCount = results.filter(r => r.found).length;
       res.status(200).json({
         historyEnabled: true,
         count: results.length,
         foundCount,
         cleanCount: results.length - foundCount,
+        inhouseCount: results.filter(r => r.inhouse).length,
         truncated: raw.length > queries.length && queries.length >= MAX_QUERIES,
         results
       });
@@ -146,7 +156,7 @@ module.exports = async (req, res) => {
     if (!q) { res.status(400).json({ error: "핸들 또는 이메일을 입력하세요" }); return; }
 
     const idx = await buildIndex();
-    const one = summarizeOne(q, idx);
+    const one = summarizeOne(q, idx, inhouseSet);
     // 단건은 기존 화면과 호환되게 sent/replies 상세도 흉내 내지 않고 요약 형태로 준다
     res.status(200).json(Object.assign({ historyEnabled: true, found: one.found, sentCount: one.sentCount, replyCount: one.replyCount, senders: one.senders }, { results: [one] }));
   } catch (e) {

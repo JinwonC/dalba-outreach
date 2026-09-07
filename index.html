@@ -604,10 +604,14 @@
         <div>이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.</div>
         <div>이 핸들에게는 <b>발송이 차단</b>됩니다 (핸들 기준 · 관리자 제외).</div>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">
-        <input id="inhouseSearch" type="text" placeholder="핸들 검색…" style="width:auto;min-width:200px" oninput="paintInhouse()" />
-        <button class="btn" onclick="loadInhouse(true)">🔄 새로고침</button>
-        <span class="muted" id="inhouseMeta"></span>
+      <div style="margin:10px 0">
+        <textarea id="inhouseSearch" rows="2" placeholder="핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트"
+                  style="width:100%" oninput="paintInhouse()"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+          <button class="btn" onclick="$('inhouseSearch').value='';paintInhouse()">지우기</button>
+          <button class="btn" onclick="loadInhouse(true)">🔄 새로고침</button>
+          <span class="muted" id="inhouseMeta"></span>
+        </div>
       </div>
       <div id="inhouseResult"></div>
     </div>
@@ -1746,17 +1750,38 @@ function paintInhouse(){
   }
   const upd = d.updatedAt ? new Date(d.updatedAt).toLocaleString() : "";
   if(meta) meta.innerHTML = '<span>협업 중</span> <b>' + (d.count||0) + '명</b>' + (upd ? ' · <span>갱신</span> ' + esc(upd) : "");
-  const q = ($("inhouseSearch").value||"").trim().toLowerCase().replace(/^@+/,"");
-  const list = (d.handles||[]).filter(h => !q || String(h).toLowerCase().includes(q));
+
   let h = "";
   if(d.error) h += '<div class="err" style="margin-bottom:10px">시트를 읽는 중 문제가 있었습니다: <span>'+esc(d.error)+'</span></div>';
   if(!(d.handles||[]).length){
     h += '<div class="hint">읽어온 핸들이 없습니다 — 시트 공유·탭 이름·핸들 열 헤더를 확인하세요.</div>';
-  } else {
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-      list.map(x => '<span class="tag" style="background:#eef3ea;color:#3f6b45">@'+esc(x)+'</span>').join("") +
-      '</div>' + (q && !list.length ? '<div class="muted" style="margin-top:8px">검색 결과 없음</div>' : '');
+    box.innerHTML = h; return;
   }
+
+  const terms = parseChecks($("inhouseSearch").value);   // 여러 개(줄바꿈·콤마·공백) 파싱, 중복 제거
+  if(!terms.length){
+    // 검색어 없음 → 전체 리스트를 태그로
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+      (d.handles||[]).map(x => '<span class="tag" style="background:#eef3ea;color:#3f6b45">@'+esc(x)+'</span>').join("") + '</div>';
+    box.innerHTML = h; return;
+  }
+
+  // 여러 개 검사 — 각 입력이 협업 리스트(핸들 기준)에 있는지
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const hasEmail = terms.some(t => emailRe.test(t));
+  const rows = terms.map(t => {
+    const hdl = String(t).toLowerCase().replace(/^@+/,"").trim();
+    return { q:t, isEmail: emailRe.test(t), inhouse: !emailRe.test(t) && isInhouseHandle(hdl) };
+  });
+  const hit = rows.filter(r=>r.inhouse).length;
+  h += '<div class="'+(hit?'hold':'ok')+'">검사 <b>'+rows.length+'개</b> · 🤝 협업 중 <b>'+hit+'</b> · ✅ 없음 <b>'+(rows.length-hit)+'</b></div>';
+  if(hasEmail) h += '<div class="muted" style="margin-top:6px">이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.</div>';
+  h += '<div class="scroll" style="margin-top:10px;max-height:420px"><table class="rcp"><thead><tr><th>입력</th><th>상태</th></tr></thead><tbody>' +
+    rows.map(r => '<tr'+(r.inhouse?' style="background:#fffaf0"':'')+'><td><b>'+esc(r.q)+'</b></td>' +
+      '<td>'+(r.inhouse ? '<span class="rowbad">🤝 협업 중</span>'
+            : r.isEmail ? '<span class="muted">이메일 — 대조 안 됨</span>'
+            : '<span class="rowok">✅ 없음</span>')+'</td></tr>').join("") +
+    '</tbody></table></div>';
   box.innerHTML = h;
 }
 
@@ -1826,15 +1851,19 @@ function renderChecks(){
   const rows = d.results || [];
   const dups = rows.filter(r=>r.found), clean = rows.filter(r=>!r.found);
   // 전체 보기에선 '이미 보냄'을 위로 올린다 (확인이 필요한 쪽)
+  const inh = rows.filter(r=>r.inhouse);
   let list = CHECK_FILTER==="dup" ? dups : CHECK_FILTER==="clean" ? clean
+    : CHECK_FILTER==="inhouse" ? inh
     : rows.slice().sort((a,b)=> (b.found?1:0)-(a.found?1:0));
 
   const btn = (f,label,n) => '<button class="pvtab'+(CHECK_FILTER===f?' active':'')+'" onclick="setCheckFilter(\''+f+'\')">'+label+' '+n+'</button>';
   let h = '<div class="'+(d.foundCount?'hold':'ok')+'">' +
     '총 <b>'+d.count+'개</b> · ⏸ 이미 보냄 <b>'+d.foundCount+'</b> · ✅ 없음 <b>'+d.cleanCount+'</b>' +
+    ((d.inhouseCount||0) ? ' · 🤝 협업 중 <b>'+d.inhouseCount+'</b>' : '') +
     (d.truncated ? ' <span class="muted">(입력이 많아 일부만 검사됨)</span>' : '') + '</div>';
   h += '<div class="pvbar" style="margin-top:10px;flex-wrap:wrap">' +
     btn("all","전체",d.count) + btn("dup","이미 보냄",d.foundCount) + btn("clean","없음",d.cleanCount) +
+    ((d.inhouseCount||0) ? btn("inhouse","협업 중",d.inhouseCount) : "") +
     '<span style="flex:1"></span>' +
     '<button class="btn" onclick="copyChecks(\'clean\')">✅ 안 보낸 것 복사</button>' +
     '<button class="btn" onclick="copyChecks(\'dup\')">⏸ 이미 보낸 것 복사</button>' +
@@ -1846,9 +1875,12 @@ function renderChecks(){
     list.slice(0, CAP).map(r =>
       '<tr'+(r.found?' style="background:#fffaf0"':'')+'>' +
       '<td><b>'+esc(r.query)+'</b>'+(r.found && r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+'</td>' +
-      '<td>'+(r.found
-          ? '<span class="rowbad">⏸ 이미 보냄 '+r.sentCount+'건</span>'+(r.forced?' <span class="holdtag">강제</span>':'')
-          : '<span class="rowok">✅ 없음</span>')+'</td>' +
+      '<td>'+(function(){ const parts=[];
+          if(r.inhouse) parts.push('<span class="rowbad">🤝 협업 중</span>');
+          if(r.sentCount>0) parts.push('<span class="rowbad">⏸ 이미 보냄 '+r.sentCount+'건</span>'+(r.forced?' <span class="holdtag">강제</span>':''));
+          if(!parts.length) parts.push('<span class="rowok">✅ 없음</span>');
+          return parts.join(' ');
+        })()+'</td>' +
       '<td>'+esc((r.senders||[]).join(", "))+'</td>' +
       '<td class="muted">'+esc(r.found?fmtAt(r.lastAt):'')+(r.lastCampaign?'<div class="muted">'+esc(r.lastCampaign)+'</div>':'')+'</td>' +
       '<td class="muted">'+(r.replyCount?r.replyCount+'건':'')+'</td></tr>').join("") +
