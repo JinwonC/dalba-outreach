@@ -201,4 +201,4 @@ async function topVideos(pid, limit) {
     .filter(v => v.url);
 }
 
-module.exports = { configured, status, ping, topVideos, readRows, parseCsv, SHEET_TAB, SHEET_ID };
+module.exports = { configured, status, ping, topVideos, readRows, parseCsv, SHEET_TAB, SHEET_ID, accessToken, serviceAccount };

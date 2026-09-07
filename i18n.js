@@ -59,6 +59,25 @@
       "💬 대화": "💬 Conversations",
       "🗂 내 파이프라인": "🗂 My pipeline",
       "🔎 중복 검사": "🔎 Duplicate check",
+      "🤝 협업 리스트": "🤝 Collab list",
+      "🤝 달바 인하우스 협업 크리에이터 리스트": "🤝 d'Alba in-house collab creator list",
+      "이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.":
+        "Creator handles already collaborating with d'Alba — read automatically from the Google Sheet.",
+      "이 핸들에게는": "These handles are",
+      "발송이 차단": "blocked from sending",
+      "됩니다 (핸들 기준 · 관리자 제외).": " (by handle · admins excluded).",
+      "협업 중": "Collaborating",
+      "갱신": "updated",
+      "핸들 검색…": "Search handles…",
+      "아직 설정되지 않았습니다 — 구글 서비스 계정 연결과 시트 공유가 필요합니다.":
+        "Not set up yet — needs the Google service account connected and the sheet shared.",
+      "읽어온 핸들이 없습니다 — 시트 공유·탭 이름·핸들 열 헤더를 확인하세요.":
+        "No handles read — check the sheet sharing, tab names and the handle-column header.",
+      "검색 결과 없음": "No results",
+      "시트를 읽는 중 문제가 있었습니다:": "There was a problem reading the sheet:",
+      "리스트를 불러오지 못했습니다:": "Could not load the list:",
+      "이미 협업 중인 크리에이터입니다 (인하우스 리스트) — 관리자만 보낼 수 있습니다":
+        "Already a collaborating creator (in-house list) — only admins can send",
       "🔎 중복 검사 — 이미 보낸 크리에이터인지 확인": "🔎 Duplicate check — has this creator been contacted?",
       "핸들 또는 이메일을 한 줄에 하나씩(또는 콤마로 구분) 붙여넣으면 한 번에 검사합니다.":
         "Paste handles or emails, one per line (or comma-separated), to check them all at once.",
@@ -481,6 +500,25 @@
       "💬 대화": "💬 Hội thoại",
       "🗂 내 파이프라인": "🗂 Pipeline của tôi",
       "🔎 중복 검사": "🔎 Kiểm tra trùng",
+      "🤝 협업 리스트": "🤝 DS hợp tác",
+      "🤝 달바 인하우스 협업 크리에이터 리스트": "🤝 Danh sách creator đang hợp tác với d'Alba",
+      "이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.":
+        "Handle của creator đang hợp tác với d'Alba — đọc tự động từ Google Sheet.",
+      "이 핸들에게는": "Các handle này bị",
+      "발송이 차단": "chặn gửi",
+      "됩니다 (핸들 기준 · 관리자 제외).": " (theo handle · trừ quản trị).",
+      "협업 중": "Đang hợp tác",
+      "갱신": "cập nhật",
+      "핸들 검색…": "Tìm handle…",
+      "아직 설정되지 않았습니다 — 구글 서비스 계정 연결과 시트 공유가 필요합니다.":
+        "Chưa thiết lập — cần kết nối tài khoản dịch vụ Google và chia sẻ sheet.",
+      "읽어온 핸들이 없습니다 — 시트 공유·탭 이름·핸들 열 헤더를 확인하세요.":
+        "Không đọc được handle nào — kiểm tra chia sẻ sheet, tên tab và tiêu đề cột handle.",
+      "검색 결과 없음": "Không có kết quả",
+      "시트를 읽는 중 문제가 있었습니다:": "Có lỗi khi đọc sheet:",
+      "리스트를 불러오지 못했습니다:": "Không tải được danh sách:",
+      "이미 협업 중인 크리에이터입니다 (인하우스 리스트) — 관리자만 보낼 수 있습니다":
+        "Creator đang hợp tác (danh sách in-house) — chỉ quản trị mới gửi được",
       "🔎 중복 검사 — 이미 보낸 크리에이터인지 확인": "🔎 Kiểm tra trùng — đã liên hệ nhà sáng tạo này chưa?",
       "핸들 또는 이메일을 한 줄에 하나씩(또는 콤마로 구분) 붙여넣으면 한 번에 검사합니다.":
         "Dán handle hoặc email, mỗi dòng một mục (hoặc phân tách bằng dấu phẩy) để kiểm tra tất cả cùng lúc.",
@@ -920,7 +958,9 @@
       "외 {n}명": "+{n} more",
       "회신 {n}": "{n} replies",
       "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "{n} approved · the staff member's resend will now go through.",
-      "{n}건 승인 · {n}건 건너뜀": "{n} approved · {n} skipped"
+      "{n}건 승인 · {n}건 건너뜀": "{n} approved · {n} skipped",
+      "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
+        "🤝 {n} collaborating creators will be held (in-house list · admins only)."
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -967,7 +1007,9 @@
       "외 {n}명": "+{n} nữa",
       "회신 {n}": "{n} phản hồi",
       "{n}건 승인됨 · 담당자가 다시 보내면 발송됩니다.": "Đã duyệt {n} · nhân viên gửi lại sẽ được gửi đi.",
-      "{n}건 승인 · {n}건 건너뜀": "Đã duyệt {n} · bỏ qua {n}"
+      "{n}건 승인 · {n}건 건너뜀": "Đã duyệt {n} · bỏ qua {n}",
+      "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
+        "🤝 {n} creator đang hợp tác sẽ bị giữ (danh sách in-house · chỉ quản trị)."
     }
   };
 

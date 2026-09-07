@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const T = require("./email-template.js");
 const H = require("./history.js");
+const IH = require("./inhouse.js");
 
 // 서버 고정값 — 클라이언트가 바꿀 수 없다
 const SMTP_HOST = process.env.NW_SMTP_HOST || "smtp.worksmobile.com";
@@ -113,7 +114,13 @@ async function sendBatch(opts) {
   const campaign = opts.campaign || {};
   const recipients = Array.isArray(opts.recipients) ? opts.recipients : [];
   const force = Boolean(opts.force);
+  const isAdminSender = Boolean(opts.admin);
   const deadline = opts.budgetMs ? Date.now() + Number(opts.budgetMs) : 0;
+
+  // 인하우스(이미 협업 중) 핸들에는 **관리자만** 보낼 수 있다. 관리자가 아니면 이 집합을 미리
+  // 불러 둔다. 시트를 못 읽으면 빈 집합으로 두고 넘어간다(발송이 통째로 막히지 않도록 — fail-open).
+  let inhouseSet = null;
+  if (!isAdminSender) { try { inhouseSet = await IH.handleSet(); } catch (_) { inhouseSet = null; } }
 
   const inlineImg = parseDataImage(campaign.productImageData);
   const ccList = T.parseList(campaign.cc);
@@ -166,6 +173,19 @@ async function sendBatch(opts) {
 
     const errs = T.validate(d);
     if (errs.length) { results.push({ to, ok: false, error: errs.join(" / ") }); continue; }
+
+    // ─── 인하우스(협업 중) 크리에이터 차단 (핸들 기준, 관리자 제외) ──
+    // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자만 예외.
+    if (inhouseSet && inhouseSet.size) {
+      const hh = H.normHandle(d.handle);
+      if (hh && inhouseSet.has(hh)) {
+        results.push({
+          to, ok: false, held: true, inhouse: true,
+          error: "이미 협업 중인 크리에이터입니다 (인하우스 리스트) — 관리자만 보낼 수 있습니다"
+        });
+        continue;
+      }
+    }
 
     // ─── 중복 발송 차단 ──────────────────────────────────────────
     // 화면에서 미리 확인했더라도 여기서 다시 잡는다 — 경합은 여기서만 막을 수 있다.

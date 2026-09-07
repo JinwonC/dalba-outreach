@@ -278,6 +278,7 @@
     <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
     <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')" style="display:none">🗂 Mail Pipeline</div>
     <div class="vtab" id="vtabCheck" onclick="setView('check')" style="display:none">🔎 중복 검사</div>
+    <div class="vtab" id="vtabInhouse" onclick="setView('inhouse')" style="display:none">🤝 협업 리스트</div>
   </div>
 
   <div id="sendView">
@@ -593,6 +594,22 @@
         <span class="muted" id="checkCount"></span>
       </div>
       <div id="checkResult" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <div id="inhouseView" style="display:none">
+    <div class="panel" style="margin-top:16px;max-width:760px">
+      <h2>🤝 달바 인하우스 협업 크리에이터 리스트</h2>
+      <div class="hint">
+        <div>이미 달바와 협업 중인 크리에이터 핸들입니다. 구글시트에서 자동으로 읽어 옵니다.</div>
+        <div>이 핸들에게는 <b>발송이 차단</b>됩니다 (핸들 기준 · 관리자 제외).</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">
+        <input id="inhouseSearch" type="text" placeholder="핸들 검색…" style="width:auto;min-width:200px" oninput="paintInhouse()" />
+        <button class="btn" onclick="loadInhouse(true)">🔄 새로고침</button>
+        <span class="muted" id="inhouseMeta"></span>
+      </div>
+      <div id="inhouseResult"></div>
     </div>
   </div>
 </div>
@@ -1555,10 +1572,13 @@ function startSend(){
   const forced = $("forceSend").checked;
   const held = forced ? [] : list.filter(r => heldPriorOf(r.to));   // 다른 담당자 것만 보류
   const going = list.length - held.length;
+  // 인하우스(협업 중) 핸들 — 관리자가 아니면 서버가 보류한다. 미리 알려 준다.
+  const inh = CFG.admin ? [] : list.filter(r => isInhouseHandle(r.handle));
 
   $("confirmBody").innerHTML =
     '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
     (held.length ? ' <span style="color:#a8801f">(다른 담당자가 보낸 '+held.length+'명 보류)</span>' : '') +
+    (inh.length ? '<br /><span style="color:#a23b2e">🤝 협업 중인 크리에이터 '+inh.length+'명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).</span>' : '') +
     (forced && list.some(r => heldPriorOf(r.to))
       ? '<br /><span style="color:#a23b2e">⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.</span>' : '') +
     '<br /><br />' +
@@ -1684,11 +1704,68 @@ function setView(v){
   $("vtabSend").classList.toggle("active", v==="send");
   $("vtabPipeline").classList.toggle("active", v==="pipeline");
   $("vtabCheck").classList.toggle("active", v==="check");
+  $("vtabInhouse").classList.toggle("active", v==="inhouse");
   $("sendView").style.display = v==="send" ? "" : "none";
   $("pipelineView").style.display = v==="pipeline" ? "" : "none";
   $("checkView").style.display = v==="check" ? "" : "none";
+  $("inhouseView").style.display = v==="inhouse" ? "" : "none";
   if(v==="pipeline" && !PIPE_LOADED) loadPipeline();
   if(v==="check"){ $("checkQ").focus(); paintCheckCount(); }
+  if(v==="inhouse" && INHOUSE_DATA===null) loadInhouse();
+}
+
+/* ── 인하우스 협업 리스트 ── */
+let INHOUSE_DATA = null;   // { handles:[], count, updatedAt, error }
+let INHOUSE_SET = null;    // 발송 화면 사전 경고용 Set
+
+async function loadInhouse(force){
+  const box = $("inhouseResult"); const meta = $("inhouseMeta");
+  if(meta) meta.textContent = "불러오는 중…";
+  try {
+    const r = await fetch("/api/inhouse" + (force ? "?t="+Date.now() : ""), { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await r.json();
+    INHOUSE_DATA = d;
+    INHOUSE_SET = new Set((d.handles||[]).map(h => String(h).toLowerCase().replace(/^@+/,"")));
+    paintInhouse();
+    markInhouseOnRecipients();
+  } catch(e){
+    if(meta) meta.textContent = "";
+    if(box) box.innerHTML = '<div class="err">리스트를 불러오지 못했습니다: <span>'+esc(String(e.message||e))+'</span></div>';
+  }
+}
+
+function paintInhouse(){
+  const d = INHOUSE_DATA; if(!d) return;
+  const meta = $("inhouseMeta"), box = $("inhouseResult");
+  if(!d.configured){
+    if(meta) meta.textContent = "";
+    box.innerHTML = '<div class="hint">아직 설정되지 않았습니다 — 구글 서비스 계정 연결과 시트 공유가 필요합니다.'+
+      (d.error ? '<br /><span class="muted">'+esc(d.error)+'</span>' : '')+'</div>';
+    return;
+  }
+  const upd = d.updatedAt ? new Date(d.updatedAt).toLocaleString() : "";
+  if(meta) meta.innerHTML = '<span>협업 중</span> <b>' + (d.count||0) + '명</b>' + (upd ? ' · <span>갱신</span> ' + esc(upd) : "");
+  const q = ($("inhouseSearch").value||"").trim().toLowerCase().replace(/^@+/,"");
+  const list = (d.handles||[]).filter(h => !q || String(h).toLowerCase().includes(q));
+  let h = "";
+  if(d.error) h += '<div class="err" style="margin-bottom:10px">시트를 읽는 중 문제가 있었습니다: <span>'+esc(d.error)+'</span></div>';
+  if(!(d.handles||[]).length){
+    h += '<div class="hint">읽어온 핸들이 없습니다 — 시트 공유·탭 이름·핸들 열 헤더를 확인하세요.</div>';
+  } else {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+      list.map(x => '<span class="tag" style="background:#eef3ea;color:#3f6b45">@'+esc(x)+'</span>').join("") +
+      '</div>' + (q && !list.length ? '<div class="muted" style="margin-top:8px">검색 결과 없음</div>' : '');
+  }
+  box.innerHTML = h;
+}
+
+/* 발송 화면에서 명단에 인하우스 핸들이 있으면 알려준다 (서버가 최종 차단하지만 미리 보여줌) */
+function markInhouseOnRecipients(){ try { renderPreview(); } catch(e){} }
+function isInhouseHandle(hdl){
+  if(!INHOUSE_SET || !INHOUSE_SET.size) return false;
+  const h = String(hdl||"").toLowerCase().replace(/^@+/,"").trim();
+  return h && INHOUSE_SET.has(h);
 }
 
 /* ── 중복 검사 (여러 개 한 번에) ──
@@ -1990,11 +2067,17 @@ async function boot(){
   //  · 중복 검사 — 이력 저장소만 있으면 (BYO 방식이어도 공용 이력을 조회할 수 있다)
   const canPipe = AUTH_MODE === "accounts" && CFG.history && CFG.history.enabled;
   const canCheck = Boolean(CFG.history && CFG.history.enabled);
+  // 인하우스 협업 리스트는 로그인한 사람이면 누구나 볼 수 있다 (열람용)
+  const canInhouse = authed && (AUTH_MODE === "accounts" ? Boolean(ME) : true);
   $("vtabPipeline").style.display = canPipe ? "" : "none";
   $("vtabCheck").style.display = canCheck ? "" : "none";
-  $("viewTabs").style.display = (canPipe || canCheck) ? "flex" : "none";
+  $("vtabInhouse").style.display = canInhouse ? "" : "none";
+  $("viewTabs").style.display = (canPipe || canCheck || canInhouse) ? "flex" : "none";
   if(!canPipe && VIEW === "pipeline") setView("send");
   if(!canCheck && VIEW === "check") setView("send");
+  if(!canInhouse && VIEW === "inhouse") setView("send");
+  // 발송 화면 사전 경고용으로 인하우스 핸들을 미리 한 번 불러 둔다 (조용히 실패해도 됨)
+  if(canInhouse && INHOUSE_SET === null) loadInhouse();
   PIPE_LOADED = false;
 
   // 상품 선택 버튼은 TikTok Shop 자격증명이 있을 때만 띄운다.

@@ -60,6 +60,8 @@ async function processDue(opts) {
       campaign: job.campaign || {},
       recipients: job.recipients || [],
       force: Boolean(job.force),
+      // 인하우스 차단은 관리자 제외 — 예약을 건 담당자가 관리자면 건너뛴다
+      admin: A.isAdmin({ email: job.by }),
       budgetMs: Math.max(3000, deadline - Date.now())
     });
 

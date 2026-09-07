@@ -32,6 +32,9 @@
     },
     "api/videos.js": {
       "maxDuration": 30
+    },
+    "api/inhouse.js": {
+      "maxDuration": 30
     }
   },
   "crons": [

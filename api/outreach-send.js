@@ -160,7 +160,8 @@ module.exports = async (req, res) => {
     }
 
     // ─── 실제 발송 — 공용 발송 코어 ──────────────────────────────
-    const out = await C.sendBatch({ account, campaign, recipients, force });
+    // 인하우스(협업 중) 크리에이터 차단은 관리자 제외 — 관리자면 admin:true 로 건너뛴다.
+    const out = await C.sendBatch({ account, campaign, recipients, force, admin: isAdmin(me) });
     if (out.smtpError) {
       res.status(502).json({ error: out.smtpError, hint: out.hint });
       return;
