@@ -98,6 +98,7 @@
       "· 🤝 협업 중": "· 🤝 Collaborating",
       "✅ 안 보낸 것 복사": "✅ Copy not-sent",
       "⏸ 이미 보낸 것 복사": "⏸ Copy already-sent",
+      "⬇️ Excel(CSV) 내보내기": "⬇️ Export Excel (CSV)",
       "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
         "Search multiple handles/emails (newline or comma) — empty shows the full list",
       "발송일": "Sent",
@@ -553,6 +554,7 @@
       "· 🤝 협업 중": "· 🤝 Đang hợp tác",
       "✅ 안 보낸 것 복사": "✅ Chép mục chưa gửi",
       "⏸ 이미 보낸 것 복사": "⏸ Chép mục đã gửi",
+      "⬇️ Excel(CSV) 내보내기": "⬇️ Xuất Excel (CSV)",
       "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
         "Tìm nhiều handle/email (xuống dòng hoặc dấu phẩy) — để trống hiện toàn bộ",
       "발송일": "Ngày gửi",
@@ -1000,7 +1002,13 @@
       "📋 이메일 복사 ({n}명)": "📋 Copy emails ({n})",
       "· 고유 이메일 {n}개": "· {n} unique emails",
       "· 고유 이메일 {n}개 · 일부만 (기간·검색으로 좁히세요)": "· {n} unique emails · partial (narrow by period/search)",
-      "{n}개 복사됨": "{n} copied"
+      "{n}개 복사됨": "{n} copied",
+      "📋 발송 이메일 복사 ({n})": "📋 Copy sent emails ({n})",
+      "⏸ 중복실패 이메일 복사 ({n})": "⏸ Copy blocked emails ({n})",
+      "· 발송 {n} · 중복실패 {n}": "· Sent {n} · Blocked {n}",
+      "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Sent {n} · Blocked {n} · partial (narrow by period/search)",
+      "⏸ 중복으로 실패한 시도 ({n})": "⏸ Blocked as duplicate ({n})",
+      "{n}행 내보냄": "{n} rows exported"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -1059,7 +1067,13 @@
       "📋 이메일 복사 ({n}명)": "📋 Chép email ({n})",
       "· 고유 이메일 {n}개": "· {n} email duy nhất",
       "· 고유 이메일 {n}개 · 일부만 (기간·검색으로 좁히세요)": "· {n} email duy nhất · một phần (thu hẹp theo kỳ/tìm kiếm)",
-      "{n}개 복사됨": "đã chép {n}"
+      "{n}개 복사됨": "đã chép {n}",
+      "📋 발송 이메일 복사 ({n})": "📋 Chép email đã gửi ({n})",
+      "⏸ 중복실패 이메일 복사 ({n})": "⏸ Chép email bị chặn ({n})",
+      "· 발송 {n} · 중복실패 {n}": "· Đã gửi {n} · Bị chặn {n}",
+      "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Đã gửi {n} · Bị chặn {n} · một phần (thu hẹp theo kỳ/tìm kiếm)",
+      "⏸ 중복으로 실패한 시도 ({n})": "⏸ Bị chặn do trùng ({n})",
+      "{n}행 내보냄": "đã xuất {n} dòng"
     }
   };
 
