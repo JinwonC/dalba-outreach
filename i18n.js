@@ -996,7 +996,11 @@
       "이미 보냄 {n}": "Already sent {n}",
       "없음 {n}": "None {n}",
       "협업 중 {n}": "Collaborating {n}",
-      "⏸ 이미 보냄 {n}건": "⏸ Already sent {n}"
+      "⏸ 이미 보냄 {n}건": "⏸ Already sent {n}",
+      "📋 이메일 복사 ({n}명)": "📋 Copy emails ({n})",
+      "· 고유 이메일 {n}개": "· {n} unique emails",
+      "· 고유 이메일 {n}개 · 일부만 (기간·검색으로 좁히세요)": "· {n} unique emails · partial (narrow by period/search)",
+      "{n}개 복사됨": "{n} copied"
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -1051,7 +1055,11 @@
       "이미 보냄 {n}": "Đã gửi {n}",
       "없음 {n}": "Không có {n}",
       "협업 중 {n}": "Đang hợp tác {n}",
-      "⏸ 이미 보냄 {n}건": "⏸ Đã gửi {n}"
+      "⏸ 이미 보냄 {n}건": "⏸ Đã gửi {n}",
+      "📋 이메일 복사 ({n}명)": "📋 Chép email ({n})",
+      "· 고유 이메일 {n}개": "· {n} email duy nhất",
+      "· 고유 이메일 {n}개 · 일부만 (기간·검색으로 좁히세요)": "· {n} email duy nhất · một phần (thu hẹp theo kỳ/tìm kiếm)",
+      "{n}개 복사됨": "đã chép {n}"
     }
   };
 

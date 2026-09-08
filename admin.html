@@ -282,6 +282,7 @@ async function loadAdmin(){
   if($("by").value) qs.set("by", $("by").value);
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
   if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
+  if(VIEW === "sent") qs.set("limit", "100000");   // 이메일 리스트업은 전부 받아야 한다
   const d = await fetchJson("/api/admin?" + qs);
 
   if(d.historyEnabled === false){
@@ -548,9 +549,19 @@ function renderWeekly(d){
   return "";
 }
 
+let SENT_EMAILS = [];
 function renderSent(d){
   const rows = d.rows||[];
+  // 담당자가 보낸 **고유 이메일** 목록 (리스트업/복사용). 담당자 선택칸으로 걸러진 결과다.
+  SENT_EMAILS = [...new Set(rows.map(r => String(r.to||"").trim().toLowerCase()).filter(Boolean))];
+  const staffLabel = (($("by").selectedOptions||[])[0] || {}).textContent || "담당자 전체";
+  const bar = '<div class="filters" style="margin-bottom:10px">' +
+    '<button class="btn dark" onclick="copyEmails()">📋 이메일 복사 (' + SENT_EMAILS.length + '명)</button>' +
+    '<span class="muted"><b>' + esc(staffLabel) + '</b> · 고유 이메일 ' + SENT_EMAILS.length + '개' +
+      (d.truncated ? ' · 일부만 (기간·검색으로 좁히세요)' : '') + '</span>' +
+    '<span class="muted" id="copyMsg"></span></div>';
   $("body").innerHTML = truncNote(d) + emptyNote(d) +
+    (rows.length ? bar : "") +
     '<div class="scroll"><table><thead><tr>' +
     '<th>보낸 시각</th><th>받는 사람</th><th>핸들</th><th>캠페인</th><th>담당자</th>' +
     '</tr></thead><tbody>' +
@@ -563,6 +574,23 @@ function renderSent(d){
     '</tbody></table></div>' +
     (rows.length ? "" : '<div class="muted" style="padding:20px 0">해당하는 기록이 없습니다.</div>');
   return rows.length + "건";
+}
+
+/* 방금 화면에 뜬(담당자로 걸러진) 고유 이메일을 클립보드로 — 한 줄에 하나씩 */
+function copyEmails(){
+  const list = SENT_EMAILS || [];
+  if(!list.length){ alert("복사할 이메일이 없습니다."); return; }
+  const txt = list.join("\n");
+  const done = () => { const m = $("copyMsg"); if(m) m.textContent = list.length + "개 복사됨"; };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
+  } else fallbackCopy(txt, done);
+}
+function fallbackCopy(txt, done){
+  const ta = document.createElement("textarea"); ta.value = txt;
+  ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); } catch(e){}
+  ta.remove(); if(done) done();
 }
 
 function renderBlocked(d){
