@@ -625,10 +625,12 @@ function fallbackCopy(txt, done){
 function csvCell(v){ const s = String(v==null?"":v); return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
 function exportSentCsv(){
   if(!EXPORT_ROWS.length){ alert("내보낼 기록이 없습니다."); return; }
-  const staffLabel = (($("by").selectedOptions||[])[0] || {}).textContent || "전체";
-  const head = ["담당자","상태","이메일","이름","핸들","캠페인","시각","원래 보낸 사람"];
+  const staffLabel = (($("by").selectedOptions||[])[0] || {}).textContent || "All";
+  // 내보내기는 항상 영어로 (헤더·상태값). 이름·캠페인 등 실제 데이터는 원본 그대로 둔다.
+  const head = ["Staff","Status","Email","Name","Handle","Campaign","Sent at","Originally sent by"];
+  const engStatus = s => s === "중복실패" ? "Blocked (duplicate)" : "Sent";
   const lines = [head.map(csvCell).join(",")].concat(
-    EXPORT_ROWS.map(r => [r.by, r.status, r.to, r.name, r.handle, r.campaign, fmt(r.at), r.prior].map(csvCell).join(","))
+    EXPORT_ROWS.map(r => [r.by, engStatus(r.status), r.to, r.name, r.handle, r.campaign, fmt(r.at), r.prior].map(csvCell).join(","))
   );
   const csv = "﻿" + lines.join("\r\n");
   const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
