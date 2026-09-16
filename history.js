@@ -104,14 +104,12 @@ function normHandle(h) {
   return String(h == null ? "" : h).trim().toLowerCase().replace(/^@+/, "").replace(/\s+/g, "");
 }
 
-// 중복(재발송) 계산에서 제외할 발신자.
-//   · 이 사람이 이미 보낸 크리에이터라도 **다른 사람의 발송을 막지 않는다**
-//   · 이 사람의 발송도 **남의 기록에 막히지 않는다**
-// 예: minju.kim@dalba.com 은 다른 종류의 아웃리치를 해서 팀 중복 판정과 섞이면 안 된다.
-// 환경변수 DEDUP_IGNORE_SENDERS 로 바꿀 수 있고(콤마·세미콜론·공백·줄바꿈 구분), 없으면 기본값을 쓴다.
+// 중복(재발송) 계산에서 **제외할 발신자** — 기본은 **아무도 없음**(전원 중복 판정 대상).
+//   · 여기 든 사람은 이미 보낸 크리에이터라도 다른 사람의 발송을 막지 않고, 본인도 안 막힌다.
+// 기본값을 비워, 관리자 포함 **전원**이 중복 판정에 포함된다. 특정 계정을 빼야 할 일이 생기면
+// 환경변수 DEDUP_IGNORE_SENDERS 에만 넣는다(콤마·세미콜론·공백·줄바꿈 구분). 코드에 사람을 박지 않는다.
 const IGNORE_SENDERS = new Set(
-  String(process.env.DEDUP_IGNORE_SENDERS != null && process.env.DEDUP_IGNORE_SENDERS !== ""
-    ? process.env.DEDUP_IGNORE_SENDERS : "minju.kim@dalba.com")
+  String(process.env.DEDUP_IGNORE_SENDERS || "")
     .split(/[\s,;]+/).map(s => normEmail(s)).filter(Boolean)
 );
 function isIgnoredSender(by) {
