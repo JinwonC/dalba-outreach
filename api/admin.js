@@ -434,9 +434,30 @@ module.exports = async (req, res) => {
     if (view === "blocked") {
       // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
       const appr = await H.approvalsIndex();
-      const rows = blocked.map(r => Object.assign({}, r, {
-        approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f))
-      }));
+      // '원래 보낸 사람/원래 발송' 이 빈 칸으로 뜨는 일이 없게, 발송 로그에서 그 크리에이터의
+      // **최초 발송**을 찾아 채운다. (막힐 때 저장된 prior 스냅샷이 비었거나 오래된 기록일 수 있다.)
+      const oe = new Map(), oh = new Map();
+      for (const s of sentAll) {
+        if (!s || !s.at) continue;
+        const e = H.normEmail(s.to), h = H.normHandle(s.handle);
+        if (e && (!oe.has(e) || s.at < oe.get(e).at)) oe.set(e, s);
+        if (h && (!oh.has(h) || s.at < oh.get(h).at)) oh.set(h, s);
+      }
+      const originOf = r => {
+        const e = H.normEmail(r.to), h = H.normHandle(r.handle);
+        return (e && oe.get(e)) || (h && oh.get(h)) || null;
+      };
+      const rows = blocked.map(r => {
+        let prior = r.prior;
+        if (!prior || !(prior.byName || prior.by) || !prior.at) {
+          const o = originOf(r);
+          if (o) prior = { by: o.by, byName: o.byName, at: o.at, campaign: o.campaign, filled: true };
+        }
+        return Object.assign({}, r, {
+          prior: prior || null,
+          approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f))
+        });
+      });
       res.status(200).json(Object.assign(base, { rows }));
       return;
     }
