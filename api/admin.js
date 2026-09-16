@@ -383,7 +383,7 @@ module.exports = async (req, res) => {
       // 중복 시도 화면은 '그 크리에이터에게 간 발송을 전부' 보여줘야 하므로 발송 로그를 전량 읽는다
       H.recent(view === "blocked" ? H.LOG_MAX : readN),
       H.recentBlocked(Math.min(readN, H.BLOCK_MAX)),
-      H.recentReplies(Math.min(readN, H.REPLY_MAX)),
+      H.recentReplies(view === "blocked" ? H.REPLY_MAX : Math.min(readN, H.REPLY_MAX)),
       H.count(H.LOG_KEY),
       H.count(H.BLOCK_KEY),
       H.count(H.REPLY_KEY)
@@ -455,6 +455,26 @@ module.exports = async (req, res) => {
         out.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));  // 오래된 순
         return out;
       };
+      // 크리에이터 → 회신 색인 (누가 회신을 받았는지 · 어떤 제목인지). inbox = 회신이 들어온 메일함.
+      const qE = new Map(), qH = new Map();
+      for (const rp of replyAll) {
+        if (!rp) continue;
+        const rec = { by: rp.by || rp.inbox || "", byName: rp.byName || rp.by || rp.inbox || "", inbox: rp.inbox || rp.by || "", at: rp.at || "", subject: rp.subject || "" };
+        const e = H.normEmail(rp.from), h = H.normHandle(rp.handle);
+        if (e) { const a = qE.get(e) || []; a.push(rec); qE.set(e, a); }
+        if (h) { const a = qH.get(h) || []; a.push(rec); qH.set(h, a); }
+      }
+      const repliesOf = r => {
+        const e = H.normEmail(r.to), h = H.normHandle(r.handle);
+        const seen = new Set(), out = [];
+        const add = arr => (arr || []).forEach(x => {
+          const k = String(x.inbox).toLowerCase() + "|" + String(x.at) + "|" + String(x.subject);
+          if (seen.has(k)) return; seen.add(k); out.push(x);
+        });
+        add(e && qE.get(e)); add(h && qH.get(h));
+        out.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+        return out;
+      };
       const rows = blocked.map(r => {
         const origins = originsOf(r);
         // 원래 발송이 하나도 안 잡혔으면(스냅샷도 없으면) 저장돼 있던 prior 라도 쓴다
@@ -462,6 +482,7 @@ module.exports = async (req, res) => {
         if (!origins.length && prior && (prior.byName || prior.by)) origins.push({ by: prior.by || "", byName: prior.byName || prior.by || "", at: prior.at || "", campaign: prior.campaign || "" });
         return Object.assign({}, r, {
           origins,
+          replies: repliesOf(r),
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f))
         });

@@ -653,14 +653,34 @@ function renderBlocked(d){
   };
   const selfCount = rows.filter(isSelf).length;
   const originsCell = r => {
+    const to = r.to || "";
     const list = r.origins || [];
-    if(!list.length) return '<span class="muted">—</span>';
-    const head = list.length > 1 ? '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+list.length+'건</div>' : '';
-    return head + list.map(o =>
-      '<div style="font-size:12px;line-height:1.5"><b>'+esc(o.byName||o.by||'—')+'</b> '+
-      '<span class="mono muted">'+esc(fmt(o.at))+'</span>'+
-      (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
-      (o.forced ? ' <span class="tag forced">강제</span>' : '')+'</div>').join("");
+    const reps = r.replies || [];
+    // 한 줄을 누르면 그 담당자 메일함의 그 크리에이터 대화(제목·내용)를 연다
+    const line = (staff, inner) => (to && staff)
+      ? '<div class="threadline" data-thread-staff="'+esc(staff)+'" data-thread-peer="'+esc(to)+'" style="cursor:pointer" title="이 메일 내용 보기">'+inner+'</div>'
+      : '<div>'+inner+'</div>';
+    let h = "";
+    if(!list.length) h += '<span class="muted">—</span>';
+    else {
+      if(list.length > 1) h += '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+list.length+'건</div>';
+      h += list.map(o => line(o.by,
+        '<b>'+esc(o.byName||o.by||'—')+'</b> <span class="mono muted">'+esc(fmt(o.at))+'</span>'+
+        (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
+        (o.forced ? ' <span class="tag forced">강제</span>' : '')+
+        ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span>')).join("");
+    }
+    // 크리에이터가 회신했으면 — 누구에게·어떤 제목인지. 누르면 그 회신 내용이 열린다.
+    if(reps.length){
+      h += '<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px">' +
+        reps.map(q => line(q.inbox||q.by,
+          '<span class="tag" style="background:#e8f5ec;color:#1f7a44">💬 회신</span> '+
+          '<b>'+esc(q.byName||q.by||'—')+'</b> <span class="mono muted">'+esc(fmt(q.at))+'</span>'+
+          (q.subject ? ' · <span class="muted">'+esc(q.subject)+'</span>' : '')+
+          ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span>')).join("") +
+        '</div>';
+    }
+    return h;
   };
   $("body").innerHTML =
     '<div class="note">이미 발송된 크리에이터라서 <b>발송되지 않은</b> 시도입니다. ' +
