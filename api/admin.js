@@ -380,7 +380,8 @@ module.exports = async (req, res) => {
     try { cronStatus = JSON.parse(await H.readRaw("outreach:cron:status")); } catch (_) {}
 
     const [sentAll, blockedAll, replyAll, totalSent, totalBlocked, totalReplies] = await Promise.all([
-      H.recent(readN),
+      // 중복 시도 화면은 '그 크리에이터에게 간 발송을 전부' 보여줘야 하므로 발송 로그를 전량 읽는다
+      H.recent(view === "blocked" ? H.LOG_MAX : readN),
       H.recentBlocked(Math.min(readN, H.BLOCK_MAX)),
       H.recentReplies(Math.min(readN, H.REPLY_MAX)),
       H.count(H.LOG_KEY),
@@ -434,27 +435,34 @@ module.exports = async (req, res) => {
     if (view === "blocked") {
       // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
       const appr = await H.approvalsIndex();
-      // '원래 보낸 사람/원래 발송' 이 빈 칸으로 뜨는 일이 없게, 발송 로그에서 그 크리에이터의
-      // **최초 발송**을 찾아 채운다. (막힐 때 저장된 prior 스냅샷이 비었거나 오래된 기록일 수 있다.)
-      const oe = new Map(), oh = new Map();
+      // 그 크리에이터에게 간 **모든 발송**을 이메일·핸들로 모은다 (2번 이상이면 전부 보여주려고).
+      const byE = new Map(), byH = new Map();
       for (const s of sentAll) {
-        if (!s || !s.at) continue;
+        if (!s) continue;
+        const rec = { by: s.by || "", byName: s.byName || s.by || "", at: s.at || "", campaign: s.campaign || "", forced: Boolean(s.forced) };
         const e = H.normEmail(s.to), h = H.normHandle(s.handle);
-        if (e && (!oe.has(e) || s.at < oe.get(e).at)) oe.set(e, s);
-        if (h && (!oh.has(h) || s.at < oh.get(h).at)) oh.set(h, s);
+        if (e) { const a = byE.get(e) || []; a.push(rec); byE.set(e, a); }
+        if (h) { const a = byH.get(h) || []; a.push(rec); byH.set(h, a); }
       }
-      const originOf = r => {
+      const originsOf = r => {
         const e = H.normEmail(r.to), h = H.normHandle(r.handle);
-        return (e && oe.get(e)) || (h && oh.get(h)) || null;
+        const seen = new Set(), out = [];
+        const add = arr => (arr || []).forEach(x => {
+          const k = String(x.by).toLowerCase() + "|" + String(x.at) + "|" + String(x.campaign);
+          if (seen.has(k)) return; seen.add(k); out.push(x);
+        });
+        add(e && byE.get(e)); add(h && byH.get(h));
+        out.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));  // 오래된 순
+        return out;
       };
       const rows = blocked.map(r => {
+        const origins = originsOf(r);
+        // 원래 발송이 하나도 안 잡혔으면(스냅샷도 없으면) 저장돼 있던 prior 라도 쓴다
         let prior = r.prior;
-        if (!prior || !(prior.byName || prior.by) || !prior.at) {
-          const o = originOf(r);
-          if (o) prior = { by: o.by, byName: o.byName, at: o.at, campaign: o.campaign, filled: true };
-        }
+        if (!origins.length && prior && (prior.byName || prior.by)) origins.push({ by: prior.by || "", byName: prior.byName || prior.by || "", at: prior.at || "", campaign: prior.campaign || "" });
         return Object.assign({}, r, {
-          prior: prior || null,
+          origins,
+          prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f))
         });
       });

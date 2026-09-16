@@ -394,6 +394,11 @@
       "이미 발송된 크리에이터라서": "Creators already contacted, so these are",
       "시도입니다.": "attempts.",
       "다른 담당자와 겹친 것": "Overlap with another teammate",
+      "원래 발송 (전체 이력)": "Original sends (full history)",
+      "오른쪽 \"원래 발송\"에 그 크리에이터에게 간 발송을 전부 표시합니다.":
+        "The \"Original sends\" column on the right lists every send to that creator.",
+      "본인 발송 있음": "Self-send on record",
+      "이 담당자가 이 크리에이터에게 이미 보냈던 기록이 있습니다": "This staff member has already sent to this creator",
       "이 명단 배분을 조정할 신호입니다.": "is a signal to rebalance the lists.",
       "⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Force-sending even to people another teammate already contacted.",
       "발송되지 않은": "not sent",
@@ -850,6 +855,11 @@
       "이미 발송된 크리에이터라서": "Creator đã được liên hệ nên đây là",
       "시도입니다.": "lượt thử.",
       "다른 담당자와 겹친 것": "Trùng với nhân viên khác",
+      "원래 발송 (전체 이력)": "Lần gửi gốc (toàn bộ lịch sử)",
+      "오른쪽 \"원래 발송\"에 그 크리에이터에게 간 발송을 전부 표시합니다.":
+        "Cột \"Lần gửi gốc\" bên phải liệt kê mọi lần gửi tới creator đó.",
+      "본인 발송 있음": "Có bản ghi tự gửi",
+      "이 담당자가 이 크리에이터에게 이미 보냈던 기록이 있습니다": "Nhân viên này đã từng gửi cho creator này",
       "이 명단 배분을 조정할 신호입니다.": "là dấu hiệu cần chia lại danh sách.",
       "⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.": "⚠️ Gửi cưỡng chế cả cho người nhân viên khác đã liên hệ.",
       "발송되지 않은": "không được gửi",
@@ -1008,7 +1018,10 @@
       "· 발송 {n} · 중복실패 {n}": "· Sent {n} · Blocked {n}",
       "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Sent {n} · Blocked {n} · partial (narrow by period/search)",
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Blocked as duplicate ({n})",
-      "{n}행 내보냄": "{n} rows exported"
+      "{n}행 내보냄": "{n} rows exported",
+      "발송 {n}건": "{n} sends",
+      "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
+        "\"Self-send on record\" ({n}) means the attempting staff member had already sent to that creator."
     },
     vi: {
       "{n}명": "{n} người", "{n}건": "{n}", "{n}통": "{n} thư",
@@ -1073,7 +1086,10 @@
       "· 발송 {n} · 중복실패 {n}": "· Đã gửi {n} · Bị chặn {n}",
       "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Đã gửi {n} · Bị chặn {n} · một phần (thu hẹp theo kỳ/tìm kiếm)",
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Bị chặn do trùng ({n})",
-      "{n}행 내보냄": "đã xuất {n} dòng"
+      "{n}행 내보냄": "đã xuất {n} dòng",
+      "발송 {n}건": "{n} lần gửi",
+      "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
+        "\"Có bản ghi tự gửi\" ({n}) nghĩa là nhân viên thử gửi đã từng gửi cho creator đó."
     }
   };
 

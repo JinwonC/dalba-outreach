@@ -648,15 +648,25 @@ function renderBlocked(d){
   // 본인 재시도(원래 보낸 사람 == 시도한 사람)와 다른 담당자와의 겹침을 구분한다.
   // 본인 재시도는 규칙 변경(본인 재발송 허용) **이전**에 막혔던 과거 기록 — 지금은 그냥 발송된다.
   const isSelf = r => {
-    const p = r.prior || {};
-    return p.by && r.by && String(p.by).toLowerCase() === String(r.by).toLowerCase();
+    const list = (r.origins && r.origins.length) ? r.origins : (r.prior ? [r.prior] : []);
+    return list.some(o => o.by && r.by && String(o.by).toLowerCase() === String(r.by).toLowerCase());
   };
   const selfCount = rows.filter(isSelf).length;
+  const originsCell = r => {
+    const list = r.origins || [];
+    if(!list.length) return '<span class="muted">—</span>';
+    const head = list.length > 1 ? '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+list.length+'건</div>' : '';
+    return head + list.map(o =>
+      '<div style="font-size:12px;line-height:1.5"><b>'+esc(o.byName||o.by||'—')+'</b> '+
+      '<span class="mono muted">'+esc(fmt(o.at))+'</span>'+
+      (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
+      (o.forced ? ' <span class="tag forced">강제</span>' : '')+'</div>').join("");
+  };
   $("body").innerHTML =
     '<div class="note">이미 발송된 크리에이터라서 <b>발송되지 않은</b> 시도입니다. ' +
-    '<b>다른 담당자와 겹친 것</b>이 명단 배분을 조정할 신호입니다.' +
-    (selfCount ? '<br /><span class="muted">"본인 재시도" ' + selfCount + '건은 예전 규칙(본인 것도 보류)에 막혔던 ' +
-      '과거 기록입니다 — 지금은 본인이 보냈던 사람에게는 그대로 발송됩니다.</span>' : '') +
+    '<b>다른 담당자와 겹친 것</b>이 명단 배분을 조정할 신호입니다. ' +
+    '<span class="muted">오른쪽 "원래 발송"에 그 크리에이터에게 간 발송을 전부 표시합니다.</span>' +
+    (selfCount ? '<br /><span class="muted">"본인 발송 있음" ' + selfCount + '건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.</span>' : '') +
     '</div>' +
     (rows.length ? '<div class="filters" style="margin-bottom:10px">' +
       '<button class="btn" onclick="approveSelectedBlocked()">☑︎ 선택 → 승인 (담당자가 직접 보냄)</button>' +
@@ -664,10 +674,9 @@ function renderBlocked(d){
       '<span class="muted" id="blkMsg">승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.</span></div>' : '') +
     '<div class="scroll"><table><thead><tr>' +
     '<th><input type="checkbox" onclick="toggleAllBlocked(this)" title="전체 선택" /></th>' +
-    '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 보낸 사람</th><th>원래 발송</th>' +
+    '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 발송 (전체 이력)</th>' +
     '</tr></thead><tbody>' +
     rows.map(r => {
-      const p = r.prior || {};
       const noMail = !r.to;
       return '<tr><td>' + (noMail
           ? '<input type="checkbox" disabled title="이메일이 없어 발송할 수 없습니다" />'
@@ -675,10 +684,9 @@ function renderBlocked(d){
         '<td class="mono muted">'+esc(fmt(r.at))+'</td>' +
         '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
         '<td>'+person(r)+
+          (isSelf(r) ? ' <span class="tag" style="background:#eef3ea;color:#4a6b45" title="이 담당자가 이 크리에이터에게 이미 보냈던 기록이 있습니다">본인 발송 있음</span>' : '')+
           (r.approved ? ' <span class="tag" style="background:#e7f0ff;color:#2f5fb0" title="이 담당자가 이 크리에이터에게 보낼 수 있게 승인됨">승인됨</span>' : '')+'</td>' +
-        '<td>'+esc(p.byName||p.by||"—")+
-          (isSelf(r) ? ' <span class="tag" style="background:#eef3ea;color:#4a6b45" title="예전 규칙에 막혔던 본인 재발송 — 지금은 허용됩니다">본인 재시도</span>' : '')+'</td>' +
-        '<td class="mono muted">'+esc(fmt(p.at))+(p.campaign ? '<div class="muted">'+esc(p.campaign)+'</div>' : '')+'</td></tr>';
+        '<td>'+originsCell(r)+'</td></tr>';
     }).join("") +
     '</tbody></table></div>' +
     (rows.length ? "" : '<div class="muted" style="padding:20px 0">중복 시도가 없습니다. 👍</div>');
