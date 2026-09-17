@@ -688,10 +688,11 @@ function renderBlocked(d){
     '<span class="muted">오른쪽 "원래 발송"에 그 크리에이터에게 간 발송을 전부 표시합니다.</span>' +
     (selfCount ? '<br /><span class="muted">"본인 발송 있음" ' + selfCount + '건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.</span>' : '') +
     '</div>' +
-    (rows.length ? '<div class="filters" style="margin-bottom:10px">' +
-      '<button class="btn" onclick="approveSelectedBlocked()">☑︎ 선택 → 승인 (담당자가 직접 보냄)</button>' +
-      '<button class="btn dark" onclick="forceSelectedBlocked()">✅ 선택 → 강제 발송 (관리자가 대신 보냄)</button>' +
-      '<span class="muted" id="blkMsg">승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.</span></div>' : '') +
+    '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
+      (rows.length ? '<button class="btn" onclick="approveSelectedBlocked()">☑︎ 선택 → 승인 (담당자가 직접 보냄)</button>' +
+        '<button class="btn dark" onclick="forceSelectedBlocked()">✅ 선택 → 강제 발송 (관리자가 대신 보냄)</button>' : '') +
+      '<button class="btn" onclick="exportApprovalsCsv()">⬇️ 승인 내역 Excel(CSV)</button>' +
+      '<span class="muted" id="blkMsg">' + (rows.length ? '승인하면 그 담당자가 자기 계정으로 다시 보낼 수 있습니다. 강제 발송은 지금 관리자 계정으로 보냅니다.' : '') + '</span></div>' +
     '<div class="scroll"><table><thead><tr>' +
     '<th><input type="checkbox" onclick="toggleAllBlocked(this)" title="전체 선택" /></th>' +
     '<th>시도 시각</th><th>대상</th><th>시도한 담당자</th><th>원래 발송 (전체 이력)</th>' +
@@ -753,6 +754,28 @@ async function approveSelectedBlocked(){
     if(msg) msg.textContent = (d.approved||0) + "건 승인됨 · 담당자가 다시 보내면 발송됩니다.";
     load();   // 목록 새로고침 → '승인됨' 배지 표시
   } catch(e){ if(msg) msg.textContent = ""; alert("승인 실패: " + String(e.message||e)); }
+}
+
+/* 관리자 승인 내역을 엑셀(CSV, 영어 헤더)로 내려받는다 — 누구를(담당자)·크리에이터 핸들/이메일·승인일. */
+async function exportApprovalsCsv(){
+  const msg = $("blkMsg"); if(msg) msg.textContent = "불러오는 중…";
+  try {
+    const d = await fetchJson("/api/admin?view=approvals");
+    const rows = (d && d.rows) || [];
+    if(!rows.length){ if(msg) msg.textContent = ""; alert("승인 내역이 없습니다."); return; }
+    const head = ["Approved staff","Staff email","Creator handle","Creator email","Creator name","Approved at","Approved by (admin)"];
+    const lines = [head.map(csvCell).join(",")].concat(
+      rows.map(r => [r.byName||r.by, r.by, r.handle, r.to, r.name, fmt(r.at), r.approvedBy].map(csvCell).join(","))
+    );
+    const csv = "﻿" + lines.join("\r\n");
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "approvals_" + new Date().toISOString().slice(0,10) + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if(msg) msg.textContent = rows.length + "건 내보냄";
+  } catch(e){ if(msg) msg.textContent = ""; alert("내보내기 실패: " + String(e.message||e)); }
 }
 
 /* ── 대화 (담당자 ↔ 크리에이터 협상) ──

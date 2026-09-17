@@ -432,6 +432,17 @@ module.exports = async (req, res) => {
       return;
     }
     if (view === "sent") { res.status(200).json(Object.assign(base, { rows: sent })); return; }
+    if (view === "approvals") {
+      // 관리자 승인 내역 (엑셀 내보내기용): 누구를(담당자) · 크리에이터 이메일·핸들 · 승인일 · 승인한 관리자
+      const nameMap = new Map(A.parseAccounts().map(a => [String(a.email || "").toLowerCase(), a.name || ""]));
+      const list = (await H.allApprovals()).map(a => ({
+        by: a.by || "", byName: nameMap.get(String(a.by || "").toLowerCase()) || "",
+        to: a.to || "", handle: a.handle || "", name: a.name || "",
+        at: a.at || "", approvedBy: a.approvedBy || ""
+      })).sort((x, y) => String(y.at).localeCompare(String(x.at)));
+      res.status(200).json(Object.assign(base, { rows: list }));
+      return;
+    }
     if (view === "blocked") {
       // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
       const appr = await H.approvalsIndex();

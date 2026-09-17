@@ -107,6 +107,7 @@
       "✅ 안 보낸 것 복사": "✅ Copy not-sent",
       "⏸ 이미 보낸 것 복사": "⏸ Copy already-sent",
       "⬇️ Excel(CSV) 내보내기": "⬇️ Export Excel (CSV)",
+      "⬇️ 승인 내역 Excel(CSV)": "⬇️ Approvals Excel (CSV)",
       "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
         "Search multiple handles/emails (newline or comma) — empty shows the full list",
       "발송일": "Sent",
@@ -576,6 +577,7 @@
       "✅ 안 보낸 것 복사": "✅ Chép mục chưa gửi",
       "⏸ 이미 보낸 것 복사": "⏸ Chép mục đã gửi",
       "⬇️ Excel(CSV) 내보내기": "⬇️ Xuất Excel (CSV)",
+      "⬇️ 승인 내역 Excel(CSV)": "⬇️ DS duyệt Excel (CSV)",
       "핸들·이메일 여러 개 검색 (줄바꿈 또는 콤마) — 비우면 전체 리스트":
         "Tìm nhiều handle/email (xuống dòng hoặc dấu phẩy) — để trống hiện toàn bộ",
       "발송일": "Ngày gửi",
@@ -1035,6 +1037,7 @@
       "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Sent {n} · Blocked {n} · partial (narrow by period/search)",
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Blocked as duplicate ({n})",
       "{n}행 내보냄": "{n} rows exported",
+      "{n}건 내보냄": "{n} exported",
       "발송 {n}건": "{n} sends",
       "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
         "\"Self-send on record\" ({n}) means the attempting staff member had already sent to that creator."
@@ -1103,6 +1106,7 @@
       "· 발송 {n} · 중복실패 {n} · 일부만 (기간·검색으로 좁히세요)": "· Đã gửi {n} · Bị chặn {n} · một phần (thu hẹp theo kỳ/tìm kiếm)",
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Bị chặn do trùng ({n})",
       "{n}행 내보냄": "đã xuất {n} dòng",
+      "{n}건 내보냄": "đã xuất {n}",
       "발송 {n}건": "{n} lần gửi",
       "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
         "\"Có bản ghi tự gửi\" ({n}) nghĩa là nhân viên thử gửi đã từng gửi cho creator đó."

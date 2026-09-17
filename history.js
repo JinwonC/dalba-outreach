@@ -273,6 +273,22 @@ async function approvalsIndex() {
   return set;
 }
 
+// 승인 내역 전체를 레코드로 (엑셀 내보내기용). 같은 승인이 이메일·핸들 두 필드에 저장되므로
+// (담당자+크리에이터) 기준으로 중복을 없앤다. 각 레코드: { by(담당자), to(이메일), handle, name, at(승인일), approvedBy(관리자) }
+async function allApprovals() {
+  if (!enabled()) return [];
+  const flat = await cmd(["HGETALL", APPROVE_KEY]);
+  const seen = new Set(), out = [];
+  const push = v => {
+    const p = parseRec(v); if (!p) return;
+    const k = normEmail(p.by) + "|" + normEmail(p.to) + "|" + normHandle(p.handle);
+    if (seen.has(k)) return; seen.add(k); out.push(p);
+  };
+  if (Array.isArray(flat)) { for (let i = 0; i + 1 < flat.length; i += 2) push(flat[i + 1]); }
+  else if (flat && typeof flat === "object") { Object.keys(flat).forEach(k => push(flat[k])); }
+  return out;
+}
+
 // 발송이 실패했으면 자리를 반납한다 — 실패한 주소가 90일간 막히면 안 된다
 async function release(r) {
   if (!enabled()) return;
@@ -468,7 +484,7 @@ async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY,
 
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
-  approveSend, isApproved, revokeApproval, approvalsIndex, approvalFieldsOf,
+  approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
   recordReply, recent, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
