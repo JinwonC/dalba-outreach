@@ -92,7 +92,8 @@ async function read(account, opts) {
             from: one(env.from),
             to: one(env.to),
             toAll: all(env.to),
-            ccAll: all(env.cc)
+            ccAll: all(env.cc),
+            bccAll: all(env.bcc)          // 보낸편지함 사본엔 숨은참조가 남는 경우가 있다
           });
           // 그래도 오래 걸리면 거기까지만 — 통째로 실패하는 것보다 낫다
           if (Date.now() > deadline) break;
@@ -168,4 +169,66 @@ async function readThread(account, opts) {
   return { peer, rows: out };
 }
 
-module.exports = { read, readThread, IMAP_HOST, IMAP_PORT };
+// ─── 회신을 찾을 폴더들 ──────────────────────────────────────────
+// 회신이 자동 분류 규칙·보관으로 받은편지함 밖(사용자 폴더)에 들어가 있을 수 있다.
+// 보낸편지함·임시보관·휴지통·스팸·전체보관(중복)만 빼고 모두 본다.
+const SKIP_USE = new Set(["\\Sent", "\\Drafts", "\\Trash", "\\Junk", "\\All", "\\Archive_ALL"]);
+const SKIP_NAME = /^(sent|sent items|sent messages|sent mail|보낸편지함|보낸메일함|보낸 편지함|drafts?|임시보관함|임시 보관함|trash|deleted|deleted items|deleted messages|휴지통|spam|junk|junk e-?mail|스팸|스팸편지함|스팸메일함|정크|outbox|보낼편지함|notes|메모)$/i;
+function isReplyFolder(b) {
+  if (!b || !b.path) return false;
+  if (b.flags && (b.flags.has ? b.flags.has("\\Noselect") : [].concat(b.flags).includes("\\Noselect"))) return false;
+  if (b.path === "INBOX") return true;
+  if (b.specialUse && SKIP_USE.has(b.specialUse)) return false;
+  return !SKIP_NAME.test(String(b.name || "").trim());
+}
+
+// 여러 폴더를 **한 번의 연결**로 읽는다 (폴더마다 새로 접속하면 느리고 한도에 걸린다).
+//   opts.cursors  { 폴더경로: 마지막 처리 UID } — 있으면 그보다 큰 것만 (증분)
+//   opts.limit    폴더당 최신 N통, opts.budgetMs 전체 예산
+// 반환: { folders:[{ path, name, rows, total, truncated }] } — 예산이 다 되면 남은 폴더는 비어 있다
+async function readFolders(account, opts) {
+  const o = opts || {};
+  const limit = Math.max(1, Math.min(Number(o.limit) || 2000, 20000));
+  const since = o.since ? new Date(o.since) : new Date(Date.now() - 30 * 86400e3);
+  const cursors = o.cursors || {};
+  const deadline = Date.now() + Math.max(5000, Number(o.budgetMs) || 35000);
+  const client = makeClient(account);
+  await client.connect();
+  const out = [];
+  try {
+    const boxes = (await client.list()).filter(isReplyFolder);
+    boxes.sort((a, b) => (a.path === "INBOX" ? -1 : b.path === "INBOX" ? 1 : String(a.path).localeCompare(String(b.path))));
+    for (const b of boxes) {
+      const entry = { path: b.path, name: b.name || b.path, rows: [], total: 0, truncated: false, skipped: false };
+      out.push(entry);
+      if (Date.now() > deadline) { entry.skipped = true; continue; }
+      let lock;
+      try { lock = await client.getMailboxLock(b.path); } catch (_) { entry.skipped = true; continue; }
+      try {
+        const found = await client.search({ since }, { uid: true }) || [];
+        const min = Number(cursors[b.path]) || 0;
+        const fmax = found.length ? Number(found[found.length - 1]) : 0;
+        const uids = (min && fmax >= min) ? found.filter(u => Number(u) > min) : found;
+        entry.total = uids.length;
+        const take = uids.slice(-limit);
+        if (take.length) {
+          for await (const msg of client.fetch(take, { envelope: true }, { uid: true })) {
+            const env = msg.envelope || {};
+            entry.rows.push({
+              uid: msg.uid, messageId: env.messageId || "", inReplyTo: env.inReplyTo || "",
+              at: env.date, subject: env.subject || "(제목 없음)",
+              from: one(env.from), to: one(env.to), toAll: all(env.to), ccAll: all(env.cc)
+            });
+            if (Date.now() > deadline) break;
+          }
+        }
+        entry.truncated = entry.total > entry.rows.length;
+      } finally { lock.release(); }
+    }
+  } finally {
+    try { await client.logout(); } catch (_) { try { client.close(); } catch (_) {} }
+  }
+  return { folders: out };
+}
+
+module.exports = { read, readFolders, readThread, isReplyFolder, IMAP_HOST, IMAP_PORT };

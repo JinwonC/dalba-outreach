@@ -107,7 +107,7 @@ module.exports = async (req, res) => {
       while (processed < accounts.length && Date.now() < deadline) {
         const acc = accounts[i % accounts.length];
         try {
-          results.push(await S.syncAccount(acc, contacted, {}));
+          results.push(await S.syncAccount(acc, contacted, { until: deadline + 5e3 }));
         } catch (e) {
           results.push({ user: acc.email, error: String((e && e.message) || e) });
         }

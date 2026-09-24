@@ -389,6 +389,24 @@ async function log(rec) {
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
+// ─── 메일함별 "보낸 적 있는 주소" (회신 판별 전용) ─────────────────
+// 보낸편지함의 모든 외부 수신자(받는사람·참조·숨은참조, 인원 제한 없음)를 메일함마다 모아 둔다.
+// 발송 이력(중복 차단)에는 넣지 않는다 — 단체 메일은 공지일 수 있어 중복 판정엔 쓰지 않지만,
+// 그 사람이 **이 메일함으로 답장했다면** 그건 우리가 보낸 메일에 대한 회신이 맞다.
+const sentToKey = acct => "outreach:sentto:" + normEmail(acct);
+async function addSentTo(acct, emails) {
+  if (!enabled()) return 0;
+  const list = [...new Set((emails || []).map(normEmail).filter(e => e && e.indexOf("@") > 0))];
+  const key = sentToKey(acct);
+  for (let i = 0; i < list.length; i += 500) await pipeline(list.slice(i, i + 500).map(e => ["SADD", key, e]));
+  return list.length;
+}
+async function sentToSet(acct) {
+  if (!enabled()) return new Set();
+  try { const m = await cmd(["SMEMBERS", sentToKey(acct)]); return new Set(Array.isArray(m) ? m : []); }
+  catch (_) { return new Set(); }
+}
+
 // ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
 // 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
 // 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
@@ -543,6 +561,27 @@ async function recordReply(rec, dedupeId) {
   return { recorded: true };
 }
 
+// 여러 회신을 한 번에 기록한다 — 중복 확인(SISMEMBER)과 기록을 각각 한 번의 파이프라인으로.
+// 한 통씩 저장소를 왕복하면 수천 통 백필이 함수 제한시간을 넘긴다.
+async function recordReplies(items) {
+  const list = (items || []).filter(x => x && x.rec);
+  if (!enabled() || !list.length) return { recorded: 0, duplicate: 0 };
+  let recorded = 0, duplicate = 0;
+  for (let i = 0; i < list.length; i += 500) {
+    const chunk = list.slice(i, i + 500);
+    const seen = await pipeline(chunk.map(x => x.id ? ["SISMEMBER", IMPORTED_KEY, "r:" + x.id] : ["ECHO", "0"]));
+    const cmds = [], batchIds = new Set();
+    chunk.forEach((x, j) => {
+      if (x.id && (Number(seen[j]) === 1 || batchIds.has(x.id))) { duplicate++; return; }
+      if (x.id) { batchIds.add(x.id); cmds.push(["SADD", IMPORTED_KEY, "r:" + x.id]); }
+      cmds.push(["LPUSH", REPLY_KEY, JSON.stringify(x.rec)]);
+      recorded++;
+    });
+    if (cmds.length) { cmds.push(["LTRIM", REPLY_KEY, "0", String(REPLY_MAX - 1)]); await pipeline(cmds); }
+  }
+  return { recorded, duplicate };
+}
+
 // 작은 값 하나를 그대로 읽고 쓴다 (자동 실행의 커서·마지막 상태 보관용)
 async function readRaw(key) { return enabled() ? cmd(["GET", key]) : null; }
 async function writeRaw(key, val) { if (enabled()) await cmd(["SET", key, String(val)]); }
@@ -621,11 +660,11 @@ async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY,
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
-  recordReply, recent, recentBlocked, recentReplies, count,
+  recordReply, recordReplies, recent, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender,
-  bridge, rebuildBridge, bridgeReady,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

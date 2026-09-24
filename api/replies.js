@@ -20,6 +20,7 @@
 const A = require("../auth.js");
 const H = require("../history.js");
 const S = require("../sync.js");
+const M = require("../mail.js");
 
 // 회신도 발송 이력과 같은 날부터 본다 — 기준이 다르면 회신율이 말이 안 된다
 
@@ -41,6 +42,54 @@ module.exports = async (req, res) => {
     if (!A.enabled()) { res.status(501).json({ error: "직원 계정(NW_ACCOUNTS)을 설정해야 합니다" }); return; }
     const me = A.currentUser(req);
     if (!me) { res.status(401).json({ error: "로그인이 필요합니다" }); return; }
+    // ─── GET ?diagnose=1&user=… — 회신 누락 점검 (실제 메일함 ↔ 기록 대조) ───
+    // 메일함(받은편지함+사용자 폴더)의 외부 발신자를 사람 단위로 묶어 상태를 매긴다:
+    //   recorded      회신으로 기록돼 있음
+    //   pending       회신 조건은 맞는데 아직 기록 전 (자동 수집 대기 · 지금 수집으로 바로 반영)
+    //   not-contacted 우리 발송 기록·이 메일함 보낸편지함 어디에도 그 주소로 보낸 흔적이 없음
+    // 본인 메일함은 누구나, 남의 메일함은 관리자만. 제목·주소만 보고 본문은 읽지 않는다.
+    if (req.method === "GET" && req.query && req.query.diagnose) {
+      const wanted = String(req.query.user || me.email).trim().toLowerCase();
+      if (wanted !== String(me.email).toLowerCase() && !isAdmin(me)) { res.status(403).json({ error: "다른 담당자의 메일함은 관리자만 볼 수 있습니다" }); return; }
+      const acc = A.findByEmail(wanted);
+      if (!acc) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + wanted }); return; }
+      const since = String(req.query.since || S.SINCE_DEFAULT);
+      const [contacted, sentTo, replyAll, sentToDone, boxCur] = await Promise.all([
+        S.contactedMap(), H.sentToSet(acc.email), H.recentReplies(H.REPLY_MAX),
+        H.readRaw("outreach:sentto:done:" + H.normEmail(acc.email)).catch(() => null),
+        H.readRaw("outreach:cursor:box2:" + H.normEmail(acc.email)).catch(() => null)
+      ]);
+      const recorded = new Set(replyAll.filter(r => H.normEmail(r.inbox || r.by) === H.normEmail(acc.email)).map(r => H.normEmail(r.from)));
+      let mail;
+      try { mail = await M.readFolders(acc, { since, limit: 5000, budgetMs: 40000 }); }
+      catch (e) { res.status(502).json({ error: "메일함을 읽지 못했습니다: " + String((e && e.message) || e) }); return; }
+      const people = new Map();
+      let scanned = 0;
+      for (const f of mail.folders) for (const m of f.rows) {
+        scanned++;
+        const c = S.classify(m, acc, contacted, sentTo);
+        if (c.kind === "internal" || c.kind === "none") continue;
+        let p = people.get(c.e);
+        if (!p) { p = { email: c.e, name: (m.from && m.from.name) || "", count: 0, lastAt: "", lastSubject: "", folders: new Set(), status: "" }; people.set(c.e, p); }
+        p.count++; p.folders.add(f.path);
+        const at = m.at ? new Date(m.at).toISOString() : "";
+        if (at >= p.lastAt) { p.lastAt = at; p.lastSubject = m.subject || ""; }
+        p.status = recorded.has(c.e) ? "recorded" : (c.kind === "reply" ? "pending" : "not-contacted");
+      }
+      const list = [...people.values()].map(p => Object.assign(p, { folders: [...p.folders] }));
+      const cnt = k => list.filter(p => p.status === k).length;
+      const order = { pending: 0, "not-contacted": 1, recorded: 2 };
+      res.status(200).json({
+        user: acc.email, name: acc.name || "", since,
+        folders: mail.folders.map(f => ({ path: f.path, scanned: f.rows.length, total: f.total, truncated: f.truncated, skipped: f.skipped })),
+        scanned, people: list.length,
+        recorded: cnt("recorded"), pending: cnt("pending"), notContacted: cnt("not-contacted"),
+        sentToSize: sentTo.size, sentToDone: sentToDone === "2", cursorStarted: Boolean(boxCur),
+        rows: list.sort((a, b) => (order[a.status] - order[b.status]) || String(b.lastAt).localeCompare(String(a.lastAt))).slice(0, 500)
+      });
+      return;
+    }
+
     if (req.method !== "POST") { res.status(405).json({ error: "method not allowed" }); return; }
     if (!H.enabled()) {
       res.status(501).json({ error: "발송 이력 저장소가 없어 회신을 셀 수 없습니다 (Vercel → Storage → Upstash Redis)" });
@@ -84,7 +133,8 @@ module.exports = async (req, res) => {
     for (const acc of targets) {
       if (Date.now() > deadline) { skipped.push(acc.email); continue; }
       try {
-        results.push(await S.collectReplies(acc, contacted, { since, limit, budgetMs: 30000 }));
+        const st = await S.backfillSentTo(acc, 12000);   // 보낸 적 있는 주소부터 따라잡기
+        results.push(Object.assign(await S.collectReplies(acc, contacted, { since, limit, budgetMs: Math.max(5000, deadline - Date.now()) }), { sentTo: st }));
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
       }
