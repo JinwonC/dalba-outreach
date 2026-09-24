@@ -701,7 +701,7 @@ function renderBlocked(d){
       const noMail = !r.to;
       return '<tr><td>' + (noMail
           ? '<input type="checkbox" disabled title="이메일이 없어 발송할 수 없습니다" />'
-          : '<input type="checkbox" class="blkchk" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" data-by="'+esc(r.by||"")+'" />') + '</td>' +
+          : '<input type="checkbox" class="blkchk" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" data-by="'+esc(r.by||"")+'" data-byname="'+esc(r.byName||"")+'" />') + '</td>' +
         '<td class="mono muted">'+esc(fmt(r.at))+'</td>' +
         threadCell((r.origins && r.origins[0] && r.origins[0].by) || r.by, r.to, r.name) +
         '<td>'+person(r)+
@@ -732,9 +732,24 @@ function forceSelectedBlocked(){
 
 /* 선택한 막힌 건을 **승인** 한다 — 원래 시도했던 담당자가 자기 계정으로 다시 보내면 통과한다.
    (관리자가 대신 보내는 강제 발송과 달리, 발신자는 그 담당자 그대로.) */
+const APPROVAL_HEAD = ["Approved staff","Staff email","Creator handle","Creator email","Creator name","Approved at","Approved by (admin)"];
+let LAST_APPROVED = [];   // 방금 승인한 건들 (즉시 다운로드용)
+
+// CSV 다운로드 (영어 헤더, UTF-8 BOM 으로 엑셀 한글 안 깨짐)
+function downloadCsv(filename, lines){
+  const csv = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function approveSelectedBlocked(){
   const items = [...document.querySelectorAll(".blkchk:checked")].map(c => ({
     by: c.getAttribute("data-by") || "",
+    byName: c.getAttribute("data-byname") || "",
     to: c.getAttribute("data-to") || "",
     handle: c.getAttribute("data-handle") || "",
     name: c.getAttribute("data-name") || ""
@@ -751,29 +766,38 @@ async function approveSelectedBlocked(){
     if(r.status === 401){ showGate("다시 로그인해 주세요."); throw new Error("로그인이 필요합니다"); }
     const d = await r.json();
     if(d.error) throw new Error(d.error);
+    // 방금 승인한 내역을 바로 엑셀로 받을지 물어본다 (목록 새로고침 전에 — confirm 은 새로고침에 안 지워짐)
+    LAST_APPROVED = items;
+    if((d.approved||0) > 0 && window.confirm((d.approved) + "건 승인 완료.\n방금 승인한 내역(담당자·핸들·이메일)을 엑셀(CSV)로 받으시겠습니까?")){
+      exportJustApproved();
+    }
     if(msg) msg.textContent = (d.approved||0) + "건 승인됨 · 담당자가 다시 보내면 발송됩니다.";
     load();   // 목록 새로고침 → '승인됨' 배지 표시
   } catch(e){ if(msg) msg.textContent = ""; alert("승인 실패: " + String(e.message||e)); }
 }
 
-/* 관리자 승인 내역을 엑셀(CSV, 영어 헤더)로 내려받는다 — 누구를(담당자)·크리에이터 핸들/이메일·승인일. */
+// 방금 승인한 건들만 즉시 CSV 로 (승인일 = 지금, 승인자 = 로그인한 관리자)
+function exportJustApproved(){
+  if(!LAST_APPROVED.length){ alert("승인한 내역이 없습니다."); return; }
+  const now = fmt(new Date().toISOString());
+  const admin = (ME && (ME.name || ME.email)) || "";
+  const lines = [APPROVAL_HEAD.map(csvCell).join(",")].concat(
+    LAST_APPROVED.map(r => [r.byName||r.by, r.by, r.handle, r.to, r.name, now, admin].map(csvCell).join(","))
+  );
+  downloadCsv("approved_" + new Date().toISOString().slice(0,10) + ".csv", lines);
+}
+
+/* 관리자 승인 내역 전체를 엑셀(CSV, 영어 헤더)로 내려받는다 — 누구를(담당자)·크리에이터 핸들/이메일·승인일. */
 async function exportApprovalsCsv(){
   const msg = $("blkMsg"); if(msg) msg.textContent = "불러오는 중…";
   try {
     const d = await fetchJson("/api/admin?view=approvals");
     const rows = (d && d.rows) || [];
     if(!rows.length){ if(msg) msg.textContent = ""; alert("승인 내역이 없습니다."); return; }
-    const head = ["Approved staff","Staff email","Creator handle","Creator email","Creator name","Approved at","Approved by (admin)"];
-    const lines = [head.map(csvCell).join(",")].concat(
+    const lines = [APPROVAL_HEAD.map(csvCell).join(",")].concat(
       rows.map(r => [r.byName||r.by, r.by, r.handle, r.to, r.name, fmt(r.at), r.approvedBy].map(csvCell).join(","))
     );
-    const csv = "﻿" + lines.join("\r\n");
-    const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "approvals_" + new Date().toISOString().slice(0,10) + ".csv";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadCsv("approvals_" + new Date().toISOString().slice(0,10) + ".csv", lines);
     if(msg) msg.textContent = rows.length + "건 내보냄";
   } catch(e){ if(msg) msg.textContent = ""; alert("내보내기 실패: " + String(e.message||e)); }
 }
