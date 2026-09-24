@@ -49,7 +49,8 @@ module.exports = async (req, res) => {
 
     const body = readBody(req);
     const since = String(body.since || S.SINCE_DEFAULT);
-    const limit = Math.max(1, Math.min(Number(body.limit) || 400, 1000));
+    // 즉시 깊게 훑는 용도 — 상한을 넉넉히 (예전 1000 은 최신 1000통만 봐서 오래된 회신을 놓쳤다).
+    const limit = Math.max(1, Math.min(Number(body.limit) || 20000, 20000));
 
     // 대상 계정 정하기 — 기본은 본인, 남의 메일함이나 전원은 관리자만
     let targets;
@@ -83,7 +84,7 @@ module.exports = async (req, res) => {
     for (const acc of targets) {
       if (Date.now() > deadline) { skipped.push(acc.email); continue; }
       try {
-        results.push(await S.collectReplies(acc, contacted, { since, limit }));
+        results.push(await S.collectReplies(acc, contacted, { since, limit, budgetMs: 30000 }));
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
       }

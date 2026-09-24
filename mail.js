@@ -70,7 +70,14 @@ async function read(account, opts) {
     path = await findMailbox(client, kind);
     const lock = await client.getMailboxLock(path);
     try {
-      const uids = await client.search({ since }, { uid: true }) || [];
+      const found = await client.search({ since }, { uid: true }) || [];
+      // 증분 스캔: minUid 가 오면 그보다 큰(=이후 도착) 것만 새로 본다. 매 실행 전체를
+      // 다시 훑지 않아 예산 안에서 확실히 끝나고, 못 본 것도 커서가 올라가며 결국 다 걸린다.
+      // 단, 메일함 UID 가 재설정(UIDVALIDITY 변경)돼 최대 UID 가 커서보다 작아지면
+      // 커서를 무시하고 전체를 다시 본다(안 그러면 아무것도 안 잡힌다).
+      const fmax = found.length ? Number(found[found.length - 1]) : 0;
+      const useMin = o.minUid && fmax >= Number(o.minUid);
+      const uids = (useMin ? found.filter(u => Number(u) > Number(o.minUid)) : found);
       total = uids.length;
       const take = uids.slice(-limit);   // 검색 결과는 오름차순이므로 뒤쪽이 최신
 

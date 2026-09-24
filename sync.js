@@ -24,6 +24,28 @@ function isInternal(email) {
   return COMPANY_DOMAINS.includes(String(email || "").toLowerCase().split("@")[1] || "");
 }
 
+// ─── 증분 스캔 커서 (자동 실행 전용) ───────────────────────────────
+// 자동 실행이 매번 받은편지함 "최신 N통" 만 보면, 그 창(limit)을 넘긴 오래된 회신은
+// 반복 실행해도 영영 안 걸린다. 그래서 계정별로 마지막에 처리한 UID 를 남겨 두고,
+// 다음엔 그보다 큰(=이후) 것만 새로 본다. 커서는 **실제로 받아온 것 중 최대 UID** 로만
+// 올린다 — 예산이 모자라 중간에 끊겨도(오래된 것부터 처리) 다음 실행이 이어받아 빈틈이 없다.
+async function getUidCursor(kind, account) {
+  try { return Number(await H.readRaw("outreach:cursor:" + kind + ":" + account.email)) || 0; }
+  catch (_) { return 0; }
+}
+async function setUidCursor(kind, account, uid) {
+  if (!(Number(uid) > 0)) return;
+  try { await H.writeRaw("outreach:cursor:" + kind + ":" + account.email, String(uid)); } catch (_) {}
+}
+function maxUidOf(rows) {
+  return (rows || []).reduce((m, r) => Math.max(m, Number(r && r.uid) || 0), 0);
+}
+// 커서를 쓸 땐 한 창을 넓게 잡는다(증분이라 매 실행 실제 건수는 적다). 안 쓰면(수동 전체
+// 스캔) 기존 기본값을 유지한다.
+function scanLimit(o) {
+  return Math.max(1, Math.min(Number(o.limit) || (o.useCursor ? 20000 : 2000), 20000));
+}
+
 // 보낸 메일 한 통 → 이력 후보들 (수신자 한 명당 한 건)
 function candidates(msg, account, needle) {
   if (needle && String(msg.subject || "").toLowerCase().indexOf(needle) < 0) return [];
@@ -50,10 +72,12 @@ function candidates(msg, account, needle) {
 async function readSent(account, opts) {
   const o = opts || {};
   const needle = String(o.subject || "").trim().toLowerCase();
+  const minUid = o.useCursor ? await getUidCursor("sent", account) : 0;
   const mail = await M.read(account, {
     kind: "sent", since: o.since || SINCE_DEFAULT,
-    limit: Math.max(1, Math.min(Number(o.limit) || 2000, 20000))
+    limit: scanLimit(o), minUid, budgetMs: o.budgetMs
   });
+  if (o.useCursor) await setUidCursor("sent", account, maxUidOf(mail.rows));
 
   const rows = [];
   const skipped = { internal: 0, bulk: 0, subject: 0 };
@@ -104,10 +128,12 @@ async function contactedMap() {
 
 async function collectReplies(account, contacted, opts) {
   const o = opts || {};
+  const minUid = o.useCursor ? await getUidCursor("inbox", account) : 0;
   const mail = await M.read(account, {
     kind: "inbox", since: o.since || SINCE_DEFAULT,
-    limit: Math.max(1, Math.min(Number(o.limit) || 2000, 20000))
+    limit: scanLimit(o), minUid, budgetMs: o.budgetMs
   });
+  if (o.useCursor) await setUidCursor("inbox", account, maxUidOf(mail.rows));
 
   let found = 0, duplicate = 0;
   for (const m of mail.rows) {
@@ -141,16 +167,19 @@ async function collectReplies(account, contacted, opts) {
 }
 
 // 한 사람의 보낸편지함·받은편지함을 잇달아 처리한다 (자동 실행이 쓰는 단위)
+// 자동 실행은 **증분 스캔(커서)** 을 켠다 — 매번 전체를 다시 훑지 않고 이후 도착분만 본다.
+// 보낸편지함은 짧게(도구로 보낸 건 실시간 기록됨 · 외부 발송만 보강), 받은편지함은 넉넉히
+// (회신 누락이 제일 아프다) 예산을 준다. 함수 상한 60초 안에 한 계정을 마치도록 잡았다.
 async function syncAccount(account, contacted, opts) {
-  const o = opts || {};
-  const sentRead = await readSent(account, o);
+  const o = Object.assign({ useCursor: true }, opts || {});
+  const sentRead = await readSent(account, Object.assign({ budgetMs: 12000 }, o));
   const sentWrite = await writeSent(account, sentRead.rows);
   // 방금 넣은 발송분도 회신 대조 대상이 되도록 목록을 갱신한다
   sentRead.rows.forEach(r => {
     const k = H.normEmail(r.to);
     if (k && !contacted.has(k)) contacted.set(k, r);
   });
-  const rep = await collectReplies(account, contacted, o);
+  const rep = await collectReplies(account, contacted, Object.assign({ budgetMs: 38000 }, o));
   return {
     user: account.email,
     sent: sentWrite,
