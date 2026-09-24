@@ -122,9 +122,13 @@ async function collectReplies(account, contacted, opts) {
       at,
       subject: m.subject || "",
       inbox: account.email,          // 누구 받은편지함에 들어왔는지
-      // 원래 누가 어느 캠페인으로 보냈는지 — 담당자별 회신율을 세려면 필요하다
-      by: hit.by || account.email,
-      byName: hit.byName || account.name || "",
+      // 담당자 귀속은 **이 회신이 도착한 메일함 주인**이다 (account). 담당자 계정은
+      // 크리에이터 아웃리치 전용이라, 그 메일함에 온 회신 = 그 담당자가 보낸 아웃리치의 답이다.
+      // (contacted 전역 맵의 hit.by 로 잡으면, 같은 크리에이터를 여러 담당자가 접촉했을 때
+      //  가장 최근 발송자에게 엉뚱하게 귀속돼 A 메일함 회신이 B 담당자로 뜬다.)
+      by: account.email,
+      byName: account.name || hit.byName || "",
+      // 캠페인·원발송시각은 참고용 문맥 — 전역 맵 기준 best-effort
       campaign: hit.campaign || "",
       sentAt: hit.at || ""
     }, id);

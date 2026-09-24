@@ -79,16 +79,17 @@ function groupByPerson(sent, blocked) {
 // 회신이 있어야 협상이 성립하므로 회신 기록을 기준으로 담당자→크리에이터로 묶는다.
 // 발송 이력에서 그 크리에이터에게 몇 번 보냈는지도 함께 붙인다.
 function conversations(sent, replies) {
+  const NM = nameByEmail();
   const staff = new Map();
   const ensure = (byKey, byName) => {
     if (!staff.has(byKey)) staff.set(byKey, { by: byKey, byName: byName || byKey, creators: new Map() });
     return staff.get(byKey);
   };
   replies.forEach(r => {
-    const byKey = String(r.by || r.inbox || "").toLowerCase();
+    const byKey = replyStaff(r);          // 회신이 도착한 메일함 주인
     const ck = H.normEmail(r.from);
     if (!byKey || !ck) return;
-    const s = ensure(byKey, r.byName);
+    const s = ensure(byKey, NM.get(byKey) || r.byName);
     const c = s.creators.get(ck) ||
       { email: r.from, name: r.fromName || "", replies: 0, sent: 0, lastAt: "", lastSubject: "", campaign: r.campaign || "" };
     c.replies++;
@@ -114,6 +115,7 @@ function conversations(sent, replies) {
 // 회신 온 인원 — **관리자 포함 전원**. 회신 로그를 크리에이터(회신 발신 주소) 단위로 묶는다.
 // 우리 '회신 인원 데이터베이스' 역할: 누가 회신했는지 · 몇 번 · 마지막 언제 · 누구에게 · 최근 제목.
 function repliers(replies, sentAll) {
+  const NM = nameByEmail();
   // 발송 로그에서 이메일 → 핸들 (있으면 표·CSV 에 핸들도 채운다)
   const handleOf = new Map();
   for (const s of (sentAll || [])) { const e = H.normEmail(s.to); if (e && s.handle && !handleOf.has(e)) handleOf.set(e, s.handle); }
@@ -127,8 +129,8 @@ function repliers(replies, sentAll) {
     a.count++;
     if (!a.name && r.fromName) a.name = r.fromName;
     if (String(r.at || "") >= String(a.lastAt || "")) { a.lastAt = r.at || ""; a.lastSubject = r.subject || a.lastSubject; a.inbox = r.inbox || r.by || a.inbox; }
-    const sk = String(r.by || r.inbox || "").toLowerCase();
-    if (sk && !a.staff.has(sk)) a.staff.set(sk, r.byName || r.by || r.inbox || "");
+    const sk = replyStaff(r);            // 회신이 도착한 메일함 주인
+    if (sk && !a.staff.has(sk)) a.staff.set(sk, NM.get(sk) || r.byName || sk);
   }
   return [...map.values()].map(a => ({
     email: a.email, name: a.name, handle: a.handle, count: a.count,
@@ -246,11 +248,11 @@ function weekly(sent, replies, tzMin, numWeeks) {
     if (!mk || !inWindow.has(mk)) return;
     const row = ensure(r.by, r.byName); row.cells[mk].sent++; row.totalSent++;
   });
-  // 회신은 **받은 날**이 속한 주에 센다 (통수 기준). 담당자는 보낸 사람/받은편지함 주인.
+  // 회신은 **받은 날**이 속한 주에 센다 (통수 기준). 담당자는 그 회신이 도착한 메일함 주인.
   replies.forEach(r => {
     const mk = localMonday(r.at, tzMin);
     if (!mk || !inWindow.has(mk)) return;
-    const row = ensure(r.by || r.inbox, r.byName); row.cells[mk].replied++; row.totalReplied++;
+    const row = ensure(replyStaff(r), r.byName); row.cells[mk].replied++; row.totalReplied++;
   });
 
   const list = [...rows.values()]
@@ -269,6 +271,20 @@ function roster() {
     name: a.name || a.email.split("@")[0],
     title: a.title || ""
   }));
+}
+
+// 이메일 → 담당자 이름. 회신 귀속을 메일함 주인(inbox)으로 옮길 때, 지난 기록의
+// byName 이 (옛 전역-귀속 탓에) 다른 담당자 이름이라도 올바른 이름을 붙이려고 쓴다.
+function nameByEmail() {
+  const m = new Map();
+  roster().forEach(a => m.set(String(a.email || "").toLowerCase(), a.name));
+  return m;
+}
+
+// 회신의 담당자 = **그 회신이 도착한 메일함 주인(inbox)**. 옛 기록은 by 가 엉뚱한
+// 담당자일 수 있으나 inbox 는 항상 정확하므로, 어디서든 inbox 를 우선한다.
+function replyStaff(r) {
+  return String((r && (r.inbox || r.by)) || "").toLowerCase();
 }
 
 function summarize(sent, blocked, replies) {
@@ -299,7 +315,7 @@ function summarize(sent, blocked, replies) {
   // 사람 단위로 세야 말이 된다. (그날 몇 통 왔는지는 일별 화면이 통수로 보여준다)
   const repliedBy = new Map();   // 담당자 → 답장한 크리에이터 집합
   replies.forEach(r => {
-    const k = r.by || "(알 수 없음)";
+    const k = replyStaff(r) || "(알 수 없음)";   // 회신이 도착한 메일함 주인
     const who = H.normEmail(r.from);
     if (!who) return;
     if (!repliedBy.has(k)) repliedBy.set(k, new Set());
@@ -483,10 +499,13 @@ module.exports = async (req, res) => {
         return out;
       };
       // 크리에이터 → 회신 색인 (누가 회신을 받았는지 · 어떤 제목인지). inbox = 회신이 들어온 메일함.
+      // 담당자 귀속은 메일함 주인(inbox) 기준 — 옛 기록의 by 가 다른 담당자여도 바로잡는다.
+      const NMb = nameByEmail();
       const qE = new Map(), qH = new Map();
       for (const rp of replyAll) {
         if (!rp) continue;
-        const rec = { by: rp.by || rp.inbox || "", byName: rp.byName || rp.by || rp.inbox || "", inbox: rp.inbox || rp.by || "", at: rp.at || "", subject: rp.subject || "" };
+        const owner = replyStaff(rp);
+        const rec = { by: owner, byName: NMb.get(owner) || rp.byName || owner, inbox: rp.inbox || rp.by || "", at: rp.at || "", subject: rp.subject || "" };
         const e = H.normEmail(rp.from), h = H.normHandle(rp.handle);
         if (e) { const a = qE.get(e) || []; a.push(rec); qE.set(e, a); }
         if (h) { const a = qH.get(h) || []; a.push(rec); qH.set(h, a); }
@@ -536,7 +555,9 @@ module.exports = async (req, res) => {
       const target = by || (me ? String(me.email).toLowerCase() : "");
       const win = r => withinDays(r, days) && matches(r, needle);
       const mineSent = sentAll.filter(r => win(r) && String(r.by || "").toLowerCase() === target);
-      const mineReplies = replyAll.filter(r => win(r) && (String(r.by || "").toLowerCase() === target || String(r.inbox || "").toLowerCase() === target));
+      // 회신은 **그 회신이 도착한 메일함 주인** 기준으로만 고른다 — 같은 크리에이터를
+      // 여러 담당자가 접촉했을 때 남의 메일함 회신이 섞이지 않게 (inbox 우선).
+      const mineReplies = replyAll.filter(r => win(r) && replyStaff(r) === target);
       // 보낸 리마인드 로그 — 이 사람이 보낸 것만
       const remLog = await H.recentReminders(H.LOG_MAX);
       const mineRem = remLog.filter(r => win(r) && String(r.by || "").toLowerCase() === target);
