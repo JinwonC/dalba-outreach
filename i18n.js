@@ -1065,6 +1065,7 @@
         "🤝 {n} collaborating creators will be held (in-house list · admins only).",
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 {n} collab creators included (admins can send).",
+      "핸들 없음 {n}명": "{n} without handle",
       "⚠️ 핸들이 비어 있는 {n}명 — 협업 리스트·중복 확인이 이메일로만 됩니다 (핸들을 채우면 더 정확합니다).":
         "⚠️ {n} without a handle — collab-list and duplicate checks will use email only (fill in handles for accuracy).",
       "{n}개 입력됨": "{n} entered",
@@ -1139,6 +1140,7 @@
         "🤝 {n} creator đang hợp tác sẽ bị giữ (danh sách in-house · chỉ quản trị).",
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 Có {n} creator đang hợp tác (quản trị vẫn gửi được).",
+      "핸들 없음 {n}명": "{n} chưa có handle",
       "⚠️ 핸들이 비어 있는 {n}명 — 협업 리스트·중복 확인이 이메일로만 됩니다 (핸들을 채우면 더 정확합니다).":
         "⚠️ {n} người chưa có handle — kiểm tra hợp tác và trùng lặp chỉ dùng email (điền handle để chính xác hơn).",
       "{n}개 입력됨": "đã nhập {n}",
