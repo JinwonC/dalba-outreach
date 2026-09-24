@@ -143,6 +143,7 @@
     <button class="tab" data-v="weekly" onclick="go('weekly')">📅 주차별</button>
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
+    <button class="tab" data-v="repliers" onclick="go('repliers')">📨 회신 온 인원</button>
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
   </div>
@@ -301,6 +302,7 @@ async function loadAdmin(){
   if(VIEW === "sent")    return renderSent(d);
   if(VIEW === "blocked") return renderBlocked(d);
   if(VIEW === "conversations") return renderConversations(d);
+  if(VIEW === "repliers")  return renderRepliers(d);
   if(VIEW === "pipeline") return renderPipeline(d);
   return "";
 }
@@ -805,6 +807,50 @@ async function exportApprovalsCsv(){
 /* ── 대화 (담당자 ↔ 크리에이터 협상) ──
    회신한 크리에이터만 목차로 띄운다(협상은 회신이 있어야 성립). 한 명을 누르면
    그 담당자 메일함에서 주고받은 스레드를 본문까지 그때그때 읽어 온다. */
+let REPLIER_ROWS = [];
+function renderRepliers(d){
+  const rows = d.rows || [];
+  REPLIER_ROWS = rows;
+  const note = '<div class="note">회신이 한 번이라도 온 인원 — <b>관리자 포함 전원</b>. 회신 발신 주소 기준으로 묶었습니다. ' +
+    '한 줄을 누르면 그 회신 내용을 열 수 있습니다.</div>';
+  const bar = '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
+    '<button class="btn" onclick="exportRepliersCsv()">⬇️ 회신 인원 Excel(CSV)</button>' +
+    '<span class="muted">회신 인원 <b>'+rows.length+'명</b></span>' +
+    '<span class="muted" id="repMsg"></span></div>';
+  if(!rows.length){
+    $("body").innerHTML = note +
+      '<div class="note"><b>아직 회신 기록이 없습니다.</b><br />담당자별 탭에서 [🔄 메일함에서 동기화] 를 먼저 돌려 회신을 채우세요.</div>';
+    return "";
+  }
+  const cellFor = r => (r.email && r.inbox)
+    ? '<td class="threadcell" data-thread-staff="'+esc(r.inbox)+'" data-thread-peer="'+esc(r.email)+'" style="cursor:pointer" title="회신 내용 보기">' +
+        '<b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div>' +
+        ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span></td>'
+    : '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+'</div></td>';
+  $("body").innerHTML = note + bar +
+    '<div class="scroll"><table><thead><tr>' +
+    '<th>크리에이터</th><th>회신</th><th>최근 회신</th><th>회신 받은 담당자</th><th>최근 제목</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(r =>
+      '<tr>' + cellFor(r) +
+      '<td class="mono"><b>'+(r.count||0)+'</b></td>' +
+      '<td class="mono muted">'+esc(fmt(r.lastAt))+'</td>' +
+      '<td>'+esc((r.staff||[]).join(", "))+'</td>' +
+      '<td class="muted">'+esc(r.lastSubject||"")+'</td></tr>').join("") +
+    '</tbody></table></div>';
+  return rows.length + "명";
+}
+function exportRepliersCsv(){
+  const rows = REPLIER_ROWS || [];
+  if(!rows.length){ alert("내보낼 회신 인원이 없습니다."); return; }
+  const head = ["Creator name","Creator email","Handle","Replies","Last reply","Replied to (staff)","Last subject"];
+  const lines = [head.map(csvCell).join(",")].concat(
+    rows.map(r => [r.name, r.email, r.handle, r.count, fmt(r.lastAt), (r.staff||[]).join(" / "), r.lastSubject].map(csvCell).join(","))
+  );
+  downloadCsv("repliers_" + new Date().toISOString().slice(0,10) + ".csv", lines);
+  const m = $("repMsg"); if(m) m.textContent = rows.length + "명 내보냄";
+}
+
 function renderConversations(d){
   const rows = d.rows || [];
   if(!rows.length){

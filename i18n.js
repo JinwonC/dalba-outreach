@@ -61,6 +61,20 @@
       "이 메일 내용 보기": "View this email's content",
       "📄 내용": "📄 View",
       "💬 회신": "💬 Reply",
+      "📨 회신 온 인원": "📨 Repliers",
+      "회신이 한 번이라도 온 인원 —": "People who replied at least once —",
+      "관리자 포함 전원": "everyone, admins included",
+      ". 회신 발신 주소 기준으로 묶었습니다. 한 줄을 누르면 그 회신 내용을 열 수 있습니다.":
+        ". Grouped by the reply's sender address. Click a row to open that reply.",
+      "⬇️ 회신 인원 Excel(CSV)": "⬇️ Repliers Excel (CSV)",
+      "회신 인원": "Repliers",
+      "아직 회신 기록이 없습니다.": "No replies recorded yet.",
+      "담당자별 탭에서 [🔄 메일함에서 동기화] 를 먼저 돌려 회신을 채우세요.":
+        "Run [🔄 Sync from mailbox] on the By-staff tab first to fill in replies.",
+      "최근 회신": "Last reply",
+      "회신 받은 담당자": "Replied to (staff)",
+      "최근 제목": "Last subject",
+      "회신 내용 보기": "View this reply",
       "불러오는 중… (메일함을 직접 읽습니다)": "Loading… (reading the mailbox directly)",
       "이 대화의 메일을 찾지 못했습니다. (기간이 2026-05-01 이후인지 확인하세요)": "No mail found for this conversation. (Check the range is on/after 2026-05-01)",
       "(본문 없음)": "(no body)",
@@ -532,6 +546,20 @@
       "이 메일 내용 보기": "Xem nội dung email này",
       "📄 내용": "📄 Nội dung",
       "💬 회신": "💬 Phản hồi",
+      "📨 회신 온 인원": "📨 Người đã phản hồi",
+      "회신이 한 번이라도 온 인원 —": "Người đã phản hồi ít nhất một lần —",
+      "관리자 포함 전원": "tất cả, gồm cả quản trị",
+      ". 회신 발신 주소 기준으로 묶었습니다. 한 줄을 누르면 그 회신 내용을 열 수 있습니다.":
+        ". Nhóm theo địa chỉ gửi phản hồi. Bấm một dòng để mở phản hồi đó.",
+      "⬇️ 회신 인원 Excel(CSV)": "⬇️ Người phản hồi Excel (CSV)",
+      "회신 인원": "Người phản hồi",
+      "아직 회신 기록이 없습니다.": "Chưa có phản hồi nào được ghi.",
+      "담당자별 탭에서 [🔄 메일함에서 동기화] 를 먼저 돌려 회신을 채우세요.":
+        "Chạy [🔄 Đồng bộ từ hộp thư] ở tab Theo nhân viên trước để điền phản hồi.",
+      "최근 회신": "Phản hồi gần nhất",
+      "회신 받은 담당자": "Người nhận phản hồi",
+      "최근 제목": "Tiêu đề gần nhất",
+      "회신 내용 보기": "Xem phản hồi này",
       "불러오는 중… (메일함을 직접 읽습니다)": "Đang tải… (đọc trực tiếp từ hộp thư)",
       "이 대화의 메일을 찾지 못했습니다. (기간이 2026-05-01 이후인지 확인하세요)": "Không tìm thấy email cho hội thoại này. (Kiểm tra khoảng thời gian từ 2026-05-01 trở đi)",
       "(본문 없음)": "(không có nội dung)",
@@ -1038,6 +1066,7 @@
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Blocked as duplicate ({n})",
       "{n}행 내보냄": "{n} rows exported",
       "{n}건 내보냄": "{n} exported",
+      "{n}명 내보냄": "{n} exported",
       "발송 {n}건": "{n} sends",
       "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
         "\"Self-send on record\" ({n}) means the attempting staff member had already sent to that creator."
@@ -1107,6 +1136,7 @@
       "⏸ 중복으로 실패한 시도 ({n})": "⏸ Bị chặn do trùng ({n})",
       "{n}행 내보냄": "đã xuất {n} dòng",
       "{n}건 내보냄": "đã xuất {n}",
+      "{n}명 내보냄": "đã xuất {n}",
       "발송 {n}건": "{n} lần gửi",
       "\"본인 발송 있음\" {n}건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.":
         "\"Có bản ghi tự gửi\" ({n}) nghĩa là nhân viên thử gửi đã từng gửi cho creator đó."

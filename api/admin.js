@@ -111,6 +111,32 @@ function conversations(sent, replies) {
 
 // 개인 파이프라인 집계는 pipeline-lib.js 로 옮겼다 (발송 화면 api/pipeline.js 와 공유).
 
+// 회신 온 인원 — **관리자 포함 전원**. 회신 로그를 크리에이터(회신 발신 주소) 단위로 묶는다.
+// 우리 '회신 인원 데이터베이스' 역할: 누가 회신했는지 · 몇 번 · 마지막 언제 · 누구에게 · 최근 제목.
+function repliers(replies, sentAll) {
+  // 발송 로그에서 이메일 → 핸들 (있으면 표·CSV 에 핸들도 채운다)
+  const handleOf = new Map();
+  for (const s of (sentAll || [])) { const e = H.normEmail(s.to); if (e && s.handle && !handleOf.has(e)) handleOf.set(e, s.handle); }
+
+  const map = new Map();
+  for (const r of (replies || [])) {
+    const e = H.normEmail(r.from);
+    if (!e) continue;
+    let a = map.get(e);
+    if (!a) { a = { email: r.from, name: r.fromName || "", handle: handleOf.get(e) || "", count: 0, lastAt: "", lastSubject: "", inbox: "", staff: new Map() }; map.set(e, a); }
+    a.count++;
+    if (!a.name && r.fromName) a.name = r.fromName;
+    if (String(r.at || "") >= String(a.lastAt || "")) { a.lastAt = r.at || ""; a.lastSubject = r.subject || a.lastSubject; a.inbox = r.inbox || r.by || a.inbox; }
+    const sk = String(r.by || r.inbox || "").toLowerCase();
+    if (sk && !a.staff.has(sk)) a.staff.set(sk, r.byName || r.by || r.inbox || "");
+  }
+  return [...map.values()].map(a => ({
+    email: a.email, name: a.name, handle: a.handle, count: a.count,
+    lastAt: a.lastAt, lastSubject: a.lastSubject, inbox: a.inbox,
+    staff: [...a.staff.values()]
+  })).sort((x, y) => String(y.lastAt).localeCompare(String(x.lastAt)));
+}
+
 // 하루 단위 집계.
 //
 // 기록의 시각은 UTC 다. 한국에서 아침 8시에 보낸 건 UTC 로는 전날 23시라, 그대로
@@ -373,7 +399,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline";
+    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline" || view === "repliers";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -383,7 +409,7 @@ module.exports = async (req, res) => {
       // 중복 시도 화면은 '그 크리에이터에게 간 발송을 전부' 보여줘야 하므로 발송 로그를 전량 읽는다
       H.recent(view === "blocked" ? H.LOG_MAX : readN),
       H.recentBlocked(Math.min(readN, H.BLOCK_MAX)),
-      H.recentReplies(view === "blocked" ? H.REPLY_MAX : Math.min(readN, H.REPLY_MAX)),
+      H.recentReplies(view === "blocked" || view === "repliers" ? H.REPLY_MAX : Math.min(readN, H.REPLY_MAX)),
       H.count(H.LOG_KEY),
       H.count(H.BLOCK_KEY),
       H.count(H.REPLY_KEY)
@@ -508,6 +534,12 @@ module.exports = async (req, res) => {
 
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
     if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
+    if (view === "repliers") {
+      // 관리자 포함 전원 — 관리자 제외 필터(keep) 를 적용하지 않고 회신 전체를 집계한다.
+      const kept = replyAll.filter(r => withinDays(r, days) && matches(r, needle));
+      res.status(200).json(Object.assign(base, { rows: repliers(kept, sentAll) }));
+      return;
+    }
     if (view === "pipeline") {
       // 개인용 — 기본은 로그인한 본인, 담당자를 고르면 그 사람. 관리자 제외 필터는 적용하지 않는다
       // (본인이 관리자여도 자기 파이프라인은 봐야 한다). raw 배열에서 그 한 명만 추린다.
