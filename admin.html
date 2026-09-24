@@ -927,10 +927,13 @@ function threadCell(staff, to, name, badge){
     ' <span class="muted" style="font-size:11px;white-space:nowrap">💬 대화</span></td>';
 }
 /* 인하우스 협업 크리에이터 배지 (핸들 기준). 중복시도·대상 칸에 붙는다. */
+const IH_VIA = { linked:"발송 기록 연결", "sheet-email":"시트 이메일", "email-prefix":"이메일 주소로 추정" };
 function inhouseBadge(r){
-  return r && r.inhouse
-    ? ' <span class="tag" style="background:#fff3d6;color:#8a5a00" title="달바 인하우스 협업 크리에이터 리스트에 있는 핸들입니다">🤝 협업 중</span>'
-    : "";
+  if(!(r && r.inhouse)) return "";
+  const via = r.inhouseVia && r.inhouseVia !== "handle" ? IH_VIA[r.inhouseVia] : "";
+  return ' <span class="tag" style="background:#fff3d6;color:#8a5a00" title="달바 인하우스 협업 크리에이터 리스트에 있는 크리에이터입니다">🤝 협업 중</span>' +
+    (r.inhouseHandle && via
+      ? ' <span class="muted" style="font-size:11px">@'+esc(r.inhouseHandle)+' · <span>'+via+'</span></span>' : '');
 }
 document.addEventListener("click", e => {
   const c = e.target.closest && e.target.closest("[data-thread-peer]");

@@ -10,6 +10,7 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
+const IH = require("../inhouse.js");
 
 function readBody(req) {
   const b = req.body;
@@ -49,11 +50,18 @@ module.exports = async (req, res) => {
     if (recipients.length > 2000) { res.status(400).json({ error: "한 번에 2000명까지 확인할 수 있습니다" }); return; }
 
     const priors = await H.lookup(recipients);
+    // 협업 리스트 대조 — 핸들이 비어 있어도 이메일(시트·발송 기록 연결·주소 추정)로 잡는다
+    const match = await IH.matcher();
+    let links = [];
+    try { links = await H.bridge(recipients); } catch (_) { links = []; }
     res.status(200).json({
       enabled: H.enabled(),
       windowDays: H.WINDOW_DAYS,
       held: priors.filter(Boolean).length,
-      results: recipients.map((r, i) => ({ to: r.to, prior: priors[i] || null }))
+      results: recipients.map((r, i) => ({
+        to: r.to, prior: priors[i] || null,
+        inhouse: match(r, (links[i] && links[i].handles) || []) || null
+      }))
     });
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e) });

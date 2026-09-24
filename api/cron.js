@@ -77,6 +77,14 @@ module.exports = async (req, res) => {
     try { scheduled = await Sch.processDue({ budgetMs: Math.min(25e3, deadline - Date.now()) }); }
     catch (e) { scheduled = { error: String((e && e.message) || e) }; }
 
+    // ─── 이메일↔핸들 연결(브리지) 1회 채우기 ─────────────────────
+    // 지난 발송 로그에서 이메일+핸들 짝을 모아 둔다(이후 새 발송은 발송 때 바로 연결된다).
+    // 다 채우면 버전 표시가 남아 다음부터는 건너뛴다. 예산을 짧게 줘 다른 일을 밀어내지 않는다.
+    let bridge = null;
+    try {
+      if (!(await H.bridgeReady())) bridge = await H.rebuildBridge({ budgetMs: Math.min(12e3, Math.max(3e3, deadline - Date.now() - 20e3)) });
+    } catch (e) { bridge = { error: String((e && e.message) || e) }; }
+
     // ─── 메일함 동기화는 **한 시간에 한 번**만 돈다 ──────────────
     // 크론은 예약·리마인드 때문에 15분마다 돌지만, 담당자 메일함 20개를 여는 무거운 동기화를
     // 매번 하면 저장소(Upstash) 요청이 15분마다 쌓여 한도를 넘고, 그러면 발송의 중복확인까지
@@ -132,6 +140,7 @@ module.exports = async (req, res) => {
       totals,
       scheduled,
       reminders,
+      bridge,               // 이메일↔핸들 연결 채우기 (다 채운 뒤엔 null)
       errors: results.filter(r => r.error).map(r => ({ user: r.user, error: r.error }))
     };
 

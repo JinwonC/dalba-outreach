@@ -16,6 +16,7 @@
 //   INHOUSE_CACHE_MS         캐시 시간(ms), 기본 30분
 
 const S = require("./sheets.js");
+const H = require("./history.js");
 
 const SHEET_ID = process.env.INHOUSE_SHEET_ID || "1JFq6m2-rvSpiGKQsTpr91Hj-RckHpqFfEl_BLkQI_hs";
 const TAB_KEYWORDS = String(process.env.INHOUSE_TABS || "GMV,담당자,캐스팅")
@@ -28,7 +29,7 @@ const HANDLE_HEADERS = new Set(
 );
 const CACHE_MS = Number(process.env.INHOUSE_CACHE_MS || 30 * 60e3);
 
-let cache = { at: 0, handles: null, tabs: [], error: "" };
+let cache = { at: 0, handles: null, emails: new Map(), tabs: [], error: "" };
 
 function configured() { return Boolean(S.serviceAccount()); }
 
@@ -61,59 +62,132 @@ async function sheetTitles(token) {
   return (d.sheets || []).map(s => (s.properties || {}).title).filter(Boolean);
 }
 
-// 한 탭에서 핸들 열을 찾아 값을 읽는다. 헤더가 1행이 아닐 수 있어 앞 6행을 훑는다.
-async function readTabHandles(token, title) {
-  const get = async range => {
-    const r = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?majorDimension=ROWS`,
-      { headers: { authorization: "Bearer " + token } });
-    return r.json();
-  };
-  const hd = await get(`'${title}'!1:6`);
-  if (hd.error) return { handles: [], error: hd.error.message };
-  const rows = hd.values || [];
-  let col = -1, headerRow = -1;
-  for (let r = 0; r < rows.length && col < 0; r++) {
+// 헤더(앞 6행)에서 핸들 열과 이메일 열을 찾는다.
+const EMAIL_HEADERS = new Set(
+  ["email", "e-mail", "email address", "e-mail address", "contact email", "이메일", "이메일 주소", "메일", "메일 주소", "gmail"]
+    .concat(String(process.env.INHOUSE_EMAIL_HEADERS || "").split(/[,;]/).map(s => s.trim().toLowerCase()))
+    .filter(Boolean)
+);
+function findHeaders(rows) {
+  let hcol = -1, ecol = -1, headerRow = -1;
+  for (let r = 0; r < Math.min(6, rows.length) && hcol < 0; r++) {
     const row = rows[r] || [];
     for (let c = 0; c < row.length; c++) {
-      if (HANDLE_HEADERS.has(String(row[c] == null ? "" : row[c]).trim().toLowerCase())) { col = c; headerRow = r; break; }
+      const v = String(row[c] == null ? "" : row[c]).trim().toLowerCase();
+      if (hcol < 0 && HANDLE_HEADERS.has(v)) { hcol = c; headerRow = r; }
+    }
+    if (hcol >= 0) {
+      for (let c = 0; c < row.length; c++) {
+        if (EMAIL_HEADERS.has(String(row[c] == null ? "" : row[c]).trim().toLowerCase())) { ecol = c; break; }
+      }
     }
   }
-  if (col < 0) return { handles: [], error: "핸들 열(헤더)을 찾지 못했습니다" };
-
-  const cd = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`'${title}'!${colLetter(col)}:${colLetter(col)}`)}?majorDimension=COLUMNS`,
-    { headers: { authorization: "Bearer " + token } }).then(r => r.json());
-  if (cd.error) return { handles: [], error: cd.error.message };
-  const colVals = (cd.values && cd.values[0]) || [];
-  const out = [];
-  for (let r = headerRow + 1; r < colVals.length; r++) {
-    const h = extractHandle(colVals[r]);
-    if (h) out.push(h);
-  }
-  return { handles: out };
+  return { hcol, ecol, headerRow };
 }
 
-// 협업 핸들 집합을 불러온다(캐시). 실패해도 마지막 성공 캐시를 유지한다 — 발송이 통째로 막히면 안 된다.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const COMPANY_DOMAINS = (process.env.NW_DOMAIN || "dalbausa.com,dalba.com")
+  .split(",").map(s => s.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
+function isCompanyEmail(e) { return COMPANY_DOMAINS.includes(String(e || "").toLowerCase().split("@")[1] || ""); }
+function emailsIn(v) { return (String(v == null ? "" : v).match(EMAIL_RE) || []).map(x => H.normEmail(x)).filter(x => x && !isCompanyEmail(x)); }
+
+// 모든 탭을 한 번의 요청(batchGet)으로 읽는다.
+async function readAllTabs(token, titles) {
+  if (!titles.length) return [];
+  const q = titles.map(t => "ranges=" + encodeURIComponent("'" + String(t).replace(/'/g, "''") + "'")).join("&");
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?majorDimension=ROWS&${q}`,
+    { headers: { authorization: "Bearer " + token } });
+  const d = await r.json();
+  if (d.error) throw new Error("시트 읽기 실패: " + (d.error.message || ""));
+  return (d.valueRanges || []).map((vr, i) => ({ title: titles[i], rows: vr.values || [] }));
+}
+
+// 협업 핸들 집합(+ 그 크리에이터의 이메일)을 불러온다(캐시).
+//   · 핸들: 대상 탭(GMV·담당자·캐스팅)의 핸들 열
+//   · 이메일: 같은 행에 적힌 이메일 — 대상 탭은 이메일 열(없으면 그 행의 이메일 칸),
+//     다른 탭(예: 배송·신청 폼)은 핸들 열과 이메일 열이 **둘 다** 헤더로 있을 때만.
+//     다른 크리에이터 이메일이 잘못 붙지 않도록, 행의 핸들은 반드시 핸들 열에서만 읽는다.
+// 실패해도 마지막 성공 캐시를 유지한다 — 발송이 통째로 막히면 안 된다.
 async function loadHandles() {
   if (cache.handles && Date.now() - cache.at < CACHE_MS) return cache;
-  if (!configured()) { cache = { at: Date.now(), handles: cache.handles || new Set(), tabs: [], error: "GOOGLE_SERVICE_ACCOUNT 가 설정되지 않았습니다" }; return cache; }
+  if (!configured()) { cache = Object.assign({}, cache, { at: Date.now(), handles: cache.handles || new Set(), tabs: [], error: "GOOGLE_SERVICE_ACCOUNT 가 설정되지 않았습니다" }); return finish(cache); }
   try {
     const token = await S.accessToken();
     const titles = await sheetTitles(token);
-    const targets = titles.filter(t => TAB_KEYWORDS.some(k => t.toLowerCase().includes(k)));
+    const tabsData = await readAllTabs(token, titles);
     const set = new Set();
     const tabs = [];
-    for (const t of targets) {
-      const { handles, error } = await readTabHandles(token, t);
-      handles.forEach(h => set.add(h));
-      tabs.push({ tab: t, count: handles.length, error: error || undefined });
+    const rowLinks = [];   // [handle, [emails]]
+    let targets = 0;
+    for (const { title, rows } of tabsData) {
+      const target = TAB_KEYWORDS.some(k => title.toLowerCase().includes(k));
+      const { hcol, ecol, headerRow } = findHeaders(rows);
+      if (target) targets++;
+      if (hcol < 0) { if (target) tabs.push({ tab: title, count: 0, error: "핸들 열(헤더)을 찾지 못했습니다" }); continue; }
+      if (!target && ecol < 0) continue;
+      let n = 0;
+      for (let r = headerRow + 1; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const h = extractHandle(row[hcol]);
+        if (!h) continue;
+        if (target) { set.add(h); n++; }
+        const em = ecol >= 0 ? emailsIn(row[ecol]) : (target ? [].concat(...row.map(emailsIn)) : []);
+        if (em.length) rowLinks.push([h, em]);
+      }
+      if (target) tabs.push({ tab: title, count: n });
     }
-    cache = { at: Date.now(), handles: set, tabs, error: targets.length ? "" : "대상 탭을 찾지 못했습니다 (INHOUSE_TABS 확인)" };
+    const emails = new Map();
+    rowLinks.forEach(([h, em]) => { if (set.has(h)) em.forEach(e => { if (!emails.has(e)) emails.set(e, h); }); });
+    cache = { at: Date.now(), handles: set, emails, tabs, error: targets ? "" : "대상 탭을 찾지 못했습니다 (INHOUSE_TABS 확인)" };
   } catch (e) {
-    cache = { at: Date.now(), handles: cache.handles || new Set(), tabs: cache.tabs || [], error: String((e && e.message) || e) };
+    cache = Object.assign({}, cache, { at: Date.now(), handles: cache.handles || new Set(), tabs: cache.tabs || [], error: String((e && e.message) || e) });
   }
-  return cache;
+  return finish(cache);
+}
+
+// ─── 매칭 ────────────────────────────────────────────────────────
+// 수신자 한 명이 협업 리스트의 누구인지. 순서대로 확실한 것부터:
+//   handle        입력한 핸들이 리스트에 있음
+//   linked        이메일이 발송 기록에서 리스트 핸들과 연결돼 있음 (브리지)
+//   sheet-email   시트에 그 크리에이터 이메일로 적혀 있음
+//   email-prefix  이메일 앞부분이 리스트 핸들로 시작함 (추정, 예: yaniratipsparati@ ↔ yaniratips)
+//                 짧은 핸들은 오탐이 나므로 INHOUSE_EMAIL_PREFIX_MIN(기본 7)글자 이상만, 0 이면 끔.
+const PREFIX_MIN = (process.env.INHOUSE_EMAIL_PREFIX_MIN != null && process.env.INHOUSE_EMAIL_PREFIX_MIN !== "")
+  ? Number(process.env.INHOUSE_EMAIL_PREFIX_MIN) : 7;
+function squash(s) { return String(s || "").toLowerCase().replace(/[._\-]/g, ""); }
+function finish(c) {
+  if (!c.emails) c.emails = new Map();
+  const sq = new Map();
+  (c.handles || new Set()).forEach(h => { const k = squash(h); if (PREFIX_MIN > 0 && k.length >= PREFIX_MIN && !sq.has(k)) sq.set(k, h); });
+  c.squashed = sq;
+  return c;
+}
+function matchOne(c, r, linkedHandles) {
+  const set = (c && c.handles) || new Set();
+  if (!set.size) return null;
+  const h = H.normHandle(r && (r.handle || r.creatorHandle));
+  if (h && set.has(h)) return { handle: h, via: "handle" };
+  for (const lh of (linkedHandles || [])) {
+    const x = H.normHandle(lh);
+    if (x && set.has(x)) return { handle: x, via: "linked" };
+  }
+  const e = H.normEmail(r && (r.to || r.email));
+  if (!e || e.indexOf("@") < 1 || isCompanyEmail(e)) return null;
+  if (c.emails && c.emails.has(e)) return { handle: c.emails.get(e), via: "sheet-email" };
+  if (PREFIX_MIN > 0 && c.squashed && c.squashed.size) {
+    const local = squash(e.split("@")[0]);
+    for (let L = local.length; L >= PREFIX_MIN; L--) {
+      const hit = c.squashed.get(local.slice(0, L));
+      if (hit) return { handle: hit, via: "email-prefix" };
+    }
+  }
+  return null;
+}
+// 한 번 불러 두고 여러 명을 대조할 때 쓴다 (실패하면 아무도 매칭 안 됨 — fail-open)
+async function matcher() {
+  let c = null;
+  try { c = await module.exports.loadHandles(); } catch (_) { c = null; }
+  return (r, linked) => (c ? matchOne(c, r, linked) : null);
 }
 
 async function handleSet() { return (await loadHandles()).handles || new Set(); }
@@ -123,8 +197,9 @@ async function summary() {
   const handles = [...(c.handles || new Set())].sort();
   return {
     configured: configured(), count: handles.length, handles,
+    emailCount: (c.emails && c.emails.size) || 0,
     tabs: c.tabs, updatedAt: c.at ? new Date(c.at).toISOString() : "", error: c.error || undefined
   };
 }
 
-module.exports = { configured, loadHandles, handleSet, summary, extractHandle, colLetter, SHEET_ID };
+module.exports = { configured, loadHandles, handleSet, summary, extractHandle, colLetter, matchOne, matcher, SHEET_ID };

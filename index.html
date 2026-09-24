@@ -1299,6 +1299,7 @@ function loadPrefill(){
    표시한다. 실제 차단은 서버가 발송 직전에 다시 한다 — 확인과 발송 사이에 다른
    담당자가 먼저 보낼 수 있고, 그 경합은 서버에서만 막을 수 있기 때문. */
 let DUP = {};            // 정규화한 주소 → 이전 발송 기록
+let INH = {};            // 정규화한 주소 → 협업 리스트 매칭 {handle, via} (서버가 이메일까지 대조)
 let dupTimer = null;
 const dupKey = e => {
   const s = String(e||"").trim().toLowerCase();
@@ -1339,8 +1340,11 @@ async function checkDup(){
     if(r.status === 401) return;
     const d = await r.json();
     if(d.error) throw new Error(d.error);
-    DUP = {};
-    (d.results||[]).forEach(x => { if(x.prior) DUP[dupKey(x.to)] = x.prior; });
+    DUP = {}; INH = {};
+    (d.results||[]).forEach(x => {
+      if(x.prior) DUP[dupKey(x.to)] = x.prior;
+      if(x.inhouse) INH[dupKey(x.to)] = x.inhouse;
+    });
     paintDup();
     if(MODE === "bulk") renderBulkTable();
   } catch(e){
@@ -1358,9 +1362,20 @@ function priorText(p){
 function paintDup(){
   const list = recipients();
   const held = list.filter(r => heldPriorOf(r.to));   // 다른 담당자가 보낸 경우만 보류
-  if(!held.length){ $("dupInfo").innerHTML = ""; return; }
+  const inh = list.filter(r => inhouseOf(r));         // 협업 리스트 (핸들·이메일)
+  if(!held.length && !inh.length){ $("dupInfo").innerHTML = ""; return; }
   const forced = $("forceSend").checked;
-  $("dupInfo").innerHTML =
+  const inhHtml = !inh.length ? "" :
+    '<div class="' + (CFG.admin ? "hold" : "err") + '" style="margin-top:10px">' +
+      (CFG.admin
+        ? '🤝 협업 중인 크리에이터 '+inh.length+'명이 포함돼 있습니다 (관리자는 발송 가능).'
+        : '🤝 협업 중인 크리에이터 '+inh.length+'명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).') +
+    '</div>' +
+    '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>협업 리스트</th></tr></thead><tbody>' +
+    inh.slice(0,50).map(r => { const m = inhouseOf(r); return '<tr><td>'+esc(r.to)+'</td><td>'+ihTag(m.handle, m.via)+'</td></tr>'; }).join("") +
+    '</tbody></table></div>';
+  if(!held.length){ $("dupInfo").innerHTML = inhHtml; return; }
+  $("dupInfo").innerHTML = inhHtml +
     '<div class="' + (forced ? "err" : "hold") + '" style="margin-top:10px">' +
       (forced
         ? '⚠️ 다른 담당자가 이미 보낸 <b>'+held.length+'명</b> 에게도 <b>강제 발송</b>합니다.'
@@ -1566,6 +1581,7 @@ function startSend(){
       '<br /><br /><span style="color:#999">제목</span><br />' + esc(built.subject) + '<br /><br />' +
       '<span style="color:#999">받는 사람</span><br />' +
       esc(list.slice(0,3).map(r => r.to).join(", ")) + (list.length > 3 ? ' 외 ' + (list.length-3) + '명' : '') +
+      (function(){ const n = list.filter(r => !String(r.handle||"").trim()).length; return n ? '<br /><br /><span style="color:#8a6d1f">'+noHandleWarn(n)+'</span>' : ''; })() +
       '<br /><br /><span style="color:#8a6d1f">중복 확인은 발송 시각에 다시 합니다 — 그 사이 다른 담당자가 먼저 보내면 그 건은 보류됩니다.</span>';
     $("confirmModal").style.display = "flex";
     confirmAction = () => { closeConfirm(); doSchedule(list); };
@@ -1577,12 +1593,14 @@ function startSend(){
   const held = forced ? [] : list.filter(r => heldPriorOf(r.to));   // 다른 담당자 것만 보류
   const going = list.length - held.length;
   // 인하우스(협업 중) 핸들 — 관리자가 아니면 서버가 보류한다. 미리 알려 준다.
-  const inh = CFG.admin ? [] : list.filter(r => isInhouseHandle(r.handle));
+  const inh = CFG.admin ? [] : list.filter(r => inhouseOf(r));
+  const noH = list.filter(r => !String(r.handle||"").trim()).length;   // 핸들 없이 보내는 인원
 
   $("confirmBody").innerHTML =
     '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
     (held.length ? ' <span style="color:#a8801f">(다른 담당자가 보낸 '+held.length+'명 보류)</span>' : '') +
     (inh.length ? '<br /><span style="color:#a23b2e">🤝 협업 중인 크리에이터 '+inh.length+'명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).</span>' : '') +
+    (noH ? '<br /><span style="color:#8a6d1f">'+noHandleWarn(noH)+'</span>' : '') +
     (forced && list.some(r => heldPriorOf(r.to))
       ? '<br /><span style="color:#a23b2e">⚠️ 다른 담당자가 이미 보낸 사람에게도 강제 발송합니다.</span>' : '') +
     '<br /><br />' +
@@ -1683,7 +1701,7 @@ function paintResults(results, total, final){
         ? '보류된 수신자 — 그래도 보내려면 [강제 발송] 을 켜고 다시 누르세요.'
         : '이미 발송된 주소라 보류되었습니다. 중복 발송은 관리자만 할 수 있고, 이 시도는 관리자 페이지에 남습니다.') + '</div>' +
       '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
-      held.map(b => '<tr><td>'+esc(b.to)+'</td><td>'+esc(priorText(b.prior) || b.error || "")+'</td></tr>').join("") +
+      held.map(b => '<tr><td>'+esc(b.to)+'</td><td>'+(b.inhouse ? ihTag(b.inhouseHandle, b.inhouseVia) : esc(priorText(b.prior) || b.error || ""))+'</td></tr>').join("") +
       '</tbody></table></div>';
   }
   $("sendResult").innerHTML = h;
@@ -1721,6 +1739,7 @@ function setView(v){
 /* ── 인하우스 협업 리스트 ── */
 let INHOUSE_DATA = null;   // { handles:[], count, updatedAt, error }
 let INHOUSE_SET = null;    // 발송 화면 사전 경고용 Set
+let IH_SEARCH_SEQ = 0;     // 협업 리스트 검색 요청 순번 (늦게 온 옛 응답 무시)
 
 async function loadInhouse(force){
   const box = $("inhouseResult"); const meta = $("inhouseMeta");
@@ -1766,31 +1785,68 @@ function paintInhouse(){
     box.innerHTML = h; return;
   }
 
-  // 여러 개 검사 — 각 입력이 협업 리스트(핸들 기준)에 있는지
+  // 여러 개 검사 — 핸들·이메일 모두 서버에서 대조한다 (시트 이메일 · 발송 기록 연결 · 주소 추정)
+  const seq = ++IH_SEARCH_SEQ;
+  box.innerHTML = h + '<div class="muted">검사 중…</div>';
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const hasEmail = terms.some(t => emailRe.test(t));
-  const rows = terms.map(t => {
-    const hdl = String(t).toLowerCase().replace(/^@+/,"").trim();
-    return { q:t, isEmail: emailRe.test(t), inhouse: !emailRe.test(t) && isInhouseHandle(hdl) };
+  const draw = rows => {
+    if(seq !== IH_SEARCH_SEQ) return;   // 더 최근 검색이 있으면 버린다
+    const hit = rows.filter(r => r.match).length;
+    let o = h + '<div class="'+(hit?'hold':'ok')+'">검사 <b>'+rows.length+'개</b> · 🤝 협업 중 <b>'+hit+'</b> · ✅ 없음 <b>'+(rows.length-hit)+'</b></div>';
+    if(rows.some(r => r.isEmail)) o += '<div class="muted" style="margin-top:6px">이메일은 협업 시트의 이메일 · 발송 기록의 이메일↔핸들 연결 · 이메일 주소(핸들로 시작)로 대조합니다.</div>';
+    o += '<div class="scroll" style="margin-top:10px;max-height:420px"><table class="rcp"><thead><tr><th>입력</th><th>상태</th></tr></thead><tbody>' +
+      rows.map(r => '<tr'+(r.match?' style="background:#fffaf0"':'')+'><td><b>'+esc(r.q)+'</b>' +
+        ((r.linkedHandles||[]).length ? '<div class="muted">🔗 '+esc(r.linkedHandles.map(x => "@"+x).join(", "))+'</div>' : '') + '</td>' +
+        '<td>'+(r.match ? ihTag(r.match.handle, r.match.via) : '<span class="rowok">✅ 없음</span>')+'</td></tr>').join("") +
+      '</tbody></table></div>';
+    box.innerHTML = o;
+  };
+  fetch("/api/inhouse", {
+    method:"POST", cache:"no-store",
+    headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+    body: JSON.stringify({ queries: terms })
+  }).then(r => r.json()).then(d2 => {
+    if(d2.error) throw new Error(d2.error);
+    draw(d2.results || []);
+  }).catch(() => {
+    // 서버 대조 실패 — 핸들만이라도 이 화면의 리스트로 대조
+    draw(terms.map(t => {
+      const isEmail = emailRe.test(t);
+      const hh = normHandleClient(t);
+      return { q:t, isEmail, match: (!isEmail && isInhouseHandle(hh)) ? { handle: hh, via:"handle" } : null };
+    }));
   });
-  const hit = rows.filter(r=>r.inhouse).length;
-  h += '<div class="'+(hit?'hold':'ok')+'">검사 <b>'+rows.length+'개</b> · 🤝 협업 중 <b>'+hit+'</b> · ✅ 없음 <b>'+(rows.length-hit)+'</b></div>';
-  if(hasEmail) h += '<div class="muted" style="margin-top:6px">이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.</div>';
-  h += '<div class="scroll" style="margin-top:10px;max-height:420px"><table class="rcp"><thead><tr><th>입력</th><th>상태</th></tr></thead><tbody>' +
-    rows.map(r => '<tr'+(r.inhouse?' style="background:#fffaf0"':'')+'><td><b>'+esc(r.q)+'</b></td>' +
-      '<td>'+(r.inhouse ? '<span class="rowbad">🤝 협업 중</span>'
-            : r.isEmail ? '<span class="muted">이메일 — 대조 안 됨</span>'
-            : '<span class="rowok">✅ 없음</span>')+'</td></tr>').join("") +
-    '</tbody></table></div>';
-  box.innerHTML = h;
 }
 
 /* 발송 화면에서 명단에 인하우스 핸들이 있으면 알려준다 (서버가 최종 차단하지만 미리 보여줌) */
 function markInhouseOnRecipients(){ try { renderPreview(); } catch(e){} }
+function normHandleClient(hdl){
+  let h = String(hdl||"").trim();
+  const m = h.match(/tiktok\.com\/@([A-Za-z0-9._]+)/i);   // URL 로 넣어도 핸들만
+  if(m) h = m[1];
+  return h.toLowerCase().replace(/^@+/,"").replace(/\s+/g,"").replace(/[/?#].*$/,"");
+}
 function isInhouseHandle(hdl){
   if(!INHOUSE_SET || !INHOUSE_SET.size) return false;
-  const h = String(hdl||"").toLowerCase().replace(/^@+/,"").trim();
+  const h = normHandleClient(hdl);
   return h && INHOUSE_SET.has(h);
+}
+/* 수신자 한 명이 협업 리스트에 걸리는지 — 핸들(즉시) 또는 서버 사전확인 결과(이메일 대조) */
+function inhouseOf(r){
+  if(!r) return null;
+  if(isInhouseHandle(r.handle)) return { handle: normHandleClient(r.handle), via: "handle" };
+  return INH[dupKey(r.to)] || null;
+}
+/* 협업 표시 — 어떤 핸들로 · 어떻게 걸렸는지 (핸들 직접 일치가 아니면 사유를 붙인다) */
+const IH_VIA = { linked:"발송 기록 연결", "sheet-email":"시트 이메일", "email-prefix":"이메일 주소로 추정" };
+function ihTag(handle, via){
+  return '<span class="rowbad">🤝 협업 중</span>' +
+    (handle ? ' <span class="mono">@'+esc(handle)+'</span>' : '') +
+    (via && via !== "handle" && IH_VIA[via] ? ' <span class="muted">(<span>'+IH_VIA[via]+'</span>)</span>' : '');
+}
+/* B. 핸들 없이 보내는 인원 경고 — 협업 리스트·핸들 중복을 이메일로만 대조하게 된다 */
+function noHandleWarn(n){
+  return '⚠️ 핸들이 비어 있는 '+n+'명 — 협업 리스트·중복 확인이 이메일로만 됩니다 (핸들을 채우면 더 정확합니다).';
 }
 
 /* ── 중복 검사 (여러 개 한 번에) ──
@@ -1874,9 +1930,10 @@ function renderChecks(){
     '<th>입력</th><th>상태</th><th>담당자</th><th>최근 발송</th><th>회신</th></tr></thead><tbody>' +
     list.slice(0, CAP).map(r =>
       '<tr'+(r.found?' style="background:#fffaf0"':'')+'>' +
-      '<td><b>'+esc(r.query)+'</b>'+(r.found && r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+'</td>' +
+      '<td><b>'+esc(r.query)+'</b>'+(r.found && r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+
+        ((r.linked||[]).length ? '<div class="muted" title="발송 기록에서 이메일↔핸들로 연결된 값">🔗 '+esc(r.linked.map(x => r.kind==="email" ? "@"+x : x).join(", "))+'</div>' : '')+'</td>' +
       '<td>'+(function(){ const parts=[];
-          if(r.inhouse) parts.push('<span class="rowbad">🤝 협업 중</span>');
+          if(r.inhouse) parts.push(ihTag(r.inhouseHandle, r.inhouseVia));
           if(r.sentCount>0) parts.push('<span class="rowbad">⏸ 이미 보냄 '+r.sentCount+'건</span>'+(r.forced?' <span class="holdtag">강제</span>':''));
           if(!parts.length) parts.push('<span class="rowok">✅ 없음</span>');
           return parts.join(' ');

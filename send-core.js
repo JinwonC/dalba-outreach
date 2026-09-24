@@ -119,8 +119,9 @@ async function sendBatch(opts) {
 
   // 인하우스(이미 협업 중) 핸들에는 **관리자만** 보낼 수 있다. 관리자가 아니면 이 집합을 미리
   // 불러 둔다. 시트를 못 읽으면 빈 집합으로 두고 넘어간다(발송이 통째로 막히지 않도록 — fail-open).
-  let inhouseSet = null;
-  if (!isAdminSender) { try { inhouseSet = await IH.handleSet(); } catch (_) { inhouseSet = null; } }
+  // 핸들뿐 아니라 이메일로도 대조한다 — 시트에 적힌 이메일, 발송 기록의 이메일↔핸들 연결,
+  // 이메일 앞부분이 협업 핸들로 시작하는 경우(추정)까지. 핸들 칸을 비우고 보내도 걸리게.
+  const inhouseMatch = isAdminSender ? null : await IH.matcher();
 
   const inlineImg = parseDataImage(campaign.productImageData);
   const ccList = T.parseList(campaign.cc);
@@ -174,18 +175,22 @@ async function sendBatch(opts) {
     const errs = T.validate(d);
     if (errs.length) { results.push({ to, ok: false, error: errs.join(" / ") }); continue; }
 
-    // ─── 인하우스(협업 중) 크리에이터 차단 (핸들 기준, 관리자 제외) ──
+    // 이메일↔핸들 연결(브리지) — 핸들을 비워 보냈어도 예전 기록으로 핸들을 찾는다
+    let linked = { handles: [], emails: [] };
+    try { linked = (await H.bridge([d]))[0] || linked; } catch (_) {}
+
+    // ─── 인하우스(협업 중) 크리에이터 차단 (핸들·이메일 기준, 관리자 제외) ──
     // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자만 예외.
-    if (inhouseSet && inhouseSet.size) {
-      const hh = H.normHandle(d.handle);
-      if (hh && inhouseSet.has(hh)) {
-        results.push({
-          to, ok: false, held: true, inhouse: true,
-          error: "이미 협업 중인 크리에이터입니다 (인하우스 리스트) — 관리자만 보낼 수 있습니다"
-        });
-        continue;
-      }
+    const ih = inhouseMatch ? inhouseMatch(d, linked.handles) : null;
+    if (ih) {
+      results.push({
+        to, ok: false, held: true, inhouse: true, inhouseHandle: ih.handle, inhouseVia: ih.via,
+        error: "이미 협업 중인 크리에이터입니다 (인하우스 리스트) — 관리자만 보낼 수 있습니다"
+      });
+      continue;
     }
+    // 기록에 남길 핸들 — 입력값(URL 이면 핸들만), 없으면 연결된 핸들
+    const logHandle = H.normHandle(d.handle) || linked.handles[0] || "";
 
     // ─── 중복 발송 차단 ──────────────────────────────────────────
     // 화면에서 미리 확인했더라도 여기서 다시 잡는다 — 경합은 여기서만 막을 수 있다.
@@ -197,7 +202,7 @@ async function sendBatch(opts) {
       if (!rv.ok) {
         results.push({ to, ok: false, held: true, prior: rv.prior || null, error: heldReason(rv.prior) });
         H.logBlocked({
-          to, handle: d.handle || "", name: d.creatorName || "",
+          to, handle: logHandle, name: d.creatorName || "",
           at: new Date().toISOString(),
           by: account.email, byName: account.name,
           campaign: d.campaignTitle || "",
@@ -244,7 +249,7 @@ async function sendBatch(opts) {
       });
       results.push({ to, ok: true, messageId: info.messageId, subject: built.subject });
       H.log({
-        to, handle: d.handle || "", name: d.creatorName || "",
+        to, handle: logHandle, name: d.creatorName || "",
         at: new Date().toISOString(), by: account.email, byName: account.name,
         campaign: d.campaignTitle || "", forced: force || undefined
       });

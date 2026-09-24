@@ -100,7 +100,17 @@ function normEmail(e) {
   return local + "@" + dom;
 }
 
+// 핸들은 '@foo', 'foo', 'https://www.tiktok.com/@foo?lang=en' 처럼 여러 모양으로 들어온다.
+// URL 로 들어오면 @ 뒤 핸들만 떼어 낸다 — 안 그러면 같은 사람이 URL 키와 핸들 키로 갈라져
+// 중복·협업 리스트 대조에서 빠진다.
 function normHandle(h) {
+  let s = String(h == null ? "" : h).trim();
+  const m = s.match(/tiktok\.com\/@([A-Za-z0-9._]+)/i);
+  if (m) s = m[1];
+  return s.toLowerCase().replace(/^@+/, "").replace(/\s+/g, "").replace(/[/?#].*$/, "");
+}
+// 예전 정규화(URL 을 풀지 않음) — 재색인 때 키가 달라진 기록을 찾는 데만 쓴다
+function legacyNormHandle(h) {
   return String(h == null ? "" : h).trim().toLowerCase().replace(/^@+/, "").replace(/\s+/g, "");
 }
 
@@ -129,6 +139,57 @@ function keysOf(r) {
   return ks;
 }
 
+// ─── 이메일 ↔ 핸들 연결 (브리지) ─────────────────────────────────
+// 같은 크리에이터가 어떤 발송엔 이메일만, 어떤 발송엔 핸들까지 적혀 기록된다.
+// 한 번이라도 이메일+핸들이 함께 기록되면 그 짝을 남겨 두고, 이후 한쪽만 있어도
+// 다른 쪽 키까지 함께 대조한다 (핸들 없이 보낸 발송 · 보낸편지함에서 가져온 발송 보완).
+//   outreach:bridge:e2h        HASH  이메일 → 핸들
+//   outreach:bridge:h:<핸들>   SET   그 핸들로 기록된 이메일들
+const BRIDGE_E2H = "outreach:bridge:e2h";
+const bridgeHKey = h => "outreach:bridge:h:" + h;
+const BRIDGE_VER_KEY = "outreach:bridge:ver";
+const BRIDGE_PROGRESS_KEY = "outreach:bridge:progress";
+const BRIDGE_VER = "2";
+
+function linkCmds(email, handle) {
+  const e = normEmail(email), h = normHandle(handle);
+  if (!e || !h || e.indexOf("@") < 1) return [];
+  return [["HSET", BRIDGE_E2H, e, h], ["SADD", bridgeHKey(h), e]];
+}
+
+// 수신자 목록 → 각자의 연결된 핸들·이메일 (자기 자신은 뺀다). 한 번의 파이프라인으로 읽는다.
+async function bridge(list) {
+  const items = Array.isArray(list) ? list : [];
+  const empty = () => ({ handles: [], emails: [] });
+  if (!enabled() || !items.length) return items.map(empty);
+  const cmds = [], spans = [];
+  items.forEach(r => {
+    const e = normEmail(r && (r.to || r.email)), h = normHandle(r && (r.handle || r.creatorHandle));
+    const s = { e, h, ei: -1, hi: -1 };
+    if (e) { s.ei = cmds.length; cmds.push(["HGET", BRIDGE_E2H, e]); }
+    if (h) { s.hi = cmds.length; cmds.push(["SMEMBERS", bridgeHKey(h)]); }
+    spans.push(s);
+  });
+  let out = [];
+  try { out = cmds.length ? await pipeline(cmds) : []; } catch (_) { return items.map(empty); }
+  return spans.map(s => {
+    const lh = s.ei >= 0 ? normHandle(out[s.ei]) : "";
+    const le = s.hi >= 0 && Array.isArray(out[s.hi]) ? out[s.hi].map(normEmail) : [];
+    return {
+      handles: lh && lh !== s.h ? [lh] : [],
+      emails: [...new Set(le)].filter(x => x && x !== s.e)
+    };
+  });
+}
+
+// 연결로 찾은 추가 키 (자기 키는 제외)
+function aliasKeysOf(br) {
+  const ks = [];
+  ((br && br.emails) || []).forEach(e => ks.push(emailKey(e)));
+  ((br && br.handles) || []).forEach(h => ks.push(handleKey(h)));
+  return ks;
+}
+
 function parseRec(s) {
   if (!s) return null;
   if (typeof s === "object") return s;
@@ -141,10 +202,12 @@ async function lookup(list) {
   const items = Array.isArray(list) ? list : [];
   if (!enabled()) return items.map(() => null);
 
-  // 수신자마다 키 개수가 달라서 인덱스가 밀리지 않도록 위치를 기록해 둔다
+  // 수신자마다 키 개수가 달라서 인덱스가 밀리지 않도록 위치를 기록해 둔다.
+  // 자기 키(이메일·핸들)를 먼저, 연결된 키(브리지)를 뒤에 — 직접 일치가 우선이다.
+  const links = await bridge(items);
   const cmds = [];
-  const spans = items.map(r => {
-    const ks = keysOf(r);
+  const spans = items.map((r, idx) => {
+    const ks = keysOf(r).concat(aliasKeysOf(links[idx]));
     const at = cmds.length;
     ks.forEach(k => cmds.push(["GET", k]));
     return { at, n: ks.length };
@@ -198,6 +261,25 @@ async function reserve(r, meta, force) {
   let resent = false;                 // 본인 자리 위에 다시 보낸 경우
   let approved = false;               // 관리자 승인으로 통과한 경우
   let approvalChecked = false;        // 승인 조회는 막힐 때 한 번만 한다
+
+  // ── 연결된 키(브리지) 먼저 확인 — **읽기만** 한다 ──
+  // 예: 예전에 이메일 A 로만 보냈던 크리에이터(핸들 X 와 연결됨)에게 지금 이메일 B + 핸들 X 로
+  // 보내면, 자기 키(B·X)에는 기록이 없어도 연결된 A 키에 다른 담당자 기록이 있다 → 막는다.
+  // 연결 키에는 자리를 잡지 않는다(보내는 주소가 아니므로) — 실패 시 반납할 것도 없다.
+  const aliasKeys = aliasKeysOf((await bridge([r]))[0]).filter(k => keys.indexOf(k) < 0);
+  if (aliasKeys.length) {
+    const vals = await pipeline(aliasKeys.map(k => ["GET", k]));
+    for (let i = 0; i < aliasKeys.length; i++) {
+      const prior = parseRec(vals[i]);
+      if (!prior || isIgnoredSender(prior.by)) continue;
+      if (me && normEmail(prior.by) === me) continue;       // 본인 기록이면 재발송 허용
+      if (me) {
+        if (!approvalChecked) { approved = await isApproved(r, me); approvalChecked = true; }
+        if (approved) continue;
+      }
+      return { ok: false, prior: Object.assign({}, prior, { linked: true }) };
+    }
+  }
 
   for (let i = 0; i < keys.length; i++) {
     const got = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
@@ -303,8 +385,62 @@ async function log(rec) {
     await pipeline([
       ["LPUSH", LOG_KEY, JSON.stringify(rec)],
       ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]
-    ]);
+    ].concat(linkCmds(rec && rec.to, rec && rec.handle)));   // 이메일+핸들이 함께 있으면 연결을 남긴다
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
+}
+
+// ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
+// 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
+// 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
+// 올바른 핸들 키로 다시 건다. 예산 안에서 나눠 처리하고, 다 끝나면 버전 표시를 남긴다.
+async function bridgeReady() {
+  if (!enabled()) return true;
+  try { return (await cmd(["GET", BRIDGE_VER_KEY])) === BRIDGE_VER; } catch (_) { return true; }
+}
+
+async function rebuildBridge(opts) {
+  if (!enabled()) return { skipped: true };
+  const o = opts || {};
+  const deadline = Date.now() + Math.max(3000, Number(o.budgetMs) || 15000);
+  const all = await recent(LOG_MAX);
+
+  // 짝과 재색인 대상을 중복 없이 모은다. 정렬해 두면 실행이 나뉘어도 순서가 안정적이다.
+  const pairs = new Map();      // "e|h" → [e, h]
+  const rekeys = new Map();     // handleKey → rec (가장 최근 발송 기준)
+  for (const r of all) {
+    if (!r) continue;
+    const e = normEmail(r.to), h = normHandle(r.handle);
+    if (e && h && e.indexOf("@") > 0) pairs.set(e + "|" + h, [e, h]);
+    if (h && legacyNormHandle(r.handle) !== h) {
+      const k = handleKey(h), cur = rekeys.get(k);
+      if (!cur || String(r.at || "") > String(cur.at || "")) rekeys.set(k, r);
+    }
+  }
+  const jobs = [];
+  [...pairs.keys()].sort().forEach(k => { const [e, h] = pairs.get(k); jobs.push(...linkCmds(e, h)); });
+  [...rekeys.keys()].sort().forEach(k => {
+    const r = rekeys.get(k), ttl = remainingTtl(r.at);
+    if (ttl > 0 && !isIgnoredSender(r.by)) {
+      const val = JSON.stringify({ to: r.to || "", handle: normHandle(r.handle), name: r.name || undefined,
+        at: r.at || "", by: r.by || "", byName: r.byName || "", campaign: r.campaign || "" });
+      jobs.push(["SET", k, val, "NX", "EX", String(ttl)]);
+    }
+  });
+
+  let start = 0;
+  try { start = Number(await cmd(["GET", BRIDGE_PROGRESS_KEY])) || 0; } catch (_) {}
+  if (start > jobs.length) start = 0;
+  let i = start;
+  const CHUNK = 500;
+  while (i < jobs.length && Date.now() < deadline) {
+    await pipeline(jobs.slice(i, i + CHUNK));
+    i = Math.min(jobs.length, i + CHUNK);
+  }
+  const done = i >= jobs.length;
+  await pipeline(done
+    ? [["SET", BRIDGE_VER_KEY, BRIDGE_VER], ["DEL", BRIDGE_PROGRESS_KEY]]
+    : [["SET", BRIDGE_PROGRESS_KEY, String(i)]]);
+  return { done, pairs: pairs.size, rekeyed: rekeys.size, processed: i - start, total: jobs.length };
 }
 
 // ─── 지난 발송 가져오기 (보낸편지함 → 이력) ─────────────────────
@@ -490,5 +626,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender,
+  bridge, rebuildBridge, bridgeReady,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

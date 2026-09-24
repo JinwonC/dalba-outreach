@@ -83,6 +83,13 @@
       "🔎 중복 검사": "🔎 Duplicate check",
       "🤝 협업 리스트": "🤝 Collab list",
       "🤝 협업 중": "🤝 Collaborating",
+      "발송 기록 연결": "linked via send history",
+      "시트 이메일": "sheet email",
+      "이메일 주소로 추정": "guessed from email address",
+      "협업 리스트": "Collab list",
+      "검사 중…": "Checking…",
+      "이메일은 협업 시트의 이메일 · 발송 기록의 이메일↔핸들 연결 · 이메일 주소(핸들로 시작)로 대조합니다.":
+        "Emails are matched against emails in the collab sheet, email↔handle links from send history, and email addresses that start with a collab handle.",
       "이메일 — 대조 안 됨": "email — not checked",
       "이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.":
         "Emails aren't matched against the collab list (handles) — use 🔎 Duplicate check for send history too.",
@@ -568,6 +575,13 @@
       "🔎 중복 검사": "🔎 Kiểm tra trùng",
       "🤝 협업 리스트": "🤝 DS hợp tác",
       "🤝 협업 중": "🤝 Đang hợp tác",
+      "발송 기록 연결": "liên kết qua lịch sử gửi",
+      "시트 이메일": "email trong sheet",
+      "이메일 주소로 추정": "suy ra từ địa chỉ email",
+      "협업 리스트": "Danh sách hợp tác",
+      "검사 중…": "Đang kiểm tra…",
+      "이메일은 협업 시트의 이메일 · 발송 기록의 이메일↔핸들 연결 · 이메일 주소(핸들로 시작)로 대조합니다.":
+        "Email được đối chiếu với email trong sheet hợp tác, liên kết email↔handle từ lịch sử gửi, và địa chỉ email bắt đầu bằng handle hợp tác.",
       "이메일 — 대조 안 됨": "email — không đối chiếu",
       "이메일은 협업 리스트(핸들)와 대조되지 않습니다 — 발송 이력까지 보려면 🔎 중복 검사를 쓰세요.":
         "Email không đối chiếu với danh sách hợp tác (handle) — dùng 🔎 Kiểm tra trùng để xem cả lịch sử gửi.",
@@ -1049,6 +1063,10 @@
       "{n}건 승인 · {n}건 건너뜀": "{n} approved · {n} skipped",
       "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
         "🤝 {n} collaborating creators will be held (in-house list · admins only).",
+      "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
+        "🤝 {n} collab creators included (admins can send).",
+      "⚠️ 핸들이 비어 있는 {n}명 — 협업 리스트·중복 확인이 이메일로만 됩니다 (핸들을 채우면 더 정확합니다).":
+        "⚠️ {n} without a handle — collab-list and duplicate checks will use email only (fill in handles for accuracy).",
       "{n}개 입력됨": "{n} entered",
       "전체 {n}": "All {n}",
       "이미 보냄 {n}": "Already sent {n}",
@@ -1119,6 +1137,10 @@
       "{n}건 승인 · {n}건 건너뜀": "Đã duyệt {n} · bỏ qua {n}",
       "🤝 협업 중인 크리에이터 {n}명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).":
         "🤝 {n} creator đang hợp tác sẽ bị giữ (danh sách in-house · chỉ quản trị).",
+      "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
+        "🤝 Có {n} creator đang hợp tác (quản trị vẫn gửi được).",
+      "⚠️ 핸들이 비어 있는 {n}명 — 협업 리스트·중복 확인이 이메일로만 됩니다 (핸들을 채우면 더 정확합니다).":
+        "⚠️ {n} người chưa có handle — kiểm tra hợp tác và trùng lặp chỉ dùng email (điền handle để chính xác hơn).",
       "{n}개 입력됨": "đã nhập {n}",
       "전체 {n}": "Tất cả {n}",
       "이미 보냄 {n}": "Đã gửi {n}",

@@ -28,69 +28,75 @@ function readBody(req) {
   return b;
 }
 
-// 발송/회신 로그를 한 번 읽어 이메일·핸들 색인을 만든다. 각 키에 대해 집계만 남긴다
-// (건수·담당자·마지막 발송·회신수) — 원본 배열을 다 들고 있지 않아 큰 입력에도 가볍다.
+// 발송/회신 로그를 한 번 읽어 이메일·핸들 색인을 만든다. 각 키에는 발송 기록 번호만 담는다
+// (이메일·핸들 양쪽으로 잡힌 같은 발송을 두 번 세지 않도록 번호로 합친다).
+// 함께 이메일↔핸들 연결도 만든다 — 한 번이라도 이메일+핸들이 같이 기록된 크리에이터는,
+// 이후 이메일로만(또는 핸들로만) 기록된 발송까지 한 사람으로 묶어 찾는다.
 async function buildIndex() {
   const [sentAll, replyAll] = await Promise.all([
     H.recent(H.LOG_MAX),
     H.recentReplies(H.REPLY_MAX)
   ]);
-
-  const sEmail = new Map(), sHandle = new Map();
+  // 제외 발신자의 발송은 중복 계산에 넣지 않는다 (DEDUP_IGNORE_SENDERS)
+  const sent = (sentAll || []).filter(r => r && !H.isIgnoredSender(r.by));
+  const sEmail = new Map(), sHandle = new Map(), e2h = new Map(), h2e = new Map();
+  const push = (map, k, v) => { if (!k) return; let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(v); };
+  const link = (map, k, v) => { let a = map.get(k); if (!a) { a = new Set(); map.set(k, a); } a.add(v); };
+  sent.forEach((r, i) => {
+    const e = H.normEmail(r.to), h = H.normHandle(r.handle);
+    push(sEmail, e, i); push(sHandle, h, i);
+    if (e && h) { link(e2h, e, h); link(h2e, h, e); }
+  });
   const rEmail = new Map(), rHandle = new Map();
-
-  const agg = (map, key) => {
-    let a = map.get(key);
-    if (!a) { a = { count: 0, senders: new Set(), lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" }; map.set(key, a); }
-    return a;
-  };
-
-  (sentAll || []).forEach(r => {
-    // 제외 발신자(예: minju)의 발송은 중복 계산에 넣지 않는다 — 그 사람만 보낸 크리에이터는
-    // '아직 안 보낸 것'으로 취급돼 발송이 허용된다.
-    if (H.isIgnoredSender(r.by)) return;
-    const rec = { by: r.by || "", byName: r.byName || r.by || "", at: r.at || "", campaign: r.campaign || "", forced: Boolean(r.forced), name: r.name || "", handle: r.handle || "" };
-    const put = (map, key) => {
-      if (!key) return;
-      const a = agg(map, key);
-      a.count++;
-      if (rec.byName) a.senders.add(rec.byName);
-      if (String(rec.at) > String(a.lastAt)) { a.lastAt = rec.at; a.lastBy = rec.byName; a.lastCampaign = rec.campaign; a.forced = rec.forced; }
-      if (!a.name && rec.name) a.name = rec.name;
-      if (!a.handle && rec.handle) a.handle = rec.handle;
-    };
-    put(sEmail, H.normEmail(r.to));
-    put(sHandle, H.normHandle(r.handle));
-  });
-
-  const bumpReply = (map, key) => { if (!key) return; map.set(key, (map.get(key) || 0) + 1); };
-  (replyAll || []).forEach(r => {
-    bumpReply(rEmail, H.normEmail(r.from));
-    bumpReply(rHandle, H.normHandle(r.handle));
-  });
-
-  return { sEmail, sHandle, rEmail, rHandle };
+  const bump = (map, key) => { if (!key) return; map.set(key, (map.get(key) || 0) + 1); };
+  (replyAll || []).forEach(r => { bump(rEmail, H.normEmail(r.from)); bump(rHandle, H.normHandle(r.handle)); });
+  return { sent, sEmail, sHandle, e2h, h2e, rEmail, rHandle };
 }
 
-// 한 입력(핸들 또는 이메일)에 대한 조회 결과.
-// inhouseSet 이 주어지면, 핸들이 인하우스 협업 리스트에 있는지도 함께 표시한다(발송 로그와 별개).
-function summarizeOne(q, idx, inhouseSet) {
+// 한 입력(핸들 또는 이메일)에 대한 조회 결과. match 가 있으면 협업 리스트도 함께 대조한다
+// (핸들 · 연결된 핸들 · 시트 이메일 · 이메일 주소 추정).
+function summarizeOne(q, idx, match) {
   const isEmail = EMAIL_RE.test(q);
-  const key = isEmail ? H.normEmail(q) : H.normHandle(q);
-  const a = (isEmail ? idx.sEmail : idx.sHandle).get(key);
-  const replyCount = (isEmail ? idx.rEmail : idx.rHandle).get(key) || 0;
-  // 인하우스는 핸들 기준이다. 이메일로 검사해도 핸들(a.handle)이 있으면 그걸로 대조한다.
-  const hh = isEmail ? H.normHandle(a && a.handle) : key;
-  const inhouse = Boolean(inhouseSet && hh && inhouseSet.has(hh));
-  if (!a) {
-    return { query: q, kind: isEmail ? "email" : "handle", found: inhouse, inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, replyCount, name: "", handle: "" };
-  }
-  return {
-    query: q, kind: isEmail ? "email" : "handle", found: true, inhouse,
-    sentCount: a.count, senders: [...a.senders],
-    lastAt: a.lastAt, lastBy: a.lastBy, lastCampaign: a.lastCampaign, forced: a.forced,
-    replyCount, name: a.name, handle: a.handle
+  const emails = new Set(), handles = new Set();
+  if (isEmail) { const e = H.normEmail(q); emails.add(e); (idx.e2h.get(e) || []).forEach(h => handles.add(h)); }
+  else { const h = H.normHandle(q); if (h) handles.add(h); (idx.h2e.get(h) || []).forEach(e => emails.add(e)); }
+
+  const ids = new Set();
+  emails.forEach(e => (idx.sEmail.get(e) || []).forEach(i => ids.add(i)));
+  handles.forEach(h => (idx.sHandle.get(h) || []).forEach(i => ids.add(i)));
+
+  let replyCount = 0;
+  emails.forEach(e => { replyCount += idx.rEmail.get(e) || 0; });
+  handles.forEach(h => { replyCount += idx.rHandle.get(h) || 0; });
+
+  const a = { count: 0, senders: new Set(), lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" };
+  ids.forEach(i => {
+    const r = idx.sent[i];
+    a.count++;
+    const who = r.byName || r.by || "";
+    if (who) a.senders.add(who);
+    if (String(r.at || "") > String(a.lastAt)) { a.lastAt = r.at || ""; a.lastBy = who; a.lastCampaign = r.campaign || ""; a.forced = Boolean(r.forced); }
+    if (!a.name && r.name) a.name = r.name;
+    if (!a.handle && r.handle) a.handle = H.normHandle(r.handle);
+  });
+
+  const m = match ? match(isEmail ? { to: q, handle: a.handle } : { handle: q }, [...handles]) : null;
+  const inhouse = Boolean(m);
+  // 연결로 찾은 쪽 (예: 이메일로 검사했는데 그 이메일과 연결된 핸들)
+  const linked = isEmail ? [...handles] : [...emails];
+  const base = {
+    query: q, kind: isEmail ? "email" : "handle", inhouse,
+    inhouseHandle: m ? m.handle : "", inhouseVia: m ? m.via : "",
+    linked, replyCount
   };
+  if (!a.count) {
+    return Object.assign(base, { found: inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" });
+  }
+  return Object.assign(base, {
+    found: true, sentCount: a.count, senders: [...a.senders],
+    lastAt: a.lastAt, lastBy: a.lastBy, lastCampaign: a.lastCampaign, forced: a.forced,
+    name: a.name, handle: a.handle
+  });
 }
 
 module.exports = async (req, res) => {
@@ -113,9 +119,8 @@ module.exports = async (req, res) => {
       return;
     }
 
-    // 인하우스 협업 리스트도 함께 대조한다 (핸들 기준). 못 읽어도 검사는 계속(빈 집합).
-    let inhouseSet = new Set();
-    try { inhouseSet = await IH.handleSet(); } catch (_) { inhouseSet = new Set(); }
+    // 인하우스 협업 리스트도 함께 대조한다 (핸들·이메일). 못 읽어도 검사는 계속(아무도 매칭 안 됨).
+    const match = await IH.matcher();
 
     // ─── POST: 여러 개 한 번에 ───────────────────────────────────
     if (req.method === "POST") {
@@ -136,7 +141,7 @@ module.exports = async (req, res) => {
       if (!queries.length) { res.status(400).json({ error: "검사할 핸들 또는 이메일을 입력하세요" }); return; }
 
       const idx = await buildIndex();
-      const results = queries.map(q => summarizeOne(q, idx, inhouseSet));
+      const results = queries.map(q => summarizeOne(q, idx, match));
       const foundCount = results.filter(r => r.found).length;
       res.status(200).json({
         historyEnabled: true,
@@ -156,7 +161,7 @@ module.exports = async (req, res) => {
     if (!q) { res.status(400).json({ error: "핸들 또는 이메일을 입력하세요" }); return; }
 
     const idx = await buildIndex();
-    const one = summarizeOne(q, idx, inhouseSet);
+    const one = summarizeOne(q, idx, match);
     // 단건은 기존 화면과 호환되게 sent/replies 상세도 흉내 내지 않고 요약 형태로 준다
     res.status(200).json(Object.assign({ historyEnabled: true, found: one.found, sentCount: one.sentCount, replyCount: one.replyCount, senders: one.senders }, { results: [one] }));
   } catch (e) {

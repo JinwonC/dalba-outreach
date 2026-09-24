@@ -479,9 +479,14 @@ module.exports = async (req, res) => {
     if (view === "blocked") {
       // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
       const appr = await H.approvalsIndex();
-      // 인하우스 협업 크리에이터(핸들 기준) — 중복시도 목록에도 🤝 로 표시한다 (실패해도 화면은 살린다)
-      let ihSet = new Set();
-      try { ihSet = await IH.handleSet(); } catch (_) { ihSet = new Set(); }
+      // 인하우스 협업 크리에이터 — 중복시도 목록에도 🤝 로 표시한다 (실패해도 화면은 살린다).
+      // 핸들뿐 아니라 이메일로도 대조: 발송 기록의 이메일↔핸들 연결 · 시트 이메일 · 주소 추정.
+      const ihMatch = await IH.matcher();
+      const e2h = new Map();
+      for (const s of sentAll) {
+        const e = s && H.normEmail(s.to), h = s && H.normHandle(s.handle);
+        if (e && h) { const a = e2h.get(e) || new Set(); a.add(h); e2h.set(e, a); }
+      }
       // 그 크리에이터에게 간 **모든 발송**을 이메일·핸들로 모은다 (2번 이상이면 전부 보여주려고).
       const byE = new Map(), byH = new Map();
       for (const s of sentAll) {
@@ -530,13 +535,13 @@ module.exports = async (req, res) => {
         // 원래 발송이 하나도 안 잡혔으면(스냅샷도 없으면) 저장돼 있던 prior 라도 쓴다
         let prior = r.prior;
         if (!origins.length && prior && (prior.byName || prior.by)) origins.push({ by: prior.by || "", byName: prior.byName || prior.by || "", at: prior.at || "", campaign: prior.campaign || "" });
-        const hh = H.normHandle(r.handle);
+        const ih = ihMatch(r, [...(e2h.get(H.normEmail(r.to)) || [])]);
         return Object.assign({}, r, {
           origins,
           replies: repliesOf(r),
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f)),
-          inhouse: Boolean(hh && ihSet.has(hh))
+          inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : ""
         });
       });
       res.status(200).json(Object.assign(base, { rows }));
