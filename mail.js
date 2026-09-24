@@ -226,7 +226,9 @@ async function readFolders(account, opts) {
       } finally { lock.release(); }
     }
   } finally {
-    try { await client.logout(); } catch (_) { try { client.close(); } catch (_) {} }
+    // 로그아웃이 늦어도 기다리지 않는다 (예산 안에 응답하는 게 우선) — 2초 뒤엔 연결을 끊는다
+    try { await Promise.race([client.logout(), new Promise(r => setTimeout(r, 2000))]); } catch (_) {}
+    try { client.close(); } catch (_) {}
   }
   return { folders: out };
 }

@@ -36,6 +36,10 @@ function readBody(req) {
 }
 
 module.exports = async (req, res) => {
+  // 함수 제한시간(60초) 안에 반드시 응답한다 — 예산은 **요청 시작** 기준으로 잡는다.
+  // (저장소 읽기 뒤에 메일함 예산을 따로 주면 둘이 합쳐 60초를 넘겨 JSON 대신 오류 페이지가 간다)
+  const t0 = Date.now();
+  const left = () => t0 + 52e3 - Date.now();
   try {
     res.setHeader("Cache-Control", "no-store");
 
@@ -54,15 +58,18 @@ module.exports = async (req, res) => {
       const acc = A.findByEmail(wanted);
       if (!acc) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + wanted }); return; }
       const since = String(req.query.since || S.SINCE_DEFAULT);
+      // 저장소 읽기와 메일함 훑기를 **동시에** — 순서대로 하면 합쳐서 제한시간을 넘긴다
+      const mailP = M.readFolders(acc, { since, limit: 5000, budgetMs: Math.max(8000, left() - 12000) })
+        .then(m => ({ m }), e => ({ e }));
       const [contacted, sentTo, replyAll, sentToDone, boxCur] = await Promise.all([
         S.contactedMap(), H.sentToSet(acc.email), H.recentReplies(H.REPLY_MAX),
         H.readRaw("outreach:sentto:done:" + H.normEmail(acc.email)).catch(() => null),
         H.readRaw("outreach:cursor:box2:" + H.normEmail(acc.email)).catch(() => null)
       ]);
       const recorded = new Set(replyAll.filter(r => H.normEmail(r.inbox || r.by) === H.normEmail(acc.email)).map(r => H.normEmail(r.from)));
-      let mail;
-      try { mail = await M.readFolders(acc, { since, limit: 5000, budgetMs: 40000 }); }
-      catch (e) { res.status(502).json({ error: "메일함을 읽지 못했습니다: " + String((e && e.message) || e) }); return; }
+      const got = await mailP;
+      if (got.e) { res.status(502).json({ error: "메일함을 읽지 못했습니다: " + String((got.e && got.e.message) || got.e) }); return; }
+      const mail = got.m;
       const people = new Map();
       let scanned = 0;
       for (const f of mail.folders) for (const m of f.rows) {
@@ -127,14 +134,19 @@ module.exports = async (req, res) => {
 
     // 함수 제한시간(60초) 안에 못 끝내면 거기까지만 하고 남은 사람을 알려준다.
     // 조용히 자르면 "전원 수집했다" 고 오해한다.
-    const deadline = Date.now() + 45e3;
+    const deadline = t0 + 50e3;   // 요청 시작 기준 (기록 읽기에 쓴 시간도 포함)
     const results = [];
     const skipped = [];
     for (const acc of targets) {
       if (Date.now() > deadline) { skipped.push(acc.email); continue; }
       try {
-        const st = await S.backfillSentTo(acc, 12000);   // 보낸 적 있는 주소부터 따라잡기
-        results.push(Object.assign(await S.collectReplies(acc, contacted, { since, limit, budgetMs: Math.max(5000, deadline - Date.now()) }), { sentTo: st }));
+        // 자동 수집과 **같은 경로**(보낸편지함 → 보낸 적 있는 주소 → 폴더별 커서로 회신)를 쓴다.
+        // 커서 덕분에 메일이 많아 한 번에 못 끝나도, 다시 누르면 이어서 처리된다.
+        const r = await S.syncAccount(acc, contacted, { until: deadline });
+        results.push({
+          user: acc.email, found: r.replies.found || 0, duplicate: r.replies.duplicate || 0,
+          waiting: Boolean(r.replies.waiting), notContacted: r.replies.notContacted || 0, folders: r.folders
+        });
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
       }
@@ -147,7 +159,8 @@ module.exports = async (req, res) => {
       totals: {
         found: results.reduce((s, r) => s + (r.found || 0), 0),
         duplicate: results.reduce((s, r) => s + (r.duplicate || 0), 0),
-        failed: results.filter(r => r.error).length
+        failed: results.filter(r => r.error).length,
+        waiting: results.filter(r => r.waiting).length   // 보낸편지함을 아직 읽는 중 — 다시 누르면 이어서
       },
       skipped: skipped.length ? skipped : undefined
     });
