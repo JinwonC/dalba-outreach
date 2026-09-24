@@ -544,8 +544,10 @@ module.exports = async (req, res) => {
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
     if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
     if (view === "repliers") {
-      // 관리자 포함 전원 — 담당자(by) 선택과 무관하게 회신 전체를 크리에이터 단위로 집계한다.
-      const kept = replyAll.filter(r => withinDays(r, days) && matches(r, needle));
+      // 담당자(by) 를 고르면 **그 담당자가 발송해서 회신 온 크리에이터만** 보여준다
+      //   = 그 담당자 메일함(inbox)에 도착한 회신 (replyStaff). 안 고르면 관리자 포함 전원.
+      const kept = replyAll.filter(r => withinDays(r, days) && matches(r, needle) &&
+        (!by || replyStaff(r) === by));
       res.status(200).json(Object.assign(base, { rows: repliers(kept, sentAll) }));
       return;
     }
