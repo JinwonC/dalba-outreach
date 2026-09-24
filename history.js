@@ -437,6 +437,20 @@ async function bookMerge(dir, acct, agg) {
   }
   return emails.length;
 }
+async function bookCount(dir, acct) {
+  if (!enabled()) return 0;
+  try { return Number(await cmd(["HLEN", bookKey(dir, acct)])) || 0; } catch (_) { return 0; }
+}
+// 메일함별 마지막 동기화 상태 (주소록 탭에 표시 — 어느 폴더를 보낸편지함으로 읽었는지, 오류 등)
+const syncInfoKey = acct => "outreach:syncinfo:" + normEmail(acct);
+async function saveSyncInfo(acct, info) {
+  if (!enabled()) return;
+  try { await cmd(["SET", syncInfoKey(acct), JSON.stringify(Object.assign({ at: new Date().toISOString() }, info))]); } catch (_) {}
+}
+async function syncInfo(acct) {
+  if (!enabled()) return null;
+  try { return parseRec(await cmd(["GET", syncInfoKey(acct)])); } catch (_) { return null; }
+}
 async function bookAll(dir, acct) {
   if (!enabled()) return [];
   const flat = await cmd(["HGETALL", bookKey(dir, acct)]);
@@ -705,6 +719,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender,
-  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

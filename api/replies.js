@@ -149,6 +149,7 @@ module.exports = async (req, res) => {
         });
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });
+        try { await H.saveSyncInfo(acc.email, { error: String((e && e.message) || e) }); } catch (_) {}
       }
     }
 

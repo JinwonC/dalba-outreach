@@ -22,16 +22,52 @@ function makeClient(account) {
   });
 }
 
-// 보낸편지함 이름은 배포·언어 설정마다 다르다(Sent / 보낸메일함 / Sent Messages …).
-// IMAP 은 폴더에 용도 플래그(\Sent)를 붙이도록 돼 있으니 그것부터 보고,
-// 없을 때만 이름으로 추측한다 — 이름 목록에 의존하면 어느 계정에서 조용히 빈 목록이 된다.
-async function findMailbox(client, kind) {
+// 보낸편지함 찾기 — 배포·언어 설정마다 이름이 다르다(Sent / Sent Messages / 보낸메일함 / 보낸 메일함 …).
+//   ① IMAP 용도 표시(\Sent) → ② 이름(띄어쓰기·변형 허용, 하위 폴더면 끝 이름) →
+//   ③ 그래도 없으면 **내용으로**: 폴더마다 최근 메일을 몇 통 보고 '보낸 사람 = 본인' 인 폴더.
+// 못 찾으면 받은편지함으로 대신하지 **않는다** — 예전엔 조용히 받은편지함을 읽어 발송이 하나도
+// 안 잡혔다. 대신 폴더 목록과 함께 오류를 낸다(무엇이 문제인지 화면에 보이도록).
+const SENT_NAME = /^(sent|sent items|sent messages|sent mail|outbox sent|보낸\s*편지함|보낸\s*메일함|보낸\s*메일|보낸함|보낸\s*편지)$/i;
+const sentCache = new Map();   // 계정 → 경로 (이 함수 인스턴스 동안)
+function leaf(b) { return String(b.name || String(b.path || "").split(b.delimiter || "/").pop() || "").trim(); }
+function selectable(b) { return !(b.flags && (b.flags.has ? b.flags.has("\\Noselect") : [].concat(b.flags).includes("\\Noselect"))); }
+async function detectSentByContent(client, boxes, me) {
+  let best = null;
+  for (const b of boxes) {
+    if (b.path === "INBOX" || !selectable(b)) continue;
+    if (/^(drafts?|임시\s*보관함|trash|휴지통|deleted.*|spam|junk.*|스팸.*)$/i.test(leaf(b))) continue;
+    let lock;
+    try { lock = await client.getMailboxLock(b.path); } catch (_) { continue; }
+    try {
+      const n = (client.mailbox && client.mailbox.exists) || 0;
+      if (!n) continue;
+      let mine = 0, total = 0;
+      for await (const msg of client.fetch(Math.max(1, n - 14) + ":*", { envelope: true })) {
+        total++;
+        const f = ((msg.envelope && msg.envelope.from) || [])[0];
+        if (f && String(f.address || "").toLowerCase() === me) mine++;
+      }
+      const ratio = total ? mine / total : 0;
+      if (ratio >= 0.6 && (!best || ratio > best.ratio || (ratio === best.ratio && total > best.total))) best = { path: b.path, ratio, total };
+    } catch (_) { /* 읽을 수 없는 폴더는 건너뛴다 */ }
+    finally { lock.release(); }
+  }
+  return best && best.path;
+}
+async function findMailbox(client, kind, account) {
   if (kind === "inbox" || kind === "replies") return "INBOX";
+  const me = String((account && account.email) || "").toLowerCase();
+  if (me && sentCache.has(me)) return sentCache.get(me);
   const boxes = await client.list();
-  const flagged = boxes.find(b => b.specialUse === "\\Sent");
-  if (flagged) return flagged.path;
-  const guess = boxes.find(b => /^(sent|sent items|sent messages|보낸편지함|보낸메일함)$/i.test(b.name || ""));
-  return guess ? guess.path : "INBOX";
+  let path = (boxes.find(b => b.specialUse === "\\Sent") || {}).path ||
+             (boxes.find(b => SENT_NAME.test(leaf(b))) || {}).path || "";
+  if (!path && me) path = await detectSentByContent(client, boxes, me) || "";
+  if (!path) {
+    const names = boxes.map(b => b.path).join(", ");
+    throw new Error("보낸편지함 폴더를 찾지 못했습니다 (폴더: " + names + ")");
+  }
+  if (me) sentCache.set(me, path);
+  return path;
 }
 
 function one(list) {
@@ -67,7 +103,7 @@ async function read(account, opts) {
   const deadline = Date.now() + Math.max(5000, Number(o.budgetMs) || 35000);
 
   try {
-    path = await findMailbox(client, kind);
+    path = await findMailbox(client, kind, account);
     const lock = await client.getMailboxLock(path);
     try {
       const found = await client.search({ since }, { uid: true }) || [];
@@ -157,11 +193,17 @@ async function readThread(account, opts) {
   const out = [];
   try {
     if (o.pingOnly) return { peer, rows: [] };
-    // 상대가 보낸 것: 받은편지함에서 from=peer
-    await collectSide(client, "INBOX", { since, from: peer }, "in", perSide, deadline, out);
-    // 담당자가 보낸 것: 보낸편지함에서 to=peer
-    const sentPath = await findMailbox(client, "sent");
-    await collectSide(client, sentPath, { since, to: peer }, "out", perSide, deadline, out);
+    // 담당자가 보낸 것: 보낸편지함에서 to=peer (못 찾으면 그쪽만 건너뛴다 — 대화 보기는 살린다)
+    let sentPath = "";
+    try { sentPath = await findMailbox(client, "sent", account); } catch (_) { sentPath = ""; }
+    // 상대가 보낸 것: 받은편지함 + 사용자 폴더(자동 분류로 옮겨진 회신까지)에서 from=peer
+    const boxes = (await client.list()).filter(isReplyFolder).filter(b => b.path !== sentPath);
+    boxes.sort((a, b) => (a.path === "INBOX" ? -1 : b.path === "INBOX" ? 1 : 0));
+    for (const b of boxes) {
+      if (Date.now() > deadline) break;
+      try { await collectSide(client, b.path, { since, from: peer }, "in", perSide, deadline, out); } catch (_) {}
+    }
+    if (sentPath) await collectSide(client, sentPath, { since, to: peer }, "out", perSide, deadline, out);
   } finally {
     try { await client.logout(); } catch (_) { try { client.close(); } catch (_) {} }
   }
@@ -196,7 +238,11 @@ async function readFolders(account, opts) {
   await client.connect();
   const out = [];
   try {
-    const boxes = (await client.list()).filter(isReplyFolder);
+    const listed = await client.list();
+    // 이름이 특이해서 isReplyFolder 가 못 거른 보낸편지함도 뺀다 (본인이 보낸 메일은 받은 게 아니다)
+    let sentPath = "";
+    try { sentPath = await findMailbox(client, "sent", account); } catch (_) { sentPath = ""; }
+    const boxes = listed.filter(isReplyFolder).filter(b => b.path !== sentPath);
     boxes.sort((a, b) => (a.path === "INBOX" ? -1 : b.path === "INBOX" ? 1 : String(a.path).localeCompare(String(b.path))));
     for (const b of boxes) {
       const entry = { path: b.path, name: b.name || b.path, rows: [], total: 0, truncated: false, skipped: false };
@@ -233,4 +279,4 @@ async function readFolders(account, opts) {
   return { folders: out };
 }
 
-module.exports = { read, readFolders, readThread, isReplyFolder, IMAP_HOST, IMAP_PORT };
+module.exports = { read, readFolders, readThread, isReplyFolder, findMailbox, IMAP_HOST, IMAP_PORT };

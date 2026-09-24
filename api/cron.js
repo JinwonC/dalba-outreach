@@ -110,6 +110,7 @@ module.exports = async (req, res) => {
           results.push(await S.syncAccount(acc, contacted, { until: deadline + 5e3 }));
         } catch (e) {
           results.push({ user: acc.email, error: String((e && e.message) || e) });
+          try { await H.saveSyncInfo(acc.email, { error: String((e && e.message) || e) }); } catch (_) {}
         }
         i++; processed++;
       }

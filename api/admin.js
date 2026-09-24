@@ -570,10 +570,14 @@ module.exports = async (req, res) => {
         if (dir === "sent") {
           // 이 툴로 보낸 메일은 SMTP 로 나가 보낸편지함에 없을 수 있다 → 발송 기록에서 더한다.
           // 보낸편지함에서 가져온 기록(source:"imap")은 이미 메일함 주소록에 세어져 있으니 뺀다.
+          // 주소록이 아직 비어 있는(채우는 중인) 주소는 예전에 보낸편지함에서 가져온 기록(imap)으로 보완한다.
+          const inBook = new Set(map.keys());
           sentAll.forEach(r => {
-            if (H.normEmail(r.by) !== st || r.source === "imap") return;
+            if (H.normEmail(r.by) !== st) return;
             const e = H.normEmail(r.to);
             if (!e) return;
+            const imap = r.source === "imap";
+            if (imap && inBook.has(e)) return;
             let x = map.get(e);
             if (!x) { x = { email: e, staff: st, staffName: NM.get(st) || st, n: 0, first: "", last: "", subj: "", name: "", src: [] }; map.set(e, x); }
             x.n = (Number(x.n) || 0) + 1;
@@ -582,7 +586,8 @@ module.exports = async (req, res) => {
             if (at >= String(x.last || "")) { x.last = at; x.subj = r.campaign || x.subj; }
             if (!x.name && r.name) x.name = r.name;
             if (!x.handle && r.handle) x.handle = H.normHandle(r.handle);
-            if (x.src.indexOf("tool") < 0) x.src.push("tool");
+            const tag = imap ? "mailbox" : "tool";
+            if (x.src.indexOf(tag) < 0) x.src.push(tag);
           });
         } else {
           const sentTo = await H.sentToSet(st);
@@ -593,7 +598,13 @@ module.exports = async (req, res) => {
       const kept = rows.filter(x => withinDays({ at: x.last }, days) &&
         (!needle || [x.email, x.name, x.subj, x.handle, x.box].filter(Boolean).join(" ").toLowerCase().indexOf(needle) >= 0))
         .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
-      res.status(200).json(Object.assign(base, { dir, rows: kept }));
+      // 담당자별 채움 상태 — 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 마지막 동기화 · 오류
+      const status = [];
+      for (const st of staffList) {
+        const [sn, rn, info] = await Promise.all([H.bookCount("sent", st), H.bookCount("recv", st), H.syncInfo(st)]);
+        status.push(Object.assign({ staff: st, staffName: NM.get(st) || st, sentBook: sn, recvBook: rn }, info || {}));
+      }
+      res.status(200).json(Object.assign(base, { dir, rows: kept, status }));
       return;
     }
     if (view === "repliers") {

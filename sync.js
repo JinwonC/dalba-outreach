@@ -237,7 +237,7 @@ async function scanSentBook(account, budgetMs) {
   await setUidCursor("booksent", account, r.nextCursor);   // 저장을 마친 뒤에 커서를 올린다
   const caughtUp = !r.truncated;
   if (caughtUp) { try { await H.writeRaw(BOOK_READY(account), "1"); } catch (_) {} }
-  return { caughtUp, scanned: r.scanned, addresses: r.book.size };
+  return { caughtUp, scanned: r.scanned, addresses: r.book.size, sentFolder: r.path };
 }
 
 // 한 사람의 보낸편지함·받은편지함을 잇달아 처리한다 (자동 실행이 쓰는 단위)
@@ -261,6 +261,7 @@ async function syncAccount(account, contacted, opts) {
   let st = await scanSentBook(account, Math.max(3000, Math.min(30000, left() - 12000)));
   while (!st.caughtUp && left() > 15000) st = await scanSentBook(account, Math.min(30000, left() - 12000));
   if (!st.caughtUp) {
+    await H.saveSyncInfo(account.email, { sentFolder: st.sentFolder, sentCaughtUp: false, waiting: true });
     return {
       user: account.email, sent: sentWrite, sentTo: st,
       replies: { found: 0, duplicate: 0, waiting: true },   // 보낸편지함을 다 읽은 뒤에 판정
@@ -269,6 +270,11 @@ async function syncAccount(account, contacted, opts) {
   }
 
   const rep = await collectReplies(account, contacted, Object.assign({}, o, { budgetMs: Math.max(4000, left() - 3000) }));
+  await H.saveSyncInfo(account.email, {
+    sentFolder: st.sentFolder, sentCaughtUp: true,
+    folders: rep.folders, foldersCaughtUp: !(rep.folders || []).some(f => f.truncated || f.skipped),
+    found: rep.found, notContacted: rep.notContacted
+  });
   return {
     user: account.email,
     sent: sentWrite,
