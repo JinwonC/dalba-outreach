@@ -357,8 +357,8 @@
       "담당자별": "By staff",
       "📈 일별": "📈 Daily",
       "📅 주차별": "📅 Weekly",
-      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽":
-        "Weeks are Mon–Sun (KST) · replies counted by messages received that week · admins excluded · latest week on the left",
+      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 포함 전원 · 최신 주가 왼쪽":
+        "Weeks are Mon–Sun (KST) · replies counted by messages received that week · everyone incl. admins · latest week on the left",
       "이번주": "this week",
       "합계": "Total",
       "전체": "All",
@@ -841,8 +841,8 @@
       "담당자별": "Theo nhân viên",
       "📈 일별": "📈 Theo ngày",
       "📅 주차별": "📅 Theo tuần",
-      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽":
-        "Tuần tính Thứ 2–CN (giờ KST) · phản hồi đếm theo số thư nhận trong tuần đó · không tính quản trị · tuần mới nhất bên trái",
+      "주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 포함 전원 · 최신 주가 왼쪽":
+        "Tuần tính Thứ 2–CN (giờ KST) · phản hồi đếm theo số thư nhận trong tuần đó · gồm cả quản trị · tuần mới nhất bên trái",
       "이번주": "tuần này",
       "합계": "Tổng",
       "전체": "Tất cả",

@@ -510,7 +510,7 @@ function wireTips(rows){
 }
 
 /* ── 주차별 (담당자 × 주) ──
-   주(월~일)마다 담당자별 아웃리치 수와 회신 수. 관리자는 서버에서 이미 빠져 있다.
+   주(월~일)마다 담당자별 아웃리치 수와 회신 수. 관리자 포함 전원.
    회신은 그 주에 '받은' 통수 기준. 최신 주가 왼쪽. */
 function mdRange(start, end){
   const md = s => { const p = String(s).split("-"); return p.length===3 ? (Number(p[1])+"/"+Number(p[2])) : s; };
@@ -521,7 +521,7 @@ function renderWeekly(d){
   const rows = d.rows || [];
   if(!weeks.length){ $("body").innerHTML = emptyNote(d); return ""; }
 
-  const note = '<div class="note">주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 제외 · 최신 주가 왼쪽' +
+  const note = '<div class="note">주 기준: 월~일 (한국 시간) · 회신은 그 주에 받은 통수 · 관리자 포함 전원 · 최신 주가 왼쪽' +
     (cronNote(d) ? '<br /><span class="muted">'+cronNote(d)+'</span>' : '') + '</div>';
 
   const cell = c => {
