@@ -407,6 +407,46 @@ async function sentToSet(acct) {
   catch (_) { return new Set(); }
 }
 
+// ─── 주소록 (메일함별 보낸/받은 외부 주소) ───────────────────────────
+// 관리자 '📒 주소록' 용. 메일함마다 방향별(sent/recv) HASH 하나: 필드=주소, 값=JSON
+//   { n: 메일 수, first/last: 처음·마지막 날짜, subj: 최근 제목, name, box: 폴더(받은 쪽) }
+// 본문은 저장하지 않는다. 한 번 훑은 메일은 커서가 넘어가므로 같은 메일을 두 번 세지 않는다.
+const bookKey = (dir, acct) => "outreach:book:" + dir + ":" + normEmail(acct);
+// agg: Map(주소 → {n, first, last, subj, name, box}) — 이번에 훑은 분량을 합쳐 기존 값에 더한다
+async function bookMerge(dir, acct, agg) {
+  if (!enabled() || !agg || !agg.size) return 0;
+  const key = bookKey(dir, acct);
+  const emails = [...agg.keys()];
+  for (let i = 0; i < emails.length; i += 400) {
+    const part = emails.slice(i, i + 400);
+    const cur = await cmd(["HMGET", key].concat(part));
+    const cmds = part.map((e, j) => {
+      const a = agg.get(e), c = parseRec(cur && cur[j]) || {};
+      const newer = String(a.last || "") >= String(c.last || "");
+      const m = {
+        n: (Number(c.n) || 0) + (Number(a.n) || 0),
+        first: [c.first, a.first].filter(Boolean).sort()[0] || "",
+        last: [c.last, a.last].filter(Boolean).sort().pop() || "",
+        subj: newer ? (a.subj || c.subj || "") : (c.subj || a.subj || ""),
+        name: c.name || a.name || "",
+        box: newer ? (a.box || c.box || "") : (c.box || a.box || "")
+      };
+      return ["HSET", key, e, JSON.stringify(m)];
+    });
+    await pipeline(cmds);
+  }
+  return emails.length;
+}
+async function bookAll(dir, acct) {
+  if (!enabled()) return [];
+  const flat = await cmd(["HGETALL", bookKey(dir, acct)]);
+  const out = [];
+  const push = (e, v) => { const r = parseRec(v); if (r) out.push(Object.assign({ email: e }, r)); };
+  if (Array.isArray(flat)) { for (let i = 0; i + 1 < flat.length; i += 2) push(flat[i], flat[i + 1]); }
+  else if (flat && typeof flat === "object") Object.keys(flat).forEach(k => push(k, flat[k]));
+  return out;
+}
+
 // ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
 // 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
 // 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
@@ -665,6 +705,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender,
-  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

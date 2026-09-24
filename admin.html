@@ -144,6 +144,7 @@
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="repliers" onclick="go('repliers')">📨 회신 온 인원</button>
+    <button class="tab" data-v="book" onclick="go('book')">📒 주소록</button>
     <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
   </div>
@@ -284,6 +285,7 @@ async function loadAdmin(){
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
   if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
   if(VIEW === "sent") qs.set("limit", "100000");   // 이메일 리스트업은 전부 받아야 한다
+  if(VIEW === "book") qs.set("dir", BOOK_DIR);
   const d = await fetchJson("/api/admin?" + qs);
 
   if(d.historyEnabled === false){
@@ -303,6 +305,7 @@ async function loadAdmin(){
   if(VIEW === "blocked") return renderBlocked(d);
   if(VIEW === "conversations") return renderConversations(d);
   if(VIEW === "repliers")  return renderRepliers(d);
+  if(VIEW === "book")     return renderBook(d);
   if(VIEW === "pipeline") return renderPipeline(d);
   return "";
 }
@@ -844,6 +847,69 @@ function renderRepliers(d){
       '<td class="muted">'+esc(r.lastSubject||"")+'</td></tr>').join("") +
     '</tbody></table></div>';
   return rows.length + "명";
+}
+
+/* ── 📒 주소록 ──
+   담당자별로 누구에게 보냈는지(보낸 주소) · 누구에게서 받았는지(받은 주소). 제목·주소만, 본문 없음.
+   한 줄을 누르면 그 담당자 메일함의 그 사람과의 대화를 연다. */
+let BOOK_DIR = "sent";
+let BOOK_ROWS = [];
+function setBookDir(d){ BOOK_DIR = d; load(); }
+function renderBook(d){
+  const rows = d.rows || [];
+  BOOK_ROWS = rows;
+  const sent = BOOK_DIR === "sent";
+  const allStaff = !$("by").value;
+  const CAP = 2000;
+  const toggle = '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
+    '<button class="btn'+(sent?' dark':'')+'" onclick="setBookDir(\'sent\')">📤 보낸 주소</button>' +
+    '<button class="btn'+(!sent?' dark':'')+'" onclick="setBookDir(\'recv\')">📥 받은 주소</button>' +
+    '<button class="btn" onclick="exportBookCsv()">⬇️ 주소록 Excel(CSV)</button>' +
+    '<span class="muted"><span>'+(sent?'보낸 주소':'받은 주소')+'</span> <b>'+rows.length+'개</b></span></div>';
+  const note = '<div class="note">' + (sent
+    ? '<span>보낸 주소 = 메일함 보낸편지함의 모든 외부 수신자(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록.</span>'
+    : '<span>받은 주소 = 받은편지함·사용자 폴더(보낸편지함·임시·휴지통·스팸 제외)의 회사 밖 발신자 전부. "우리가 보낸 적"이 ✓ 이면 회신입니다.</span>') +
+    ' <span class="muted">2026-05-01 이후 · 제목·주소만 저장(본문 없음) · 처음 채우는 동안은 자동 수집이 몇 사이클 걸립니다.</span></div>';
+  if(!rows.length){
+    $("body").innerHTML = toggle + note + '<div class="muted" style="padding:20px 0">아직 채워진 주소가 없습니다 — 자동 수집을 기다리거나, 회신 온 인원 탭에서 담당자를 골라 [🔄 지금 다시 수집] 을 누르세요.</div>';
+    return "";
+  }
+  const cell = r => (r.email && r.staff)
+    ? '<td class="threadcell" data-thread-staff="'+esc(r.staff)+'" data-thread-peer="'+esc(r.email)+'" style="cursor:pointer" title="대화 보기">' +
+        '<b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div></td>'
+    : '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+'</div></td>';
+  const SRC = { tool:'<span class="tag" style="background:#e7f0ff;color:#2f5fb0">툴 발송</span>', mailbox:'<span class="tag" style="background:#f1f1f1;color:#555">메일함</span>' };
+  $("body").innerHTML = toggle + note +
+    '<div class="scroll"><table><thead><tr>' +
+    '<th>주소</th>' + (allStaff ? '<th>담당자</th>' : '') + '<th>메일 수</th><th>처음</th><th>마지막</th><th>최근 제목</th>' +
+    (sent ? '<th>출처</th>' : '<th>폴더</th><th>우리가 보낸 적</th>') +
+    '</tr></thead><tbody>' +
+    rows.slice(0, CAP).map(r => '<tr>' + cell(r) +
+      (allStaff ? '<td>'+esc(r.staffName||r.staff)+'</td>' : '') +
+      '<td class="mono"><b>'+(r.n||0)+'</b></td>' +
+      '<td class="mono muted">'+esc(fmt(r.first))+'</td>' +
+      '<td class="mono muted">'+esc(fmt(r.last))+'</td>' +
+      '<td class="muted">'+esc(r.subj||"")+'</td>' +
+      (sent ? '<td>'+(r.src||[]).map(x => SRC[x]||"").join(" ")+'</td>'
+            : '<td class="muted">'+esc(r.box||"")+'</td><td>'+(r.emailed ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">✓ 회신</span>' : '<span class="muted">—</span>')+'</td>') +
+      '</tr>').join("") +
+    '</tbody></table></div>' +
+    (rows.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 Excel(CSV) 로 받으세요.</div>' : '');
+  return rows.length + "개";
+}
+function exportBookCsv(){
+  const rows = BOOK_ROWS || [];
+  if(!rows.length){ alert("내보낼 주소가 없습니다"); return; }
+  const sent = BOOK_DIR === "sent";
+  const head = sent
+    ? ["Staff","Staff email","Address","Name","Handle","Messages","First","Last","Last subject","Source"]
+    : ["Staff","Staff email","Address","Name","Messages","First","Last","Last subject","Folder","We emailed them"];
+  const lines = [head.map(csvCell).join(",")].concat(rows.map(r => (sent
+    ? [r.staffName||r.staff, r.staff, r.email, r.name, r.handle ? "@"+String(r.handle).replace(/^@/,"") : "", r.n||0, fmt(r.first), fmt(r.last), r.subj, (r.src||[]).map(x => x==="tool"?"Tool":"Mailbox").join(" + ")]
+    : [r.staffName||r.staff, r.staff, r.email, r.name, r.n||0, fmt(r.first), fmt(r.last), r.subj, r.box, r.emailed ? "Yes (reply)" : "No"]
+  ).map(csvCell).join(",")));
+  const who = ($("by").value || "all").replace(/@.*/,"");
+  downloadCsv("addresses_" + (sent?"sent":"received") + "_" + who + "_" + new Date().toISOString().slice(0,10) + ".csv", lines);
 }
 
 /* ── 회신 누락 점검 ──

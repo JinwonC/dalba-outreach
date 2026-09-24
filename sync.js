@@ -80,15 +80,22 @@ async function readSent(account, opts) {
     kind: "sent", since: o.since || SINCE_DEFAULT,
     limit: scanLimit(o), minUid, budgetMs: o.budgetMs
   });
-  if (o.useCursor) await setUidCursor(ck, account, maxUidOf(mail.rows));
+  // deferCursor: 호출한 쪽이 결과를 저장한 **뒤에** 커서를 올린다 (저장 실패 시 다시 읽도록)
+  const nextCursor = maxUidOf(mail.rows);
+  if (o.useCursor && !o.deferCursor) await setUidCursor(ck, account, nextCursor);
 
   const rows = [];
   const recipients = new Set();
+  const book = new Map();   // 주소 → { n, first, last, subj, name } (o.book 일 때만)
   const skipped = { internal: 0, bulk: 0, subject: 0 };
   mail.rows.forEach(msg => {
+    const at = msg.at ? new Date(msg.at).toISOString() : "";
+    const seen = new Set();   // 한 메일에 같은 사람이 받는사람·참조로 두 번 있어도 1통
     (msg.toAll || []).concat(msg.ccAll || [], msg.bccAll || []).forEach(p => {
       const e = H.normEmail(p.email);
-      if (e && !isInternal(e)) recipients.add(e);
+      if (!e || isInternal(e) || e.indexOf("@") < 1) return;
+      recipients.add(e);
+      if (o.book && !seen.has(e)) { seen.add(e); bookAdd(book, e, at, msg.subject, p.name); }
     });
     if (o.recipientsOnly) return;
     const c = candidates(msg, account, needle);
@@ -102,7 +109,7 @@ async function readSent(account, opts) {
     rows.push(...c);
   });
 
-  return { path: mail.path, truncated: mail.truncated, scanned: mail.rows.length, rows, skipped, recipients: [...recipients] };
+  return { path: mail.path, truncated: mail.truncated, scanned: mail.rows.length, rows, skipped, recipients: [...recipients], book, nextCursor, cursorKey: ck };
 }
 
 async function writeSent(account, rows) {
@@ -137,12 +144,23 @@ async function contactedMap() {
 
 // ─── 폴더별 증분 커서 (회신 판별 v2) ──────────────────────────────
 // 기준이 바뀌었으므로 새 키로 시작한다 → 5월부터 전부 새 기준으로 다시 평가된다.
-const boxCursorKey = acct => "outreach:cursor:box2:" + H.normEmail(acct.email);
+// v3: 받은 주소록을 채우려고 한 번 더 5월부터 훑는다 (회신 기록은 messageId 로 중복 방지)
+const boxCursorKey = acct => "outreach:cursor:box3:" + H.normEmail(acct.email);
 async function getBoxCursors(acct) {
   try { return JSON.parse(await H.readRaw(boxCursorKey(acct)) || "{}") || {}; } catch (_) { return {}; }
 }
 async function setBoxCursors(acct, map) {
   try { await H.writeRaw(boxCursorKey(acct), JSON.stringify(map || {})); } catch (_) {}
+}
+
+// 주소록 집계: 이번에 훑은 메일들을 주소별로 합친다 (저장은 H.bookMerge)
+function bookAdd(map, e, at, subj, name, box) {
+  let a = map.get(e);
+  if (!a) { a = { n: 0, first: "", last: "", subj: "", name: "", box: "" }; map.set(e, a); }
+  a.n++;
+  if (at && (!a.first || at < a.first)) a.first = at;
+  if (!a.last || String(at || "") >= a.last) { a.last = at || a.last; a.subj = subj || a.subj; if (box) a.box = box; }
+  if (!a.name && name) a.name = name;
 }
 
 // 이 메일에서 '회신'인지 판정: 회사 밖 발신자 + (전 담당자 발송 기록 | 이 메일함이 보낸 적 있는 주소)
@@ -168,14 +186,16 @@ async function collectReplies(account, contacted, opts) {
 
   let found = 0, duplicate = 0, scanned = 0, notContacted = 0;
   const items = [];
+  const recv = new Map();   // 받은 주소록 — 회사 밖 발신자 전부 (회신 여부와 무관)
   const next = Object.assign({}, cursors);
   for (const f of res.folders) {
     for (const m of f.rows) {
       scanned++;
       const c = classify(m, account, contacted, sentTo);
+      const at = m.at ? new Date(m.at).toISOString() : "";
+      if (c.kind === "reply" || c.kind === "not-contacted") bookAdd(recv, c.e, at, m.subject, m.from && m.from.name, f.path);
       if (c.kind === "not-contacted") { notContacted++; continue; }
       if (c.kind !== "reply") continue;
-      const at = m.at ? new Date(m.at).toISOString() : "";
       items.push({
         id: m.messageId || (account.email + "|" + m.from.email + "|" + at),
         rec: {
@@ -193,6 +213,8 @@ async function collectReplies(account, contacted, opts) {
   }
   const out = await H.recordReplies(items);
   found = out.recorded; duplicate = out.duplicate;
+  // 주소록은 커서를 쓰는 실행에서만 더한다 — 커서 없이 다시 훑으면 같은 메일을 두 번 센다
+  if (o.useCursor) await H.bookMerge("recv", account.email, recv);
   // 기록을 마친 뒤에 커서를 저장한다 — 기록 전에 올리면, 도중에 끊길 때 그 회신이 영영 빠진다
   if (o.useCursor) await setBoxCursors(account, next);
 
@@ -204,17 +226,18 @@ async function collectReplies(account, contacted, opts) {
   };
 }
 
-// 보낸편지함의 '보낸 적 있는 주소'를 과거분까지 1회 채운다 (계정별 완료 표시).
-// 다 채우기 전엔 회신 판정을 미룬다 — 먼저 판정하면 아직 안 읽은 발송 상대의 회신이
-// '접촉 안 한 사람'으로 넘어가고 커서가 지나가 버린다.
-const SENTTO_DONE = acct => "outreach:sentto:done:" + H.normEmail(acct.email);
-async function backfillSentTo(account, budgetMs) {
-  try { if ((await H.readRaw(SENTTO_DONE(account))) === "2") return { done: true, added: 0 }; } catch (_) {}
-  const r = await readSent(account, { useCursor: true, cursorKey: "sentto2", recipientsOnly: true, budgetMs });
-  const added = await H.addSentTo(account.email, r.recipients);
-  const done = !r.truncated;
-  if (done) { try { await H.writeRaw(SENTTO_DONE(account), "2"); } catch (_) {} }
-  return { done, added, scanned: r.scanned };
+// 보낸편지함 → '보낸 적 있는 주소'(회신 판별) + 보낸 주소록. 자체 커서로 매번 이어서 처리한다.
+// 처음엔 5월부터 과거분을 채우고, 그 뒤엔 새로 보낸 메일만. 한 번이라도 끝까지 따라잡으면 ready.
+const BOOK_READY = acct => "outreach:book:sent:ready:" + H.normEmail(acct.email || acct);
+async function bookReady(acct) { try { return (await H.readRaw(BOOK_READY(acct))) === "1"; } catch (_) { return false; } }
+async function scanSentBook(account, budgetMs) {
+  const r = await readSent(account, { useCursor: true, deferCursor: true, cursorKey: "booksent", recipientsOnly: true, book: true, budgetMs });
+  await H.addSentTo(account.email, r.recipients);
+  await H.bookMerge("sent", account.email, r.book);
+  await setUidCursor("booksent", account, r.nextCursor);   // 저장을 마친 뒤에 커서를 올린다
+  const caughtUp = !r.truncated;
+  if (caughtUp) { try { await H.writeRaw(BOOK_READY(account), "1"); } catch (_) {} }
+  return { caughtUp, scanned: r.scanned, addresses: r.book.size };
 }
 
 // 한 사람의 보낸편지함·받은편지함을 잇달아 처리한다 (자동 실행이 쓰는 단위)
@@ -226,17 +249,18 @@ async function syncAccount(account, contacted, opts) {
 
   const sentRead = await readSent(account, Object.assign({}, o, { budgetMs: Math.max(3000, Math.min(12000, left() - 20000)) }));
   const sentWrite = await writeSent(account, sentRead.rows);
-  try { await H.addSentTo(account.email, sentRead.recipients); } catch (_) {}
   // 방금 넣은 발송분도 회신 대조 대상이 되도록 목록을 갱신한다
   sentRead.rows.forEach(r => {
     const k = H.normEmail(r.to);
     if (k && !contacted.has(k)) contacted.set(k, r);
   });
 
-  // 보낸 적 있는 주소 과거분 채우기 — 끝날 때까지 예산을 넉넉히 준다
-  let st = await backfillSentTo(account, Math.max(3000, Math.min(30000, left() - 12000)));
-  while (!st.done && left() > 15000) st = await backfillSentTo(account, Math.min(30000, left() - 12000));
-  if (!st.done) {
+  // 보낸편지함 → 보낸 주소록·'보낸 적 있는 주소'. 따라잡을 때까지 예산을 넉넉히 준다.
+  // 다 따라잡기 전엔 회신 판정을 미룬다 — 먼저 하면 아직 안 읽은 발송 상대의 회신이
+  // '보낸 기록 없음'으로 넘어가고 커서가 지나가 버린다.
+  let st = await scanSentBook(account, Math.max(3000, Math.min(30000, left() - 12000)));
+  while (!st.caughtUp && left() > 15000) st = await scanSentBook(account, Math.min(30000, left() - 12000));
+  if (!st.caughtUp) {
     return {
       user: account.email, sent: sentWrite, sentTo: st,
       replies: { found: 0, duplicate: 0, waiting: true },   // 보낸편지함을 다 읽은 뒤에 판정
@@ -256,5 +280,5 @@ async function syncAccount(account, contacted, opts) {
 
 module.exports = {
   SINCE_DEFAULT, MAX_RECIPIENTS,
-  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, backfillSentTo, isInternal
+  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, scanSentBook, bookReady, isInternal
 };

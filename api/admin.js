@@ -407,7 +407,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline" || view === "repliers";
+    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline" || view === "repliers" || view === "book";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -554,6 +554,48 @@ module.exports = async (req, res) => {
 
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
     if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
+    // ─── 📒 주소록 — 담당자별 보낸/받은 외부 주소 (관리자 전용 · 제목·주소만, 본문 없음) ───
+    //   dir=sent  보낸 주소: 메일함 보낸편지함(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록
+    //   dir=recv  받은 주소: 받은편지함·사용자 폴더의 회사 밖 발신자 전부 (+ 우리가 보낸 적 있는지)
+    if (view === "book") {
+      const dir = q.dir === "recv" ? "recv" : "sent";
+      const NM = nameByEmail();
+      const staffList = by ? [by] : roster().map(a => String(a.email).toLowerCase());
+      const contactedAll = new Set(sentAll.map(r => H.normEmail(r.to)).filter(Boolean));
+      const rows = [];
+      for (const st of staffList) {
+        const book = await H.bookAll(dir, st);
+        const map = new Map();
+        book.forEach(b => map.set(b.email, Object.assign({ staff: st, staffName: NM.get(st) || st, src: ["mailbox"] }, b)));
+        if (dir === "sent") {
+          // 이 툴로 보낸 메일은 SMTP 로 나가 보낸편지함에 없을 수 있다 → 발송 기록에서 더한다.
+          // 보낸편지함에서 가져온 기록(source:"imap")은 이미 메일함 주소록에 세어져 있으니 뺀다.
+          sentAll.forEach(r => {
+            if (H.normEmail(r.by) !== st || r.source === "imap") return;
+            const e = H.normEmail(r.to);
+            if (!e) return;
+            let x = map.get(e);
+            if (!x) { x = { email: e, staff: st, staffName: NM.get(st) || st, n: 0, first: "", last: "", subj: "", name: "", src: [] }; map.set(e, x); }
+            x.n = (Number(x.n) || 0) + 1;
+            const at = String(r.at || "");
+            if (at && (!x.first || at < x.first)) x.first = at;
+            if (at >= String(x.last || "")) { x.last = at; x.subj = r.campaign || x.subj; }
+            if (!x.name && r.name) x.name = r.name;
+            if (!x.handle && r.handle) x.handle = H.normHandle(r.handle);
+            if (x.src.indexOf("tool") < 0) x.src.push("tool");
+          });
+        } else {
+          const sentTo = await H.sentToSet(st);
+          map.forEach(x => { x.emailed = sentTo.has(x.email) || contactedAll.has(x.email); });
+        }
+        map.forEach(x => rows.push(x));
+      }
+      const kept = rows.filter(x => withinDays({ at: x.last }, days) &&
+        (!needle || [x.email, x.name, x.subj, x.handle, x.box].filter(Boolean).join(" ").toLowerCase().indexOf(needle) >= 0))
+        .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
+      res.status(200).json(Object.assign(base, { dir, rows: kept }));
+      return;
+    }
     if (view === "repliers") {
       // 담당자(by) 를 고르면 **그 담당자가 발송해서 회신 온 크리에이터만** 보여준다
       //   = 그 담당자 메일함(inbox)에 도착한 회신 (replyStaff). 안 고르면 관리자 포함 전원.

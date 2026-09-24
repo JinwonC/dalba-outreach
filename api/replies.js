@@ -63,8 +63,8 @@ module.exports = async (req, res) => {
         .then(m => ({ m }), e => ({ e }));
       const [contacted, sentTo, replyAll, sentToDone, boxCur] = await Promise.all([
         S.contactedMap(), H.sentToSet(acc.email), H.recentReplies(H.REPLY_MAX),
-        H.readRaw("outreach:sentto:done:" + H.normEmail(acc.email)).catch(() => null),
-        H.readRaw("outreach:cursor:box2:" + H.normEmail(acc.email)).catch(() => null)
+        S.bookReady(acc),
+        H.readRaw("outreach:cursor:box3:" + H.normEmail(acc.email)).catch(() => null)
       ]);
       const recorded = new Set(replyAll.filter(r => H.normEmail(r.inbox || r.by) === H.normEmail(acc.email)).map(r => H.normEmail(r.from)));
       const got = await mailP;
@@ -91,7 +91,7 @@ module.exports = async (req, res) => {
         folders: mail.folders.map(f => ({ path: f.path, scanned: f.rows.length, total: f.total, truncated: f.truncated, skipped: f.skipped })),
         scanned, people: list.length,
         recorded: cnt("recorded"), pending: cnt("pending"), notContacted: cnt("not-contacted"),
-        sentToSize: sentTo.size, sentToDone: sentToDone === "2", cursorStarted: Boolean(boxCur),
+        sentToSize: sentTo.size, sentToDone: sentToDone === true, cursorStarted: Boolean(boxCur),
         rows: list.sort((a, b) => (order[a.status] - order[b.status]) || String(b.lastAt).localeCompare(String(a.lastAt))).slice(0, 500)
       });
       return;
