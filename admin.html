@@ -854,28 +854,30 @@ function renderRepliers(d){
 }
 
 /* ── 📒 주소록 ──
-   담당자별로 누구에게 보냈는지(보낸 주소) · 누구에게서 받았는지(받은 주소). 제목·주소만, 본문 없음.
-   메일 내용(대화)은 여기서 열 수 없다. */
-let BOOK_DIR = "sent";
+   담당자별로 누가 회신했는지(기본) · 누구에게 보냈는지 · 누구에게서 받았는지 — **주소만**.
+   내용·제목은 보여주지 않는다(기록은 그대로 보관). 메일 내용(대화)도 여기서 열 수 없다. */
+let BOOK_DIR = "replied";
 let BOOK_ROWS = [];
 function setBookDir(d){ BOOK_DIR = d; load(); }
 function renderBook(d){
   const rows = d.rows || [];
   BOOK_ROWS = rows;
-  const sent = BOOK_DIR === "sent";
+  const dir = BOOK_DIR;
   const allStaff = !$("by").value;
   const CAP = 2000;
+  const LABEL = { replied:"회신 온 사람", sent:"보낸 주소", recv:"받은 주소" };
+  const btn = (k, icon) => '<button class="btn'+(dir===k?' dark':'')+'" onclick="setBookDir(\''+k+'\')">'+icon+' '+LABEL[k]+'</button>';
   const toggle = '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
-    '<button class="btn'+(sent?' dark':'')+'" onclick="setBookDir(\'sent\')">📤 보낸 주소</button>' +
-    '<button class="btn'+(!sent?' dark':'')+'" onclick="setBookDir(\'recv\')">📥 받은 주소</button>' +
+    btn("replied","📨") + btn("sent","📤") + btn("recv","📥") +
     '<button class="btn" onclick="exportBookCsv()">⬇️ 주소록 Excel(CSV)</button>' +
     '<button class="btn dark" onclick="fillBook()">🔄 네이버웍스에서 지금 채우기</button>' +
-    '<span class="muted"><span>'+(sent?'보낸 주소':'받은 주소')+'</span> <b>'+rows.length+'개</b></span></div>' +
+    '<span class="muted"><span>'+LABEL[dir]+'</span> <b>'+rows.length+'명</b></span></div>' +
     '<div id="bookFill"></div>' + bookStatusHtml(d.status || []);
-  const note = '<div class="note">' + (sent
-    ? '<span>보낸 주소 = 메일함 보낸편지함의 모든 외부 수신자(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록.</span>'
-    : '<span>받은 주소 = 받은편지함·사용자 폴더(보낸편지함·임시·휴지통·스팸 제외)의 회사 밖 발신자 전부. "우리가 보낸 적"이 ✓ 이면 회신입니다.</span>') +
-    ' <span class="muted">2026-05-01 이후 · 제목·주소만 저장(본문 없음) · 처음 채우는 동안은 자동 수집이 몇 사이클 걸립니다.</span></div>';
+  const note = '<div class="note">' + (
+    dir === "replied" ? '<span>회신 온 사람 = 담당자 메일함으로 메일이 온 사람 중, 우리가 먼저 보낸 적 있는 주소 (관리자 포함 전원).</span>'
+    : dir === "sent" ? '<span>보낸 주소 = 메일함 보낸편지함의 모든 외부 수신자(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록.</span>'
+    : '<span>받은 주소 = 받은편지함·사용자 폴더(보낸편지함·임시·휴지통·스팸 제외)의 회사 밖 발신자 전부.</span>') +
+    ' <span class="muted">주소록에는 내용·제목을 표시하지 않습니다 (기록은 그대로 보관) · 2026-05-01 이후.</span></div>';
   if(!rows.length){
     $("body").innerHTML = toggle + note + '<div class="muted" style="padding:20px 0">아직 채워진 주소가 없습니다 — [🔄 네이버웍스에서 지금 채우기] 를 누르세요.</div>';
     return "";
@@ -883,37 +885,40 @@ function renderBook(d){
   // 주소록은 **주소만** — 줄을 눌러 메일 내용(대화)을 여는 기능은 두지 않는다
   const cell = r => '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div></td>';
   const SRC = { tool:'<span class="tag" style="background:#e7f0ff;color:#2f5fb0">툴 발송</span>', mailbox:'<span class="tag" style="background:#f1f1f1;color:#555">메일함</span>' };
+  const head = dir === "replied"
+    ? '<th>회신 수</th><th>처음 회신</th><th>마지막 회신</th><th>폴더</th>'
+    : dir === "sent" ? '<th>메일 수</th><th>처음</th><th>마지막</th><th>출처</th>'
+    : '<th>메일 수</th><th>처음</th><th>마지막</th><th>폴더</th><th>우리가 보낸 적</th>';
+  const tail = r => dir === "sent" ? '<td>'+(r.src||[]).map(x => SRC[x]||"").join(" ")+'</td>'
+    : dir === "replied" ? '<td class="muted">'+esc(r.box||"")+'</td>'
+    : '<td class="muted">'+esc(r.box||"")+'</td><td>'+(r.emailed ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">✓ 회신</span>' : '<span class="muted">—</span>')+'</td>';
   $("body").innerHTML = toggle + note +
-    '<div class="scroll"><table><thead><tr>' +
-    '<th>주소</th>' + (allStaff ? '<th>담당자</th>' : '') + '<th>메일 수</th><th>처음</th><th>마지막</th><th>최근 제목</th>' +
-    (sent ? '<th>출처</th>' : '<th>폴더</th><th>우리가 보낸 적</th>') +
-    '</tr></thead><tbody>' +
+    '<div class="scroll"><table><thead><tr><th>주소</th>' + (allStaff ? '<th>담당자</th>' : '') + head + '</tr></thead><tbody>' +
     rows.slice(0, CAP).map(r => '<tr>' + cell(r) +
       (allStaff ? '<td>'+esc(r.staffName||r.staff)+'</td>' : '') +
       '<td class="mono"><b>'+(r.n||0)+'</b></td>' +
       '<td class="mono muted">'+esc(fmt(r.first))+'</td>' +
-      '<td class="mono muted">'+esc(fmt(r.last))+'</td>' +
-      '<td class="muted">'+esc(r.subj||"")+'</td>' +
-      (sent ? '<td>'+(r.src||[]).map(x => SRC[x]||"").join(" ")+'</td>'
-            : '<td class="muted">'+esc(r.box||"")+'</td><td>'+(r.emailed ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">✓ 회신</span>' : '<span class="muted">—</span>')+'</td>') +
-      '</tr>').join("") +
+      '<td class="mono muted">'+esc(fmt(r.last))+'</td>' + tail(r) + '</tr>').join("") +
     '</tbody></table></div>' +
     (rows.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 Excel(CSV) 로 받으세요.</div>' : '');
-  return rows.length + "개";
+  return rows.length + "명";
 }
 function exportBookCsv(){
   const rows = BOOK_ROWS || [];
   if(!rows.length){ alert("내보낼 주소가 없습니다"); return; }
-  const sent = BOOK_DIR === "sent";
-  const head = sent
-    ? ["Staff","Staff email","Address","Name","Handle","Messages","First","Last","Last subject","Source"]
-    : ["Staff","Staff email","Address","Name","Messages","First","Last","Last subject","Folder","We emailed them"];
-  const lines = [head.map(csvCell).join(",")].concat(rows.map(r => (sent
-    ? [r.staffName||r.staff, r.staff, r.email, r.name, r.handle ? "@"+String(r.handle).replace(/^@/,"") : "", r.n||0, fmt(r.first), fmt(r.last), r.subj, (r.src||[]).map(x => x==="tool"?"Tool":"Mailbox").join(" + ")]
-    : [r.staffName||r.staff, r.staff, r.email, r.name, r.n||0, fmt(r.first), fmt(r.last), r.subj, r.box, r.emailed ? "Yes (reply)" : "No"]
+  const dir = BOOK_DIR;
+  const H = r => r.handle ? "@"+String(r.handle).replace(/^@/,"") : "";
+  const head = dir === "replied" ? ["Staff","Staff email","Address","Name","Handle","Replies","First reply","Last reply","Folder"]
+    : dir === "sent" ? ["Staff","Staff email","Address","Name","Handle","Messages","First","Last","Source"]
+    : ["Staff","Staff email","Address","Name","Handle","Messages","First","Last","Folder","We emailed them"];
+  const lines = [head.map(csvCell).join(",")].concat(rows.map(r => (
+      dir === "replied" ? [r.staffName||r.staff, r.staff, r.email, r.name, H(r), r.n||0, fmt(r.first), fmt(r.last), r.box]
+    : dir === "sent" ? [r.staffName||r.staff, r.staff, r.email, r.name, H(r), r.n||0, fmt(r.first), fmt(r.last), (r.src||[]).map(x => x==="tool"?"Tool":"Mailbox").join(" + ")]
+    : [r.staffName||r.staff, r.staff, r.email, r.name, H(r), r.n||0, fmt(r.first), fmt(r.last), r.box, r.emailed ? "Yes (reply)" : "No"]
   ).map(csvCell).join(",")));
   const who = ($("by").value || "all").replace(/@.*/,"");
-  downloadCsv("addresses_" + (sent?"sent":"received") + "_" + who + "_" + new Date().toISOString().slice(0,10) + ".csv", lines);
+  const tag = { replied:"replied", sent:"sent", recv:"received" }[dir];
+  downloadCsv("addresses_" + tag + "_" + who + "_" + new Date().toISOString().slice(0,10) + ".csv", lines);
 }
 
 /* 담당자별 채움 상태 — 네이버웍스에서 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 진행 · 오류 */

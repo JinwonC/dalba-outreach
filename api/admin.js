@@ -564,14 +564,20 @@ module.exports = async (req, res) => {
     // ─── 📒 주소록 — 담당자별 보낸/받은 외부 주소 (관리자 전용 · 제목·주소만, 본문 없음) ───
     //   dir=sent  보낸 주소: 메일함 보낸편지함(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록
     //   dir=recv  받은 주소: 받은편지함·사용자 폴더의 회사 밖 발신자 전부 (+ 우리가 보낸 적 있는지)
+    // 주소록엔 **내용을 싣지 않는다** — 제목(subj)은 저장은 하되 이 화면·응답에서는 뺀다.
+    //   dir=replied  회신 온 사람: 담당자 메일함으로 메일이 온 사람 중 우리가 보낸 적 있는 주소
+    //                (받은 주소록 + 회신 기록으로 보완 — 주소록을 채우는 중에도 바로 보이도록)
     if (view === "book") {
-      const dir = q.dir === "recv" ? "recv" : "sent";
+      const dir = q.dir === "recv" ? "recv" : q.dir === "replied" ? "replied" : "sent";
       const NM = nameByEmail();
       const staffList = by ? [by] : roster().map(a => String(a.email).toLowerCase());
       const contactedAll = new Set(sentAll.map(r => H.normEmail(r.to)).filter(Boolean));
+      // 이메일 → 핸들 (발송 기록에서) — 받은 쪽에도 핸들을 붙여 준다
+      const handleOf = new Map();
+      sentAll.forEach(r => { const e = H.normEmail(r.to), h = H.normHandle(r.handle); if (e && h && !handleOf.has(e)) handleOf.set(e, h); });
       const rows = [];
       for (const st of staffList) {
-        const book = await H.bookAll(dir, st);
+        const book = await H.bookAll(dir === "sent" ? "sent" : "recv", st);
         const map = new Map();
         book.forEach(b => map.set(b.email, Object.assign({ staff: st, staffName: NM.get(st) || st, src: ["mailbox"] }, b)));
         if (dir === "sent") {
@@ -598,13 +604,33 @@ module.exports = async (req, res) => {
           });
         } else {
           const sentTo = await H.sentToSet(st);
-          map.forEach(x => { x.emailed = sentTo.has(x.email) || contactedAll.has(x.email); });
+          map.forEach(x => { x.emailed = sentTo.has(x.email) || contactedAll.has(x.email); if (!x.handle && handleOf.has(x.email)) x.handle = handleOf.get(x.email); });
+          if (dir === "replied") {
+            // 받은 주소록이 아직 덜 채워졌어도 회신 기록에 있는 사람은 바로 보이게 보완한다
+            replyAll.forEach(r => {
+              if (replyStaff(r) !== st) return;
+              const e = H.normEmail(r.from);
+              if (!e) return;
+              let x = map.get(e);
+              if (!x) { x = { email: e, staff: st, staffName: NM.get(st) || st, n: 0, first: "", last: "", name: r.fromName || "", box: r.box || "", src: ["log"], fromLog: 0 }; map.set(e, x); }
+              x.emailed = true;
+              if (x.src && x.src[0] === "log") {
+                x.n++;
+                const at = String(r.at || "");
+                if (at && (!x.first || at < x.first)) x.first = at;
+                if (at >= String(x.last || "")) { x.last = at; if (r.box) x.box = r.box; }
+              }
+              if (!x.handle && handleOf.has(e)) x.handle = handleOf.get(e);
+            });
+            [...map.keys()].forEach(k => { if (!map.get(k).emailed) map.delete(k); });
+          }
         }
         map.forEach(x => rows.push(x));
       }
       const kept = rows.filter(x => withinDays({ at: x.last }, days) &&
-        (!needle || [x.email, x.name, x.subj, x.handle, x.box].filter(Boolean).join(" ").toLowerCase().indexOf(needle) >= 0))
-        .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
+        (!needle || [x.email, x.name, x.handle, x.box].filter(Boolean).join(" ").toLowerCase().indexOf(needle) >= 0))
+        .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")))
+        .map(x => { const o = Object.assign({}, x); delete o.subj; delete o.fromLog; return o; });   // 내용(제목)은 싣지 않는다
       // 담당자별 채움 상태 — 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 마지막 동기화 · 오류
       const status = [];
       for (const st of staffList) {
