@@ -32,9 +32,11 @@ module.exports = async (req, res) => {
     const peer = String(q.peer || "").trim().toLowerCase();
     if (!staffEmail || !peer) { res.status(400).json({ error: "staff 와 peer 가 필요합니다" }); return; }
 
-    // 자기 메일함은 언제나, 남의 메일함은 관리자만.
-    const mine = staffEmail === String(me.email || "").toLowerCase();
-    if (!mine && !A.isAdmin(me)) { res.status(403).json({ error: "남의 대화는 관리자만 볼 수 있습니다" }); return; }
+    // 자기 메일함은 언제나, 관리자 메일함은 본인 말고는 아무도, 그 외 담당자 메일함은 관리자만.
+    if (!A.canViewMailbox(me, staffEmail)) {
+      res.status(403).json({ error: A.adminEmails().includes(staffEmail) ? "관리자 메일함의 대화는 볼 수 없습니다" : "남의 대화는 관리자만 볼 수 있습니다" });
+      return;
+    }
 
     const account = A.findByEmail(staffEmail);
     if (!account) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + staffEmail }); return; }

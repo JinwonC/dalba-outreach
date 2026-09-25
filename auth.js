@@ -170,7 +170,21 @@ function isAdmin(user) {
   return Boolean(email && adminEmails().includes(email));
 }
 
+// 메일함 대화(본문)를 볼 수 있는가:
+//   · 본인 메일함 → 언제나
+//   · **관리자의 메일함** → 본인 말고는 아무도 (다른 관리자 포함). 어떤 화면에서든 숨긴다.
+//   · 그 외 담당자 메일함 → 관리자만
+function canViewMailbox(user, staffEmail) {
+  const me = String((user && user.email) || "").toLowerCase();
+  const box = String(staffEmail || "").toLowerCase();
+  if (!me || !box) return false;
+  if (me === box) return true;
+  if (adminEmails().includes(box)) return false;
+  return isAdmin(user);
+}
+
 module.exports = {
+  canViewMailbox,
   enabled, parseAccounts, findByLogin, findByEmail,
   makeToken, verifyToken, tokenFrom, currentUser, publicUser,
   adminEmails, isAdmin,

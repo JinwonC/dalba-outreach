@@ -194,6 +194,9 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 let VIEW = "summary";
+/* 대화(본문)를 열 수 없는 메일함 — 관리자 메일함(본인 제외). 서버가 매 응답에 알려 준다(서버도 막는다). */
+let HIDDEN_BOX = new Set();
+function canOpen(staff){ return Boolean(staff) && !HIDDEN_BOX.has(String(staff).toLowerCase()); }
 let ME = null;
 
 /* 발송 화면과 같은 세션 토큰을 쓴다 — 두 번 로그인하지 않도록 */
@@ -287,6 +290,7 @@ async function loadAdmin(){
   if(VIEW === "sent") qs.set("limit", "100000");   // 이메일 리스트업은 전부 받아야 한다
   if(VIEW === "book") qs.set("dir", BOOK_DIR);
   const d = await fetchJson("/api/admin?" + qs);
+  HIDDEN_BOX = new Set((d.hiddenMailboxes || []).map(x => String(x).toLowerCase()));
 
   if(d.historyEnabled === false){
     $("body").innerHTML = setupGuide(d);
@@ -662,8 +666,10 @@ function renderBlocked(d){
     const list = r.origins || [];
     const reps = r.replies || [];
     // 한 줄을 누르면 그 담당자 메일함의 그 크리에이터 대화(제목·내용)를 연다
-    const line = (staff, inner) => (to && staff)
-      ? '<div class="threadline" data-thread-staff="'+esc(staff)+'" data-thread-peer="'+esc(to)+'" style="cursor:pointer" title="이 메일 내용 보기">'+inner+'</div>'
+    // 관리자 메일함(본인 제외)은 대화를 열지 않는다 — 누가·언제만 보이고 '📄 내용' 링크가 없다
+    const line = (staff, inner) => (to && canOpen(staff))
+      ? '<div class="threadline" data-thread-staff="'+esc(staff)+'" data-thread-peer="'+esc(to)+'" style="cursor:pointer" title="이 메일 내용 보기">'+inner+
+          ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span></div>'
       : '<div>'+inner+'</div>';
     let h = "";
     if(!list.length) h += '<span class="muted">—</span>';
@@ -672,8 +678,7 @@ function renderBlocked(d){
       h += list.map(o => line(o.by,
         '<b>'+esc(o.byName||o.by||'—')+'</b> <span class="mono muted">'+esc(fmt(o.at))+'</span>'+
         (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
-        (o.forced ? ' <span class="tag forced">강제</span>' : '')+
-        ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span>')).join("");
+        (o.forced ? ' <span class="tag forced">강제</span>' : ''))).join("");
     }
     // 크리에이터가 회신했으면 — 누구에게·어떤 제목인지. 누르면 그 회신 내용이 열린다.
     if(reps.length){
@@ -681,8 +686,7 @@ function renderBlocked(d){
         reps.map(q => line(q.inbox||q.by,
           '<span class="tag" style="background:#e8f5ec;color:#1f7a44">💬 회신</span> '+
           '<b>'+esc(q.byName||q.by||'—')+'</b> <span class="mono muted">'+esc(fmt(q.at))+'</span>'+
-          (q.subject ? ' · <span class="muted">'+esc(q.subject)+'</span>' : '')+
-          ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span>')).join("") +
+          (q.subject ? ' · <span class="muted">'+esc(q.subject)+'</span>' : ''))).join("") +
         '</div>';
     }
     return h;
@@ -830,7 +834,7 @@ function renderRepliers(d){
       '<div class="note"><b>아직 회신 기록이 없습니다.</b><br />담당자별 탭에서 [🔄 메일함에서 동기화] 를 먼저 돌려 회신을 채우세요.</div>';
     return "";
   }
-  const cellFor = r => (r.email && r.inbox)
+  const cellFor = r => (r.email && canOpen(r.inbox))
     ? '<td class="threadcell" data-thread-staff="'+esc(r.inbox)+'" data-thread-peer="'+esc(r.email)+'" style="cursor:pointer" title="회신 내용 보기">' +
         '<b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div>' +
         ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span></td>'
@@ -1078,12 +1082,14 @@ function renderConversations(d){
       '</tbody></table></div></div>';
   }).join("");
   // onclick 을 문자열로 박지 않고 data-* + 위임으로 — 이메일에 따옴표가 섞여도 안전하다
-  [...document.querySelectorAll(".convrow")].forEach(tr =>
-    tr.addEventListener("click", () => openThread(tr.dataset.staff, tr.dataset.peer)));
+  [...document.querySelectorAll(".convrow")].forEach(tr => {
+    if(canOpen(tr.dataset.staff)) tr.addEventListener("click", () => openThread(tr.dataset.staff, tr.dataset.peer));
+  });
   return total + "명과 대화";
 }
 
 async function openThread(staff, peer){
+  if(!canOpen(staff)) return;   // 관리자 메일함(본인 제외)의 대화는 열지 않는다 — 서버도 거부한다
   $("threadModal").style.display = "flex";
   $("threadHead").innerHTML = esc(peer);
   $("threadBody").innerHTML = '<div class="muted" style="padding:24px 8px">불러오는 중… (메일함을 직접 읽습니다)</div>';
@@ -1120,7 +1126,7 @@ document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread()
 function threadCell(staff, to, name, badge){
   const b = badge || "";
   const label = '<b>'+esc(name||"—")+'</b>'+b+'<div class="muted">'+esc(to||"")+'</div>';
-  if(!to || !staff) return '<td>'+label+'</td>';
+  if(!to || !canOpen(staff)) return '<td>'+label+'</td>';
   return '<td class="threadcell" data-thread-staff="'+esc(staff)+'" data-thread-peer="'+esc(to)+'" ' +
     'style="cursor:pointer" title="대화 보기 — 메일함에서 제목·내용을 직접 읽습니다">' + label +
     ' <span class="muted" style="font-size:11px;white-space:nowrap">💬 대화</span></td>';
@@ -1173,14 +1179,14 @@ function renderPipeline(d){
   const bucket = {}; PIPE_STAGES.forEach(s => bucket[s.key] = []);
   rows.forEach(r => { (bucket[r.stage] || bucket.outreach).push(r); });
   $("body").innerHTML =
-    '<div class="muted" style="margin:-2px 0 10px;font-size:12.5px">'+esc(who)+' 님 기준 · 카드를 누르면 대화가 열립니다</div>' +
+    '<div class="muted" style="margin:-2px 0 10px;font-size:12.5px">'+esc(who)+' <span>'+(canOpen(who) ? '님 기준 · 카드를 누르면 대화가 열립니다' : '님 기준 · 관리자 메일함이라 대화는 열 수 없습니다')+'</span></div>' +
     '<div class="kan">' + PIPE_STAGES.map(s => {
       const list = bucket[s.key];
       return '<div class="kcol"><div class="khead"><span class="kdot" style="background:'+s.color+'"></span>' +
         esc(s.label) + '<span class="kcount">'+list.length+'</span></div>' +
         '<div class="klist">' + (list.length ? list.map(pipeCard).join("") : '<div class="kempty">없음</div>') + '</div></div>';
     }).join("") + '</div>';
-  [...document.querySelectorAll(".kcard")].forEach(el =>
+  if(canOpen(who)) [...document.querySelectorAll(".kcard")].forEach(el =>
     el.addEventListener("click", () => openThread(who, el.dataset.peer)));
   return rows.length + "명";
 }

@@ -54,7 +54,10 @@ module.exports = async (req, res) => {
     // 본인 메일함은 누구나, 남의 메일함은 관리자만. 제목·주소만 보고 본문은 읽지 않는다.
     if (req.method === "GET" && req.query && req.query.diagnose) {
       const wanted = String(req.query.user || me.email).trim().toLowerCase();
-      if (wanted !== String(me.email).toLowerCase() && !isAdmin(me)) { res.status(403).json({ error: "다른 담당자의 메일함은 관리자만 볼 수 있습니다" }); return; }
+      if (!A.canViewMailbox(me, wanted)) {
+        res.status(403).json({ error: A.adminEmails().includes(wanted) ? "관리자 메일함은 볼 수 없습니다" : "다른 담당자의 메일함은 관리자만 볼 수 있습니다" });
+        return;
+      }
       const acc = A.findByEmail(wanted);
       if (!acc) { res.status(404).json({ error: "등록되지 않은 담당자입니다: " + wanted }); return; }
       const since = String(req.query.since || S.SINCE_DEFAULT);

@@ -441,6 +441,8 @@ module.exports = async (req, res) => {
       me: A.publicUser(me),
       // 등록된 직원 명단. 어느 탭에서 시작하든 담당자 선택칸이 채워져 있어야 한다
       accounts: roster(),
+      // 대화(본문)를 열 수 없는 메일함 — 관리자 메일함(본인 제외). 화면은 이 메일함에 대화 링크를 두지 않는다
+      hiddenMailboxes: A.adminEmails().filter(e => e !== meEmail),
       // 자동 동기화가 언제 돌았는지 — 숫자가 낡았는지 화면에서 바로 알 수 있어야 한다
       cron: cronStatus,
       // 저장소에 실제로 쌓인 전체 건수 (LLEN — 표시 개수·필터와 무관하게 항상 정확하다)
@@ -553,7 +555,12 @@ module.exports = async (req, res) => {
     }
 
     if (view === "replies") { res.status(200).json(Object.assign(base, { rows: replies })); return; }
-    if (view === "conversations") { res.status(200).json(Object.assign(base, { rows: conversations(sent, replies) })); return; }
+    if (view === "conversations") {
+      // 관리자 메일함의 대화는 목록에도 올리지 않는다 (본인 것만 예외)
+      const rows = conversations(sent, replies).filter(g => A.canViewMailbox(me, g.by));
+      res.status(200).json(Object.assign(base, { rows }));
+      return;
+    }
     // ─── 📒 주소록 — 담당자별 보낸/받은 외부 주소 (관리자 전용 · 제목·주소만, 본문 없음) ───
     //   dir=sent  보낸 주소: 메일함 보낸편지함(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록
     //   dir=recv  받은 주소: 받은편지함·사용자 폴더의 회사 밖 발신자 전부 (+ 우리가 보낸 적 있는지)
