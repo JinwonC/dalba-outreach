@@ -609,6 +609,34 @@ async function messagesWith(acct, peer) {
   return (vals || []).map(parseRec).filter(Boolean).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
 }
 
+// ─── 실시간 접속 (presence) ────────────────────────────────────────
+// 열어 둔 화면이 주기적으로 신호를 보낸다(하트비트). 마지막 신호 시각으로 접속 중/자리 비움을 가린다.
+//   outreach:presence        ZSET  이메일 → 마지막 신호(ms)
+//   outreach:presence:info   HASH  이메일 → { name, page, view, at }
+const PRES_KEY = "outreach:presence", PRES_INFO = "outreach:presence:info";
+async function presencePing(email, info, now, leave) {
+  const e = normEmail(email);
+  if (!enabled() || !e) return [];
+  const t = Number(now) || Date.now();
+  const cmds = leave
+    ? [["ZREM", PRES_KEY, e], ["HDEL", PRES_INFO, e]]
+    : [["ZADD", PRES_KEY, String(t), e], ["HSET", PRES_INFO, e, JSON.stringify(Object.assign({}, info, { at: t }))]];
+  cmds.push(["ZREMRANGEBYSCORE", PRES_KEY, "0", String(t - 86400e3)]);          // 하루 지난 기록 정리
+  cmds.push(["ZRANGEBYSCORE", PRES_KEY, String(t - 300e3), "+inf", "WITHSCORES"]); // 최근 5분
+  cmds.push(["HGETALL", PRES_INFO]);
+  const out = await pipeline(cmds);
+  const range = out[out.length - 2] || [], infoAll = out[out.length - 1] || [];
+  const infos = new Map();
+  if (Array.isArray(infoAll)) { for (let i = 0; i + 1 < infoAll.length; i += 2) infos.set(infoAll[i], parseRec(infoAll[i + 1]) || {}); }
+  else if (infoAll && typeof infoAll === "object") Object.keys(infoAll).forEach(k => infos.set(k, parseRec(infoAll[k]) || {}));
+  const people = [];
+  for (let i = 0; i + 1 < range.length; i += 2) {
+    const who = range[i], at = Number(range[i + 1]) || 0;
+    people.push(Object.assign({ email: who }, infos.get(who) || {}, { at }));
+  }
+  return people;
+}
+
 // ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
 // 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
 // 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
@@ -899,7 +927,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany,
+  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, presencePing,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

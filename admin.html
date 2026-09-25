@@ -130,6 +130,7 @@
     <h1>📊 관리자 페이지</h1>
     <span class="who" id="who"></span>
     <span class="grow"></span>
+    <span id="presence"></span>
     <span class="langs" id="langs"></span>
     <a class="btn" href="/index.html">✉️ 발송 화면</a>
     <button class="btn" onclick="logout()">로그아웃</button>
@@ -186,6 +187,7 @@
 </div>
 
 <script src="/i18n.js"></script>
+<script src="/presence.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
@@ -231,6 +233,7 @@ function person(r){ return esc(r.byName || r.by || "—"); }
 /* ── 탭 ── */
 function go(v){
   VIEW = v;
+  if(window.Presence) Presence.refresh();   // 어느 화면에 있는지 곧바로 알림
   [...document.querySelectorAll(".tab")].forEach(t => {
     t.className = "tab" + (t.dataset.v === v ? " active" : "");
   });
@@ -1182,6 +1185,7 @@ async function boot(){
     // 이름은 사람마다 다르므로 번역 대상에서 분리한다 — "· 관리자" 만 사전에 있으면 된다
     $("who").innerHTML = ME ? esc(ME.name || ME.email) + ' <span>· 관리자</span>' : "";
     fillStaffPicker(d.accounts);
+    if(ME && window.Presence) Presence.start({ page:"admin", getView: () => VIEW, headers, mount: $("presence") });
     // 저장소 미연결은 본문에서 설명하므로 위에 빨간 띠를 겹쳐 띄우지 않는다
     if(d.error && d.historyEnabled !== false){ $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>'; }
     go("summary");
