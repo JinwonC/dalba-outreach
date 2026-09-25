@@ -24,7 +24,9 @@
 // 중복인지 알 수 없는 상태이므로 기본적으로 보내지 않고, 담당자가 [강제 발송] 으로만
 // 넘어갈 수 있다. 켜 놓고 조용히 중복이 나가는 것이 가장 나쁜 결과이기 때문이다.
 
-const WINDOW_DAYS = Math.max(1, Number(process.env.HISTORY_DAYS || 90));
+// 차단 기간(일). 기본 365일 — "5월부터 한 번 접촉한 크리에이터는 다시 안 보낸다"를 지키려면
+// 90일로는 5~6월 발송이 풀린다. 환경변수 HISTORY_DAYS 로 바꿀 수 있다(Vercel 에 90 이 들어 있으면 그게 우선).
+const WINDOW_DAYS = Math.max(1, Number(process.env.HISTORY_DAYS || 365));
 const TTL_SEC = Math.round(WINDOW_DAYS * 86400);
 
 const LOG_KEY = "outreach:log";          // 성공한 발송
@@ -149,7 +151,9 @@ const BRIDGE_E2H = "outreach:bridge:e2h";
 const bridgeHKey = h => "outreach:bridge:h:" + h;
 const BRIDGE_VER_KEY = "outreach:bridge:ver";
 const BRIDGE_PROGRESS_KEY = "outreach:bridge:progress";
-const BRIDGE_VER = "2";
+// v3: 연결 + 발송 로그 **전체**의 차단 키를 현재 차단 기간으로 다시 건다(만료된 5~6월 발송 되살리기).
+// 차단 기간을 바꾸면 버전이 달라져 다시 돈다.
+const BRIDGE_VER = "3:" + WINDOW_DAYS;
 
 function linkCmds(email, handle) {
   const e = normEmail(email), h = normHandle(handle);
@@ -198,8 +202,9 @@ function parseRec(s) {
 
 // ─── 조회 ────────────────────────────────────────────────────────
 // 수신자 목록을 받아 같은 순서로 [이전 발송기록 | null] 을 돌려준다.
-async function lookup(list) {
+async function lookup(list, me) {
   const items = Array.isArray(list) ? list : [];
+  const meN = normEmail(me || "");
   if (!enabled()) return items.map(() => null);
 
   // 수신자마다 키 개수가 달라서 인덱스가 밀리지 않도록 위치를 기록해 둔다.
@@ -214,13 +219,21 @@ async function lookup(list) {
   });
 
   const out = await pipeline(cmds);
-  return spans.map(s => {
+  // 담당자 보낸편지함(주소록)도 대조 — 단체·숨은참조로 보낸 상대
+  const emailsOf = idx => [normEmail(items[idx] && (items[idx].to || items[idx].email))].concat(links[idx].emails || []).filter(Boolean);
+  const bp = await bookSentPriors([].concat(...items.map((_, i) => emailsOf(i))));
+  return spans.map((s, idx) => {
+    const cands = [];
     for (let i = 0; i < s.n; i++) {
       const rec = parseRec(out[s.at + i]);
       // 제외 발신자(예: minju)의 기록은 '이미 보낸 것'으로 치지 않는다
-      if (rec && !isIgnoredSender(rec.by)) return rec;
+      if (rec && !isIgnoredSender(rec.by)) cands.push(rec);
     }
-    return null;
+    emailsOf(idx).forEach(e => (bp.get(e) || []).forEach(p => { if (!isIgnoredSender(p.by)) cands.push(p); }));
+    if (!cands.length) return null;
+    // 보내는 사람을 알면 **다른 담당자** 기록을 우선 (본인 기록은 보류 사유가 아니다)
+    if (meN) { const other = cands.find(c => normEmail(c.by) !== meN); if (other) return other; }
+    return cands[0];
   });
 }
 
@@ -266,7 +279,8 @@ async function reserve(r, meta, force) {
   // 예: 예전에 이메일 A 로만 보냈던 크리에이터(핸들 X 와 연결됨)에게 지금 이메일 B + 핸들 X 로
   // 보내면, 자기 키(B·X)에는 기록이 없어도 연결된 A 키에 다른 담당자 기록이 있다 → 막는다.
   // 연결 키에는 자리를 잡지 않는다(보내는 주소가 아니므로) — 실패 시 반납할 것도 없다.
-  const aliasKeys = aliasKeysOf((await bridge([r]))[0]).filter(k => keys.indexOf(k) < 0);
+  const br = (await bridge([r]))[0] || { handles: [], emails: [] };
+  const aliasKeys = aliasKeysOf(br).filter(k => keys.indexOf(k) < 0);
   if (aliasKeys.length) {
     const vals = await pipeline(aliasKeys.map(k => ["GET", k]));
     for (let i = 0; i < aliasKeys.length; i++) {
@@ -278,6 +292,22 @@ async function reserve(r, meta, force) {
         if (approved) continue;
       }
       return { ok: false, prior: Object.assign({}, prior, { linked: true }) };
+    }
+  }
+
+  // ── 다른 담당자 보낸편지함(주소록) 대조 — 단체·참조·숨은참조로 이미 보낸 상대도 막는다 ──
+  const bookEmails = [normEmail(r && (r.to || r.email))].concat(br.emails || []).filter(Boolean);
+  if (bookEmails.length) {
+    const bp = await bookSentPriors(bookEmails);
+    const priors = [].concat(...bookEmails.map(x => bp.get(x) || []));
+    for (const p of priors) {
+      if (isIgnoredSender(p.by)) continue;
+      if (me && p.by === me) continue;                       // 본인이 보낸 적 있으면 재발송 허용
+      if (me) {
+        if (!approvalChecked) { approved = await isApproved(r, me); approvalChecked = true; }
+        if (approved) continue;
+      }
+      return { ok: false, prior: p };
     }
   }
 
@@ -413,9 +443,11 @@ async function sentToSet(acct) {
 // 본문은 저장하지 않는다. 한 번 훑은 메일은 커서가 넘어가므로 같은 메일을 두 번 세지 않는다.
 const bookKey = (dir, acct) => "outreach:book:" + dir + ":" + normEmail(acct);
 // agg: Map(주소 → {n, first, last, subj, name, box}) — 이번에 훑은 분량을 합쳐 기존 값에 더한다
+const BOOK_OWNERS = "outreach:book:owners";   // 보낸 주소록이 있는 메일함 목록 (중복 차단 대조용)
 async function bookMerge(dir, acct, agg) {
   if (!enabled() || !agg || !agg.size) return 0;
   const key = bookKey(dir, acct);
+  if (dir === "sent") { try { await cmd(["SADD", BOOK_OWNERS, normEmail(acct)]); } catch (_) {} }
   const emails = [...agg.keys()];
   for (let i = 0; i < emails.length; i += 400) {
     const part = emails.slice(i, i + 400);
@@ -437,6 +469,45 @@ async function bookMerge(dir, acct, agg) {
   }
   return emails.length;
 }
+// ─── 중복 차단: 모든 담당자 보낸편지함(주소록) 대조 ────────────────────
+// 네이버웍스에서 직접 보낸 메일 — 단체 발송·참조·숨은참조까지 — 의 상대도 '이미 접촉한 사람'이다.
+// 이메일들 → Map(이메일 → [{by: 보낸 메일함, at: 마지막 발송, n, source:"mailbox"}]) (차단 기간 안만)
+function withinWindow(at) { const t = Date.parse(at || ""); return !isFinite(t) || (Date.now() - t) <= WINDOW_DAYS * 86400e3; }
+async function bookSentPriors(emails) {
+  const list = [...new Set((emails || []).map(normEmail).filter(e => e && e.indexOf("@") > 0))];
+  const out = new Map();
+  if (!enabled() || !list.length) return out;
+  let owners = [];
+  try { owners = (await cmd(["SMEMBERS", BOOK_OWNERS])) || []; } catch (_) { return out; }
+  if (!owners.length) return out;
+  let res = [];
+  try { res = await pipeline(owners.map(o => ["HMGET", bookKey("sent", o)].concat(list))); } catch (_) { return out; }
+  let names = null;
+  const nameOf = o => {
+    if (!names) { names = new Map(); try { require("./auth.js").parseAccounts().forEach(a => names.set(normEmail(a.email), a.name || "")); } catch (_) {} }
+    return names.get(normEmail(o)) || "";
+  };
+  owners.forEach((o, i) => {
+    const vals = res[i] || [];
+    list.forEach((e, j) => {
+      const b = parseRec(vals[j]);
+      if (!b) return;
+      const at = b.last || b.first || "";
+      if (!withinWindow(at)) return;
+      const arr = out.get(e) || [];
+      arr.push({ to: e, by: normEmail(o), byName: nameOf(o), at, n: Number(b.n) || 1, campaign: "", source: "mailbox" });
+      out.set(e, arr);
+    });
+  });
+  out.forEach(arr => arr.sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))));
+  return out;
+}
+
+async function bookOwners() {
+  if (!enabled()) return [];
+  try { return (await cmd(["SMEMBERS", BOOK_OWNERS])) || []; } catch (_) { return []; }
+}
+
 async function bookCount(dir, acct) {
   if (!enabled()) return 0;
   try { return Number(await cmd(["HLEN", bookKey(dir, acct)])) || 0; } catch (_) { return 0; }
@@ -539,10 +610,12 @@ async function rebuildBridge(opts) {
     if (!r) continue;
     const e = normEmail(r.to), h = normHandle(r.handle);
     if (e && h && e.indexOf("@") > 0) pairs.set(e + "|" + h, [e, h]);
-    if (h && legacyNormHandle(r.handle) !== h) {
-      const k = handleKey(h), cur = rekeys.get(k);
+    // 이메일·핸들 차단 키마다 가장 최근 발송 기록으로 다시 건다 (비어 있을 때만 — NX)
+    if (isIgnoredSender(r.by)) continue;
+    [e ? emailKey(e) : "", h ? handleKey(h) : ""].filter(Boolean).forEach(k => {
+      const cur = rekeys.get(k);
       if (!cur || String(r.at || "") > String(cur.at || "")) rekeys.set(k, r);
-    }
+    });
   }
   const jobs = [];
   [...pairs.keys()].sort().forEach(k => { const [e, h] = pairs.get(k); jobs.push(...linkCmds(e, h)); });
@@ -569,6 +642,37 @@ async function rebuildBridge(opts) {
     ? [["SET", BRIDGE_VER_KEY, BRIDGE_VER], ["DEL", BRIDGE_PROGRESS_KEY]]
     : [["SET", BRIDGE_PROGRESS_KEY, String(i)]]);
   return { done, pairs: pairs.size, rekeyed: rekeys.size, processed: i - start, total: jobs.length };
+}
+
+// 여러 건을 한 번에 가져온다 — importSend 를 한 통씩 부르면 저장소 왕복이 수천 번이라 느리다.
+// 규칙은 importSend 와 같다: 차단 키는 (남은 기간이 있으면) 비어 있을 때만 잡고, 로그는 처음 가져올 때만.
+async function importSends(list) {
+  const items = (list || []).filter(x => x && x.rec);
+  const res = { imported: 0, duplicate: 0, blocking: 0, expired: 0 };
+  if (!enabled() || !items.length) return res;
+  for (let i = 0; i < items.length; i += 300) {
+    const chunk = items.slice(i, i + 300);
+    const seen = await pipeline(chunk.map(x => x.id ? ["SISMEMBER", IMPORTED_KEY, String(x.id)] : ["ECHO", "0"]));
+    const cmds = [], setPos = [];
+    let logged = false;
+    const batchIds = new Set();
+    chunk.forEach((x, j) => {
+      const val = JSON.stringify(x.rec), ttl = remainingTtl(x.rec.at);
+      const pos = [];
+      if (ttl > 0) keysOf(x.rec).forEach(k => { pos.push(cmds.length); cmds.push(["SET", k, val, "NX", "EX", String(ttl)]); });
+      setPos.push(pos);
+      const dup = (x.id && (Number(seen[j]) === 1 || batchIds.has(x.id)));
+      if (dup) { res.duplicate++; return; }
+      if (x.id) { batchIds.add(x.id); cmds.push(["SADD", IMPORTED_KEY, String(x.id)]); }
+      cmds.push(["LPUSH", LOG_KEY, val]); logged = true;
+      res.imported++; if (ttl <= 0) res.expired++;
+    });
+    if (logged) cmds.push(["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]);
+    if (!cmds.length) continue;
+    const out = await pipeline(cmds);
+    setPos.forEach(ps => { if (ps.some(p => out[p] === "OK")) res.blocking++; });
+  }
+  return res;
 }
 
 // ─── 지난 발송 가져오기 (보낸편지함 → 이력) ─────────────────────
@@ -774,7 +878,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender,
+  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

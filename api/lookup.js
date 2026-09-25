@@ -39,6 +39,21 @@ async function buildIndex() {
   ]);
   // 제외 발신자의 발송은 중복 계산에 넣지 않는다 (DEDUP_IGNORE_SENDERS)
   const sent = (sentAll || []).filter(r => r && !H.isIgnoredSender(r.by));
+  // 담당자 보낸편지함(주소록) — 네이버웍스에서 단체·참조·숨은참조로 보낸 상대도 '보낸 적 있음'.
+  // 발송 기록에 이미 그 담당자→그 주소가 있으면 같은 발송이므로 더하지 않는다.
+  try {
+    const have = new Set(sent.map(r => H.normEmail(r.by) + "|" + H.normEmail(r.to)));
+    const names = new Map(A.parseAccounts().map(a => [H.normEmail(a.email), a.name || ""]));
+    for (const owner of await H.bookOwners()) {
+      if (H.isIgnoredSender(owner)) continue;
+      for (const b of await H.bookAll("sent", owner)) {
+        const e = H.normEmail(b.email);
+        if (!e || have.has(H.normEmail(owner) + "|" + e)) continue;
+        sent.push({ to: e, by: owner, byName: names.get(H.normEmail(owner)) || owner, at: b.last || b.first || "",
+          campaign: "", count: Number(b.n) || 1, source: "mailbox" });
+      }
+    }
+  } catch (_) { /* 주소록을 못 읽어도 발송 기록만으로 검사는 계속 */ }
   const sEmail = new Map(), sHandle = new Map(), e2h = new Map(), h2e = new Map();
   const push = (map, k, v) => { if (!k) return; let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(v); };
   const link = (map, k, v) => { let a = map.get(k); if (!a) { a = new Set(); map.set(k, a); } a.add(v); };
@@ -72,7 +87,7 @@ function summarizeOne(q, idx, match) {
   const a = { count: 0, senders: new Set(), lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" };
   ids.forEach(i => {
     const r = idx.sent[i];
-    a.count++;
+    a.count += Number(r.count) || 1;
     const who = r.byName || r.by || "";
     if (who) a.senders.add(who);
     if (String(r.at || "") > String(a.lastAt)) { a.lastAt = r.at || ""; a.lastBy = who; a.lastCampaign = r.campaign || ""; a.forced = Boolean(r.forced); }

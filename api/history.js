@@ -49,7 +49,9 @@ module.exports = async (req, res) => {
     if (!recipients.length) { res.status(400).json({ error: "recipients 가 비어 있습니다" }); return; }
     if (recipients.length > 2000) { res.status(400).json({ error: "한 번에 2000명까지 확인할 수 있습니다" }); return; }
 
-    const priors = await H.lookup(recipients);
+    // 보내는 사람(로그인)을 넘기면 **다른 담당자** 기록을 우선 보여준다 (본인 기록은 보류 사유가 아님)
+    const me = A.enabled() ? A.currentUser(req) : null;
+    const priors = await H.lookup(recipients, me && me.email);
     // 협업 리스트 대조 — 핸들이 비어 있어도 이메일(시트·발송 기록 연결·주소 추정)로 잡는다
     const match = await IH.matcher();
     let links = [];

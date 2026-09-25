@@ -78,7 +78,7 @@ async function readSent(account, opts) {
   const minUid = o.useCursor ? await getUidCursor(ck, account) : 0;
   const mail = await M.read(account, {
     kind: "sent", since: o.since || SINCE_DEFAULT,
-    limit: scanLimit(o), minUid, budgetMs: o.budgetMs
+    limit: scanLimit(o), minUid, budgetMs: o.budgetMs, oldestFirst: Boolean(o.oldestFirst)
   });
   // deferCursor: 호출한 쪽이 결과를 저장한 **뒤에** 커서를 올린다 (저장 실패 시 다시 읽도록)
   const nextCursor = maxUidOf(mail.rows);
@@ -113,19 +113,20 @@ async function readSent(account, opts) {
 }
 
 async function writeSent(account, rows) {
-  let imported = 0, duplicate = 0, blocking = 0, expired = 0;
-  for (const r of rows) {
-    // messageId 가 없는 서버도 있으므로 계정+주소+시각으로 대체 키를 만든다
-    const id = r.messageId || (account.email + "|" + r.to + "|" + r.at);
-    const out = await H.importSend(r, id);
-    if (out.duplicate) { duplicate++; continue; }
-    if (out.imported) {
-      imported++;
-      if (out.blocking) blocking++;
-      if (out.expired) expired++;
-    }
-  }
-  return { imported, duplicate, blocking, expired };
+  // 한 번에 일괄로 (한 통씩 저장소를 왕복하면 과거분 가져오기가 함수 제한시간을 넘긴다).
+  // messageId 가 없는 서버도 있으므로 계정+주소+시각으로 대체 키를 만든다.
+  // 한 메일에 수신자가 여럿이면 메일 id 에 주소를 붙여 사람마다 따로 기록한다.
+  // (예전엔 같은 메일의 수신자들이 id 를 공유해 **첫 수신자만** 기록됐다. 첫 수신자는 예전 id 를 그대로 써서
+  //  이미 가져온 건 다시 쌓지 않고, 나머지 수신자는 id 에 주소를 붙여 새로 기록한다.)
+  const firstSeen = new Set();
+  return H.importSends((rows || []).map(r => {
+    let id;
+    if (r.messageId) {
+      id = firstSeen.has(r.messageId) ? r.messageId + "|" + H.normEmail(r.to) : r.messageId;
+      firstSeen.add(r.messageId);
+    } else id = account.email + "|" + r.to + "|" + r.at;
+    return { rec: r, id };
+  }));
 }
 
 // 우리가 보낸 적 있는 주소 (전 담당자 발송 이력)
@@ -304,7 +305,10 @@ async function syncAccount(account, contacted, opts) {
   const until = Number(o.until) || (Date.now() + 48e3);
   const left = () => until - Date.now();
 
-  const sentRead = await readSent(account, Object.assign({}, o, { budgetMs: Math.max(3000, Math.min(12000, left() - 20000)) }));
+  // 발송 기록 가져오기(중복 차단용). v2 커서: 보낸편지함 폴더 인식 버그로 예전 커서가 엉뚱한 폴더를
+  // 기준으로 앞서 가 있을 수 있어 5월부터 다시 — 오래된 것부터 400통씩 이어서, 일괄 저장.
+  const sentRead = await readSent(account, Object.assign({}, o, { cursorKey: "sent2", oldestFirst: true, limit: 400,
+    budgetMs: Math.max(3000, Math.min(12000, left() - 20000)) }));
   const sentWrite = await writeSent(account, sentRead.rows);
   // 방금 넣은 발송분도 회신 대조 대상이 되도록 목록을 갱신한다
   sentRead.rows.forEach(r => {

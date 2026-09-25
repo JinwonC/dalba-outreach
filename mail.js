@@ -132,7 +132,9 @@ async function read(account, opts) {
       const useMin = o.minUid && fmax >= Number(o.minUid);
       const uids = (useMin ? found.filter(u => Number(u) > Number(o.minUid)) : found);
       total = uids.length;
-      const take = uids.slice(-limit);   // 검색 결과는 오름차순이므로 뒤쪽이 최신
+      // 기본은 최신 limit 통. oldestFirst 면 **오래된 것부터** limit 통 — 커서와 함께 조금씩 이어서
+      // 처리할 때 쓴다(최신부터 자르면 커서가 앞질러 가 오래된 메일을 영영 건너뛴다).
+      const take = o.oldestFirst ? uids.slice(0, limit) : uids.slice(-limit);   // 오름차순: 뒤쪽이 최신
 
       if (take.length) {
         const q = o.withBody ? { envelope: true, source: { start: 0, maxLength: BODY_FETCH_BYTES } } : { envelope: true };
