@@ -851,7 +851,7 @@ function renderRepliers(d){
 
 /* ── 📒 주소록 ──
    담당자별로 누구에게 보냈는지(보낸 주소) · 누구에게서 받았는지(받은 주소). 제목·주소만, 본문 없음.
-   한 줄을 누르면 그 담당자 메일함의 그 사람과의 대화를 연다. */
+   메일 내용(대화)은 여기서 열 수 없다. */
 let BOOK_DIR = "sent";
 let BOOK_ROWS = [];
 function setBookDir(d){ BOOK_DIR = d; load(); }
@@ -876,10 +876,8 @@ function renderBook(d){
     $("body").innerHTML = toggle + note + '<div class="muted" style="padding:20px 0">아직 채워진 주소가 없습니다 — [🔄 네이버웍스에서 지금 채우기] 를 누르세요.</div>';
     return "";
   }
-  const cell = r => (r.email && r.staff)
-    ? '<td class="threadcell" data-thread-staff="'+esc(r.staff)+'" data-thread-peer="'+esc(r.email)+'" style="cursor:pointer" title="대화 보기">' +
-        '<b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div></td>'
-    : '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+'</div></td>';
+  // 주소록은 **주소만** — 줄을 눌러 메일 내용(대화)을 여는 기능은 두지 않는다
+  const cell = r => '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div></td>';
   const SRC = { tool:'<span class="tag" style="background:#e7f0ff;color:#2f5fb0">툴 발송</span>', mailbox:'<span class="tag" style="background:#f1f1f1;color:#555">메일함</span>' };
   $("body").innerHTML = toggle + note +
     '<div class="scroll"><table><thead><tr>' +
