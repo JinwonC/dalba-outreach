@@ -145,7 +145,6 @@
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="repliers" onclick="go('repliers')">📨 회신 온 인원</button>
     <button class="tab" data-v="book" onclick="go('book')">📒 주소록</button>
-    <button class="tab" data-v="sent" onclick="go('sent')">발송 이력</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
   </div>
 
@@ -287,7 +286,6 @@ async function loadAdmin(){
   if($("by").value) qs.set("by", $("by").value);
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
   if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
-  if(VIEW === "sent") qs.set("limit", "100000");   // 이메일 리스트업은 전부 받아야 한다
   if(VIEW === "book") qs.set("dir", BOOK_DIR);
   const d = await fetchJson("/api/admin?" + qs);
   HIDDEN_BOX = new Set((d.hiddenMailboxes || []).map(x => String(x).toLowerCase()));
@@ -296,16 +294,9 @@ async function loadAdmin(){
     $("body").innerHTML = setupGuide(d);
     return "";
   }
-  // 발송 이력 화면에선 같은 필터의 '중복으로 실패한 시도'도 함께 받아 따로 보여준다
-  if(VIEW === "sent"){
-    const bqs = new URLSearchParams(qs); bqs.set("view", "blocked");
-    try { const bd = await fetchJson("/api/admin?" + bqs); d.blockedRows = (bd && bd.rows) || []; }
-    catch(e){ d.blockedRows = []; }
-  }
   if(VIEW === "daily")   return renderDaily(d);
   if(VIEW === "weekly")  return renderWeekly(d);
   if(VIEW === "summary") return renderSummary(d);
-  if(VIEW === "sent")    return renderSent(d);
   if(VIEW === "blocked") return renderBlocked(d);
   if(VIEW === "conversations") return renderConversations(d);
   if(VIEW === "repliers")  return renderRepliers(d);
@@ -564,93 +555,8 @@ function renderWeekly(d){
   return "";
 }
 
-let SENT_EMAILS = [], BLOCKED_EMAILS = [], EXPORT_ROWS = [];
-function renderSent(d){
-  const rows = d.rows || [];
-  const blocked = d.blockedRows || [];
-  const staffLabel = (($("by").selectedOptions||[])[0] || {}).textContent || "담당자 전체";
-  // 고유 이메일 — 발송 / 중복실패 각각 (담당자 선택칸으로 걸러진 결과)
-  SENT_EMAILS = [...new Set(rows.map(r => String(r.to||"").trim().toLowerCase()).filter(Boolean))];
-  BLOCKED_EMAILS = [...new Set(blocked.map(r => String(r.to||"").trim().toLowerCase()).filter(Boolean))];
-  // 엑셀(CSV) 내보내기용 행 — 발송 + 중복실패 를 상태 열로 구분
-  EXPORT_ROWS = rows.map(r => ({ status:"발송", to:r.to, name:r.name, handle:r.handle, campaign:r.campaign, by:r.byName||r.by, at:r.at, prior:"" }))
-    .concat(blocked.map(r => ({ status:"중복실패", to:r.to, name:r.name, handle:r.handle, campaign:r.campaign, by:r.byName||r.by, at:r.at, prior:(r.prior&&(r.prior.byName||r.prior.by))||"" })));
-
-  const bar = '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
-    '<button class="btn dark" onclick="copyEmails(\'sent\')">📋 발송 이메일 복사 (' + SENT_EMAILS.length + ')</button>' +
-    '<button class="btn" onclick="copyEmails(\'blocked\')">⏸ 중복실패 이메일 복사 (' + BLOCKED_EMAILS.length + ')</button>' +
-    '<button class="btn" onclick="exportSentCsv()">⬇️ Excel(CSV) 내보내기</button>' +
-    '<span class="muted"><b>' + esc(staffLabel) + '</b> · 발송 ' + SENT_EMAILS.length + ' · 중복실패 ' + BLOCKED_EMAILS.length +
-      (d.truncated ? ' · 일부만 (기간·검색으로 좁히세요)' : '') + '</span>' +
-    '<span class="muted" id="copyMsg"></span></div>';
-
-  let h = truncNote(d) + emptyNote(d) + ((rows.length || blocked.length) ? bar : "");
-  h += '<div class="scroll"><table><thead><tr>' +
-    '<th>보낸 시각</th><th>받는 사람</th><th>핸들</th><th>캠페인</th><th>담당자</th>' +
-    '</tr></thead><tbody>' +
-    rows.map(r =>
-      '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
-      threadCell(r.by, r.to, r.name) +
-      '<td class="muted">'+esc(r.handle||"")+'</td>' +
-      '<td>'+esc(r.campaign||"")+(r.forced ? ' <span class="tag forced">강제</span>' : '')+'</td>' +
-      '<td>'+person(r)+'</td></tr>').join("") +
-    '</tbody></table></div>';
-
-  // 중복으로 실패한 시도 — 따로 표기
-  if(blocked.length){
-    h += '<h3 style="margin:18px 0 6px;font-size:15px">⏸ 중복으로 실패한 시도 (' + blocked.length + ')</h3>' +
-      '<div class="scroll"><table><thead><tr><th>시도 시각</th><th>대상</th><th>핸들</th><th>원래 보낸 사람</th><th>캠페인</th></tr></thead><tbody>' +
-      blocked.map(r =>
-        '<tr><td class="mono muted">'+esc(fmt(r.at))+'</td>' +
-        '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.to)+'</div></td>' +
-        '<td class="muted">'+esc(r.handle||"")+'</td>' +
-        '<td>'+esc((r.prior&&(r.prior.byName||r.prior.by))||"—")+'</td>' +
-        '<td>'+esc(r.campaign||"")+'</td></tr>').join("") +
-      '</tbody></table></div>';
-  }
-  if(!rows.length && !blocked.length) h += '<div class="muted" style="padding:20px 0">해당하는 기록이 없습니다.</div>';
-  $("body").innerHTML = h;
-  return rows.length + "건";
-}
-
-/* 담당자로 걸러진 고유 이메일을 클립보드로 — kind: 'sent' | 'blocked' */
-function copyEmails(kind){
-  const list = (kind === "blocked" ? BLOCKED_EMAILS : SENT_EMAILS) || [];
-  if(!list.length){ alert("복사할 이메일이 없습니다."); return; }
-  const txt = list.join("\n");
-  const done = () => { const m = $("copyMsg"); if(m) m.textContent = list.length + "개 복사됨"; };
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
-  } else fallbackCopy(txt, done);
-}
-function fallbackCopy(txt, done){
-  const ta = document.createElement("textarea"); ta.value = txt;
-  ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
-  try { document.execCommand("copy"); } catch(e){}
-  ta.remove(); if(done) done();
-}
-
-/* 발송 + 중복실패를 하나의 CSV(엑셀에서 열림)로 내려받는다. BOM 을 붙여 한글이 안 깨진다. */
+/* CSV 칸 이스케이프 (승인 내역·회신 인원·주소록 내보내기 공용). 따옴표·쉼표·줄바꿈이 섞여도 엑셀에서 안 깨진다. */
 function csvCell(v){ const s = String(v==null?"":v); return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
-function exportSentCsv(){
-  if(!EXPORT_ROWS.length){ alert("내보낼 기록이 없습니다."); return; }
-  const staffLabel = (($("by").selectedOptions||[])[0] || {}).textContent || "All";
-  // 내보내기는 항상 영어로 (헤더·상태값). 이름·캠페인 등 실제 데이터는 원본 그대로 둔다.
-  const head = ["Staff","Status","Email","Name","Handle","Campaign","Sent at","Originally sent by"];
-  const engStatus = s => s === "중복실패" ? "Blocked (duplicate)" : "Sent";
-  const lines = [head.map(csvCell).join(",")].concat(
-    EXPORT_ROWS.map(r => [r.by, engStatus(r.status), r.to, r.name, r.handle, r.campaign, fmt(r.at), r.prior].map(csvCell).join(","))
-  );
-  const csv = "﻿" + lines.join("\r\n");
-  const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "outreach_" + String(staffLabel).replace(/[^\w.-]+/g,"_") + "_" + new Date().toISOString().slice(0,10) + ".csv";
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  const m = $("copyMsg"); if(m) m.textContent = EXPORT_ROWS.length + "행 내보냄";
-}
 
 function renderBlocked(d){
   const rows = d.rows||[];
@@ -1126,7 +1032,7 @@ function closeThread(){ $("threadModal").style.display = "none"; $("threadBody")
 document.addEventListener("click", e => { if(e.target && e.target.id === "threadModal") closeThread(); });
 document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread(); });
 
-/* 발송 이력·중복 시도에서 크리에이터를 누르면 그 담당자 메일함의 대화(제목·내용)를 연다.
+/* 중복 시도 등에서 크리에이터를 누르면 그 담당자 메일함의 대화(제목·내용)를 연다.
    staff = 메일함 주인(보낸 담당자), peer = 크리에이터 이메일. 이메일·담당자가 있어야 클릭 가능. */
 function threadCell(staff, to, name, badge){
   const b = badge || "";
