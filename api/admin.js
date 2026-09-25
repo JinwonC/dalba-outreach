@@ -400,6 +400,7 @@ module.exports = async (req, res) => {
 
     const q = req.query || {};
     const view = String(q.view || "summary");
+    const t0 = Date.now();   // 요청 시작 — 무거운 보완 작업은 남은 시간을 보고 건너뛴다
     const displayLimit = Math.max(1, Math.min(Number(q.limit) || 1000, H.LOG_MAX));
     const days = Number(q.days) || 0;
     const needle = String(q.q || "").trim().toLowerCase();
@@ -479,11 +480,34 @@ module.exports = async (req, res) => {
       return;
     }
     if (view === "blocked") {
-      // 이미 승인된 (담당자+크리에이터) 는 화면에 표시해 준다
-      const appr = await H.approvalsIndex();
-      // 인하우스 협업 크리에이터 — 중복시도 목록에도 🤝 로 표시한다 (실패해도 화면은 살린다).
-      // 핸들뿐 아니라 이메일로도 대조: 발송 기록의 이메일↔핸들 연결 · 시트 이메일 · 주소 추정.
-      const ihMatch = await IH.matcher();
+      // ── 같은 담당자의 같은 크리에이터 반복 시도는 한 줄로 (최신 시도 + 횟수) ──
+      const tRead = Date.now() - t0;
+      const seenAttempt = new Map();
+      const blockedRows = [];
+      for (const b of blocked) {           // blocked 는 최신순
+        const k = H.normEmail(b.by) + "|" + (H.normEmail(b.to) || H.normHandle(b.handle));
+        const hit = seenAttempt.get(k);
+        if (hit) { hit.attempts++; continue; }
+        const row = Object.assign({}, b, { attempts: 1 });
+        seenAttempt.set(k, row); blockedRows.push(row);
+      }
+      // ── 무거운 조회는 **동시에**, 각각 시간 제한 — 하나가 느려도 화면 전체가 멈추지 않게 ──
+      const withTimeout = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(() => fallback), new Promise(r => setTimeout(() => r(fallback), ms))]);
+      const REAPPROVE_DAYS = Math.max(1, Number(process.env.BLOCKED_REAPPROVE_DAYS) || 15);
+      const accts = A.parseAccounts().map(a => H.normEmail(a.email));
+      const bEmails = blockedRows.map(r => H.normEmail(r.to)).filter(Boolean);
+      const room = Math.max(0, 45e3 - (Date.now() - t0));   // 남은 시간
+      const tHeavy = Date.now();
+      const [appr, ihMatchRaw, books] = await Promise.all([
+        withTimeout(H.approvalsIndex(), Math.min(8000, room), new Set()),
+        withTimeout(IH.matcher(), Math.min(8000, room), null),
+        room > 5000 ? withTimeout(Promise.all([H.bookGetMany("sent", accts, bEmails), H.bookGetMany("recv", accts, bEmails)]), Math.min(12000, room), null) : null
+      ]);
+      const ihMatch = ihMatchRaw || (() => null);
+      const [bookSent, bookRecv] = books || [new Map(), new Map()];
+      const partial = { inhouse: !ihMatchRaw, mailbox: !books };
+      const tHeavyMs = Date.now() - tHeavy;
+      // 인하우스 협업 크리에이터 — 위에서 불러 둔 ihMatch 로 🤝 표시 (핸들·이메일 대조, 실패해도 화면은 살린다)
       const e2h = new Map();
       for (const s of sentAll) {
         const e = s && H.normEmail(s.to), h = s && H.normHandle(s.handle);
@@ -534,15 +558,11 @@ module.exports = async (req, res) => {
       };
       // ── 승인 판단용 ──
       // 네이버웍스에서 직접 보낸 발송(단체·숨은참조 포함)과 메일함으로 들어온 회신까지 모든 담당자
-      // 메일함의 주소록에서 함께 본다. 판정:
+      // 메일함의 주소록(bookSent/bookRecv, 위에서 동시에 불러 둠)에서 함께 본다. 판정:
       //   replied  회신이 온 크리에이터 → 승인하지 않음 (빨강)
       //   recent   우리 쪽 마지막 발송이 REAPPROVE_DAYS(기본 15일) 안 → 보내지 않음
       //   ok       마지막 발송이 그보다 오래됨 → 다시 보내도 됨 (파랑)
-      const REAPPROVE_DAYS = Math.max(1, Number(process.env.BLOCKED_REAPPROVE_DAYS) || 15);
-      const accts = A.parseAccounts().map(a => H.normEmail(a.email));
-      const bEmails = blocked.map(r => H.normEmail(r.to)).filter(Boolean);
-      const [bookSent, bookRecv] = await Promise.all([H.bookGetMany("sent", accts, bEmails), H.bookGetMany("recv", accts, bEmails)]);
-      const rows = blocked.map(r => {
+      const rows = blockedRows.map(r => {
         const origins = originsOf(r);
         const e = H.normEmail(r.to);
         // 메일함 발송(웹메일·단체·숨은참조) — 같은 담당자의 툴 발송 기록이 없을 때만 더한다
@@ -566,15 +586,17 @@ module.exports = async (req, res) => {
         const decision = reps.length ? "replied" : daysSinceSent == null ? "unknown" : daysSinceSent < REAPPROVE_DAYS ? "recent" : "ok";
         const ih = ihMatch(r, [...(e2h.get(H.normEmail(r.to)) || [])]);
         return Object.assign({}, r, {
-          origins,
+          // 응답 크기를 줄이려고 최근 20건씩만 싣는다 (전체 건수는 따로)
+          origins: origins.slice(-20), originsTotal: origins.length,
           lastSentAt, daysSinceSent, decision,
-          replies: reps,
+          replies: reps.slice(-20), repliesTotal: reps.length,
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f)),
           inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : ""
         });
       });
-      res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS }));
+      res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS, partial,
+        timing: { readMs: tRead, heavyMs: tHeavyMs, totalMs: Date.now() - t0 } }));
       return;
     }
     if (view === "people") {

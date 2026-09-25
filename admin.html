@@ -255,7 +255,14 @@ async function load(){
 async function fetchJson(url){
   const r = await fetch(url, { cache:"no-store", headers: headers() });
   if(r.status === 401){ showGate("다시 로그인해 주세요."); throw new Error("로그인이 필요합니다"); }
-  const d = await r.json();
+  // JSON 이 아니면(시간 초과·서버 오류 페이지) 알아볼 수 있는 문구로 — "Unexpected token 'A'" 대신
+  const text = await r.text();
+  let d;
+  try { d = JSON.parse(text); } catch(_) {
+    if(r.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(text))
+      throw new Error("시간 초과 — 서버가 60초 안에 끝내지 못했습니다. 잠시 뒤 다시 열어 주세요.");
+    throw new Error("서버 오류 (HTTP "+r.status+")");
+  }
   // 저장소 미연결은 "고장" 이 아니라 "아직 설정 안 됨" 이다.
   // 여기서 던져 버리면 무엇을 해야 하는지 안내할 기회를 잃는다.
   if(d.error && d.historyEnabled !== false) throw new Error(d.error);
@@ -594,7 +601,8 @@ function renderBlocked(d){
     let h = "";
     if(!list.length) h += '<span class="muted">—</span>';
     else {
-      if(list.length > 1) h += '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+list.length+'건</div>';
+      const nSent = r.originsTotal || list.length;
+      if(nSent > 1) h += '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+nSent+'건</div>';
       h += list.map(o => line(o.by,
         '<b>'+esc(o.byName||o.by||'—')+'</b> <span class="mono muted">'+esc(fmt(o.at))+'</span>'+
         (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
@@ -624,7 +632,10 @@ function renderBlocked(d){
       '<span style="color:#a1251b">🔴 회신 옴 — 승인하지 않음</span> · ' +
       '<span style="color:#8a4b00">🟠 최근 '+N+'일 내 발송 — 보내지 않음</span> · ' +
       '<span style="color:#174ea6">🔵 '+N+'일 지남 — 재발송 가능</span>' +
-      '<div class="muted" style="font-size:12px"><span>마지막 발송은 툴 발송과 네이버웍스 보낸편지함(단체·숨은참조 포함) 중 가장 최근, 회신은 모든 담당자 메일함 기준입니다.</span></div></div>' +
+      '<div class="muted" style="font-size:12px"><span>마지막 발송은 툴 발송과 네이버웍스 보낸편지함(단체·숨은참조 포함) 중 가장 최근, 회신은 모든 담당자 메일함 기준입니다.</span></div>' +
+      ((d.partial && d.partial.mailbox) ? '<div style="color:#a23b2e;font-size:12px;margin-top:4px"><span>이번엔 시간이 부족해 네이버웍스 메일함(주소록) 대조를 건너뛰었습니다 — 판정이 툴 기록만 기준입니다. 새로고침하면 다시 시도합니다.</span></div>' : '') +
+      ((d.partial && d.partial.inhouse) ? '<div class="muted" style="font-size:12px"><span>협업 시트를 제때 읽지 못해 🤝 표시를 건너뛰었습니다.</span></div>' : '') +
+    '</div>' +
     '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
       fbtn("all", "전체 "+allRows.length) + fbtn("replied", "🔴 회신 옴 "+cnt("replied")) +
       fbtn("recent", "🟠 최근 "+N+"일 내 "+cnt("recent")) + fbtn("ok", "🔵 "+N+"일 지남 "+cnt("ok")) +
@@ -650,7 +661,7 @@ function renderBlocked(d){
           ? '<input type="checkbox" disabled title="이메일이 없어 발송할 수 없습니다" />'
           : '<input type="checkbox" class="blkchk" data-dec="'+esc(r.decision||"")+'" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" data-by="'+esc(r.by||"")+'" data-byname="'+esc(r.byName||"")+'" />') + '</td>' +
         decCell(r) +
-        '<td class="mono muted">'+esc(fmt(r.at))+'</td>' +
+        '<td class="mono muted">'+esc(fmt(r.at))+(r.attempts > 1 ? '<div style="font-size:11px">'+r.attempts+'회 시도</div>' : '')+'</td>' +
         threadCell((r.origins && r.origins[0] && r.origins[0].by) || r.by, r.to, r.name, inhouseBadge(r)) +
         '<td>'+person(r)+
           (isSelf(r) ? ' <span class="tag" style="background:#eef3ea;color:#4a6b45" title="이 담당자가 이 크리에이터에게 이미 보냈던 기록이 있습니다">본인 발송 있음</span>' : '')+
