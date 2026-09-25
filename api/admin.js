@@ -498,10 +498,12 @@ module.exports = async (req, res) => {
       const bEmails = blockedRows.map(r => H.normEmail(r.to)).filter(Boolean);
       const room = Math.max(0, 45e3 - (Date.now() - t0));   // 남은 시간
       const tHeavy = Date.now();
-      const [appr, ihMatchRaw, books] = await Promise.all([
+      const [appr, ihMatchRaw, books, links] = await Promise.all([
         withTimeout(H.approvalsIndex(), Math.min(8000, room), new Set()),
         withTimeout(IH.matcher(), Math.min(8000, room), null),
-        room > 5000 ? withTimeout(Promise.all([H.bookGetMany("sent", accts, bEmails), H.bookGetMany("recv", accts, bEmails)]), Math.min(12000, room), null) : null
+        room > 5000 ? withTimeout(Promise.all([H.bookGetMany("sent", accts, bEmails), H.bookGetMany("recv", accts, bEmails)]), Math.min(12000, room), null) : null,
+        // 이메일↔핸들 연결(브리지) — 핸들 없이 시도된 건에 크리에이터 핸들을 채운다
+        withTimeout(H.bridge(blockedRows), Math.min(6000, room), null)
       ]);
       const ihMatch = ihMatchRaw || (() => null);
       const [bookSent, bookRecv] = books || [new Map(), new Map()];
@@ -562,6 +564,7 @@ module.exports = async (req, res) => {
       //   replied  회신이 온 크리에이터 → 승인하지 않음 (빨강)
       //   recent   우리 쪽 마지막 발송이 REAPPROVE_DAYS(기본 15일) 안 → 보내지 않음
       //   ok       마지막 발송이 그보다 오래됨 → 다시 보내도 됨 (파랑)
+      const blockedIdx = new Map(blockedRows.map((r, i) => [r, i]));
       const rows = blockedRows.map(r => {
         const origins = originsOf(r);
         const e = H.normEmail(r.to);
@@ -592,7 +595,11 @@ module.exports = async (req, res) => {
           replies: reps.slice(-20), repliesTotal: reps.length,
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f)),
-          inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : ""
+          inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : "",
+          // 크리에이터 핸들: 시도에 적힌 것 → 없으면 발송 기록의 같은 이메일 → 저장된 이메일↔핸들 연결
+          handle: H.normHandle(r.handle) || [...(e2h.get(H.normEmail(r.to)) || [])][0] ||
+            ((links && links[blockedIdx.get(r)] && links[blockedIdx.get(r)].handles[0]) || ""),
+          handleLinked: !H.normHandle(r.handle) && Boolean([...(e2h.get(H.normEmail(r.to)) || [])][0] || (links && links[blockedIdx.get(r)] && links[blockedIdx.get(r)].handles[0]))
         });
       });
       res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS, partial,

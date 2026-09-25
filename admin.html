@@ -662,7 +662,7 @@ function renderBlocked(d){
           : '<input type="checkbox" class="blkchk" data-dec="'+esc(r.decision||"")+'" data-to="'+esc(r.to)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" data-by="'+esc(r.by||"")+'" data-byname="'+esc(r.byName||"")+'" />') + '</td>' +
         decCell(r) +
         '<td class="mono muted">'+esc(fmt(r.at))+(r.attempts > 1 ? '<div style="font-size:11px">'+r.attempts+'회 시도</div>' : '')+'</td>' +
-        threadCell((r.origins && r.origins[0] && r.origins[0].by) || r.by, r.to, r.name, inhouseBadge(r)) +
+        threadCell((r.origins && r.origins[0] && r.origins[0].by) || r.by, r.to, r.name, inhouseBadge(r), r.handle) +
         '<td>'+person(r)+
           (isSelf(r) ? ' <span class="tag" style="background:#eef3ea;color:#4a6b45" title="이 담당자가 이 크리에이터에게 이미 보냈던 기록이 있습니다">본인 발송 있음</span>' : '')+
           (r.approved ? ' <span class="tag" style="background:#e7f0ff;color:#2f5fb0" title="이 담당자가 이 크리에이터에게 보낼 수 있게 승인됨">승인됨</span>' : '')+'</td>' +
@@ -990,9 +990,11 @@ document.addEventListener("keydown", e => { if(e.key === "Escape") closeThread()
 
 /* 중복 시도 등에서 크리에이터를 누르면 그 담당자 메일함의 대화(제목·내용)를 연다.
    staff = 메일함 주인(보낸 담당자), peer = 크리에이터 이메일. 이메일·담당자가 있어야 클릭 가능. */
-function threadCell(staff, to, name, badge){
+function threadCell(staff, to, name, badge, handle){
   const b = badge || "";
-  const label = '<b>'+esc(name||"—")+'</b>'+b+'<div class="muted">'+esc(to||"")+'</div>';
+  const h = handle ? String(handle).replace(/^@/,"") : "";
+  const label = '<b>'+esc(name||"—")+'</b>'+b+'<div class="muted">'+esc(to||"")+'</div>' +
+    (h ? '<div class="mono" style="font-size:12px;color:#555">@'+esc(h)+'</div>' : '');
   if(!to || !canOpen(staff)) return '<td>'+label+'</td>';
   return '<td class="threadcell" data-thread-staff="'+esc(staff)+'" data-thread-peer="'+esc(to)+'" ' +
     'style="cursor:pointer" title="대화 보기 — 메일함에서 제목·내용을 직접 읽습니다">' + label +
