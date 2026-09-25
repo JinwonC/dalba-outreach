@@ -532,21 +532,49 @@ module.exports = async (req, res) => {
         out.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
         return out;
       };
+      // ── 승인 판단용 ──
+      // 네이버웍스에서 직접 보낸 발송(단체·숨은참조 포함)과 메일함으로 들어온 회신까지 모든 담당자
+      // 메일함의 주소록에서 함께 본다. 판정:
+      //   replied  회신이 온 크리에이터 → 승인하지 않음 (빨강)
+      //   recent   우리 쪽 마지막 발송이 REAPPROVE_DAYS(기본 15일) 안 → 보내지 않음
+      //   ok       마지막 발송이 그보다 오래됨 → 다시 보내도 됨 (파랑)
+      const REAPPROVE_DAYS = Math.max(1, Number(process.env.BLOCKED_REAPPROVE_DAYS) || 15);
+      const accts = A.parseAccounts().map(a => H.normEmail(a.email));
+      const bEmails = blocked.map(r => H.normEmail(r.to)).filter(Boolean);
+      const [bookSent, bookRecv] = await Promise.all([H.bookGetMany("sent", accts, bEmails), H.bookGetMany("recv", accts, bEmails)]);
       const rows = blocked.map(r => {
         const origins = originsOf(r);
+        const e = H.normEmail(r.to);
+        // 메일함 발송(웹메일·단체·숨은참조) — 같은 담당자의 툴 발송 기록이 없을 때만 더한다
+        (bookSent.get(e) || []).forEach(b => {
+          if (origins.some(o => H.normEmail(o.by) === b.owner)) return;
+          origins.push({ by: b.owner, byName: NMb.get(b.owner) || b.owner, at: b.last || b.first || "", campaign: "", mailbox: true, n: Number(b.n) || 1 });
+        });
         // 원래 발송이 하나도 안 잡혔으면(스냅샷도 없으면) 저장돼 있던 prior 라도 쓴다
         let prior = r.prior;
         if (!origins.length && prior && (prior.byName || prior.by)) origins.push({ by: prior.by || "", byName: prior.byName || prior.by || "", at: prior.at || "", campaign: prior.campaign || "" });
+        origins.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+        const reps = repliesOf(r);
+        // 메일함으로 들어온 메일(주소록) — 회신 기록에 없는 담당자 메일함이면 더한다
+        (bookRecv.get(e) || []).forEach(b => {
+          if (reps.some(x => H.normEmail(x.inbox || x.by) === b.owner)) return;
+          reps.push({ by: b.owner, byName: NMb.get(b.owner) || b.owner, inbox: b.owner, at: b.last || "", subject: "", mailbox: true, n: Number(b.n) || 1 });
+        });
+        const lastSentAt = origins.map(o => o.at).filter(Boolean).sort().pop() || (prior && prior.at) || "";
+        const t = Date.parse(lastSentAt);
+        const daysSinceSent = isFinite(t) ? Math.floor((Date.now() - t) / 86400e3) : null;
+        const decision = reps.length ? "replied" : daysSinceSent == null ? "unknown" : daysSinceSent < REAPPROVE_DAYS ? "recent" : "ok";
         const ih = ihMatch(r, [...(e2h.get(H.normEmail(r.to)) || [])]);
         return Object.assign({}, r, {
           origins,
-          replies: repliesOf(r),
+          lastSentAt, daysSinceSent, decision,
+          replies: reps,
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f)),
           inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : ""
         });
       });
-      res.status(200).json(Object.assign(base, { rows }));
+      res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS }));
       return;
     }
     if (view === "people") {

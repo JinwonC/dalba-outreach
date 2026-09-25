@@ -503,6 +503,27 @@ async function bookSentPriors(emails) {
   return out;
 }
 
+// 여러 메일함의 주소록에서 여러 주소를 한 번에 — Map(주소 → [{owner, n, first, last, box}]) (기간 제한 없음)
+async function bookGetMany(dir, accts, emails) {
+  const list = [...new Set((emails || []).map(normEmail).filter(e => e && e.indexOf("@") > 0))];
+  const owners = [...new Set((accts || []).map(normEmail).filter(Boolean))];
+  const out = new Map();
+  if (!enabled() || !list.length || !owners.length) return out;
+  for (let i = 0; i < list.length; i += 400) {
+    const part = list.slice(i, i + 400);
+    let res = [];
+    try { res = await pipeline(owners.map(o => ["HMGET", bookKey(dir, o)].concat(part))); } catch (_) { continue; }
+    owners.forEach((o, k) => (res[k] || []).forEach((v, j) => {
+      const b = parseRec(v);
+      if (!b) return;
+      const arr = out.get(part[j]) || [];
+      arr.push(Object.assign({ owner: o }, b));
+      out.set(part[j], arr);
+    }));
+  }
+  return out;
+}
+
 async function bookOwners() {
   if (!enabled()) return [];
   try { return (await cmd(["SMEMBERS", BOOK_OWNERS])) || []; } catch (_) { return []; }
@@ -878,7 +899,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners,
+  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };
