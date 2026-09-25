@@ -22,6 +22,23 @@ function makeClient(account) {
   });
 }
 
+// ─── 본문 (데이터베이스 저장용) ───────────────────────────────────
+// 메일 원문의 **앞 64KB 만** 받는다(첨부파일까지 내려받지 않도록). 인용된 이전 메일(>, "On … wrote:",
+// "-----Original Message-----", "보낸 사람:" …)은 떼고, 길이는 MSG_BODY_MAX_CHARS(기본 4000자)로 자른다.
+const BODY_FETCH_BYTES = 65536;
+const BODY_MAX = Number(process.env.MSG_BODY_MAX_CHARS) || 4000;
+function cleanBody(t) {
+  let s = String(t == null ? "" : t).replace(/\r\n/g, "\n");
+  const cut = s.search(/\n(On [^\n]{0,200}wrote:|-{2,}\s*Original Message\s*-{2,}|From: [^\n]+\n(Sent|Date): |보낸 사람: |[^\n]{0,80}님이 작성:|20\d\d[^\n]{0,60}(작성|wrote):)/i);
+  if (cut > 0) s = s.slice(0, cut);
+  s = s.split("\n").filter(l => !/^\s*>/.test(l)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return s.length > BODY_MAX ? s.slice(0, BODY_MAX) + "\n…(이하 생략)" : s;
+}
+async function bodyOf(source) {
+  if (!source) return "";
+  try { const p = await simpleParser(source); return cleanBody(p.text || ""); } catch (_) { return ""; }
+}
+
 // 보낸편지함 찾기 — 배포·언어 설정마다 이름이 다르다(Sent / Sent Messages / 보낸메일함 / 보낸 메일함 …).
 //   ① IMAP 용도 표시(\Sent) → ② 이름(띄어쓰기·변형 허용, 하위 폴더면 끝 이름) →
 //   ③ 그래도 없으면 **내용으로**: 폴더마다 최근 메일을 몇 통 보고 '보낸 사람 = 본인' 인 폴더.
@@ -118,9 +135,11 @@ async function read(account, opts) {
       const take = uids.slice(-limit);   // 검색 결과는 오름차순이므로 뒤쪽이 최신
 
       if (take.length) {
-        for await (const msg of client.fetch(take, { envelope: true }, { uid: true })) {
+        const q = o.withBody ? { envelope: true, source: { start: 0, maxLength: BODY_FETCH_BYTES } } : { envelope: true };
+        for await (const msg of client.fetch(take, q, { uid: true })) {
           const env = msg.envelope || {};
           rows.push({
+            text: o.withBody ? await bodyOf(msg.source) : undefined,
             uid: msg.uid,
             messageId: env.messageId || "",
             at: env.date,
@@ -258,12 +277,14 @@ async function readFolders(account, opts) {
         entry.total = uids.length;
         const take = uids.slice(-limit);
         if (take.length) {
-          for await (const msg of client.fetch(take, { envelope: true }, { uid: true })) {
+          const q = o.withBody ? { envelope: true, source: { start: 0, maxLength: BODY_FETCH_BYTES } } : { envelope: true };
+          for await (const msg of client.fetch(take, q, { uid: true })) {
             const env = msg.envelope || {};
             entry.rows.push({
+              text: o.withBody ? await bodyOf(msg.source) : undefined,
               uid: msg.uid, messageId: env.messageId || "", inReplyTo: env.inReplyTo || "",
               at: env.date, subject: env.subject || "(제목 없음)",
-              from: one(env.from), to: one(env.to), toAll: all(env.to), ccAll: all(env.cc)
+              from: one(env.from), to: one(env.to), toAll: all(env.to), ccAll: all(env.cc), bccAll: all(env.bcc)
             });
             if (Date.now() > deadline) break;
           }
@@ -279,4 +300,4 @@ async function readFolders(account, opts) {
   return { folders: out };
 }
 
-module.exports = { read, readFolders, readThread, isReplyFolder, findMailbox, IMAP_HOST, IMAP_PORT };
+module.exports = { read, readFolders, readThread, isReplyFolder, findMailbox, cleanBody, IMAP_HOST, IMAP_PORT };

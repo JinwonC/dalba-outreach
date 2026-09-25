@@ -634,10 +634,11 @@ module.exports = async (req, res) => {
       // 담당자별 채움 상태 — 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 마지막 동기화 · 오류
       const status = [];
       for (const st of staffList) {
-        const [sn, rn, info] = await Promise.all([H.bookCount("sent", st), H.bookCount("recv", st), H.syncInfo(st)]);
-        status.push(Object.assign({ staff: st, staffName: NM.get(st) || st, sentBook: sn, recvBook: rn }, info || {}));
+        const [sn, rn, mn, info] = await Promise.all([H.bookCount("sent", st), H.bookCount("recv", st), H.messageCount(st), H.syncInfo(st)]);
+        status.push(Object.assign({ staff: st, staffName: NM.get(st) || st, sentBook: sn, recvBook: rn, messages: mn }, info || {}));
       }
-      res.status(200).json(Object.assign(base, { dir, rows: kept, status }));
+      const msgUsage = await H.messageUsage();   // 메일 데이터베이스 용량 (본문 저장)
+      res.status(200).json(Object.assign(base, { dir, rows: kept, status, msgUsage }));
       return;
     }
     if (view === "repliers") {

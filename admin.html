@@ -143,7 +143,6 @@
     <button class="tab" data-v="weekly" onclick="go('weekly')">📅 주차별</button>
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
-    <button class="tab" data-v="repliers" onclick="go('repliers')">📨 회신 온 인원</button>
     <button class="tab" data-v="book" onclick="go('book')">📒 주소록</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
   </div>
@@ -299,7 +298,6 @@ async function loadAdmin(){
   if(VIEW === "summary") return renderSummary(d);
   if(VIEW === "blocked") return renderBlocked(d);
   if(VIEW === "conversations") return renderConversations(d);
-  if(VIEW === "repliers")  return renderRepliers(d);
   if(VIEW === "book")     return renderBook(d);
   if(VIEW === "pipeline") return renderPipeline(d);
   return "";
@@ -720,44 +718,6 @@ async function exportApprovalsCsv(){
 /* ── 대화 (담당자 ↔ 크리에이터 협상) ──
    회신한 크리에이터만 목차로 띄운다(협상은 회신이 있어야 성립). 한 명을 누르면
    그 담당자 메일함에서 주고받은 스레드를 본문까지 그때그때 읽어 온다. */
-let REPLIER_ROWS = [];
-function renderRepliers(d){
-  const rows = d.rows || [];
-  REPLIER_ROWS = rows;
-  const who = $("by").value;
-  const note = '<div class="note">회신이 한 번이라도 온 인원 — <b>관리자 포함 전원</b>. 회신 발신 주소 기준으로 묶었습니다. ' +
-    '한 줄을 누르면 그 회신 내용을 열 수 있습니다.</div>';
-  const bar = '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
-    '<button class="btn" onclick="exportRepliersCsv()">⬇️ 회신 인원 Excel(CSV)</button>' +
-    (who
-      ? '<button class="btn" onclick="diagnoseReplies()">🩺 누락 점검</button>' +
-        '<button class="btn" onclick="recollectReplies()">🔄 지금 다시 수집</button>'
-      : '<span class="muted">담당자를 고르면 누락 점검·다시 수집을 할 수 있습니다.</span>') +
-    '<span class="muted"><span>회신 인원</span> <b>'+rows.length+'명</b></span>' +
-    '<span class="muted" id="repMsg"></span></div><div id="repDiag"></div>';
-  if(!rows.length){
-    $("body").innerHTML = note + bar +
-      '<div class="note"><b>아직 회신 기록이 없습니다.</b><br />담당자별 탭에서 [🔄 메일함에서 동기화] 를 먼저 돌려 회신을 채우세요.</div>';
-    return "";
-  }
-  const cellFor = r => (r.email && canOpen(r.inbox))
-    ? '<td class="threadcell" data-thread-staff="'+esc(r.inbox)+'" data-thread-peer="'+esc(r.email)+'" style="cursor:pointer" title="회신 내용 보기">' +
-        '<b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+(r.handle?' · @'+esc(String(r.handle).replace(/^@/,"")):'')+'</div>' +
-        ' <span class="muted" style="font-size:11px;white-space:nowrap">📄 내용</span></td>'
-    : '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+'</div></td>';
-  $("body").innerHTML = note + bar +
-    '<div class="scroll"><table><thead><tr>' +
-    '<th>크리에이터</th><th>회신</th><th>최근 회신</th><th>회신 받은 담당자</th><th>최근 제목</th>' +
-    '</tr></thead><tbody>' +
-    rows.map(r =>
-      '<tr>' + cellFor(r) +
-      '<td class="mono"><b>'+(r.count||0)+'</b></td>' +
-      '<td class="mono muted">'+esc(fmt(r.lastAt))+'</td>' +
-      '<td>'+esc((r.staff||[]).join(", "))+'</td>' +
-      '<td class="muted">'+esc(r.lastSubject||"")+'</td></tr>').join("") +
-    '</tbody></table></div>';
-  return rows.length + "명";
-}
 
 /* ── 📒 주소록 ──
    담당자별로 누가 회신했는지(기본) · 누구에게 보냈는지 · 누구에게서 받았는지 — **주소만**.
@@ -778,7 +738,7 @@ function renderBook(d){
     '<button class="btn" onclick="exportBookCsv()">⬇️ 주소록 Excel(CSV)</button>' +
     '<button class="btn dark" onclick="fillBook()">🔄 네이버웍스에서 지금 채우기</button>' +
     '<span class="muted"><span>'+LABEL[dir]+'</span> <b>'+rows.length+'명</b></span></div>' +
-    '<div id="bookFill"></div>' + bookStatusHtml(d.status || []);
+    '<div id="bookFill"></div>' + bookStatusHtml(d.status || [], d.msgUsage);
   const note = '<div class="note">' + (
     dir === "replied" ? '<span>회신 온 사람 = 담당자 메일함으로 메일이 온 사람 중, 우리가 먼저 보낸 적 있는 주소 (관리자 포함 전원).</span>'
     : dir === "sent" ? '<span>보낸 주소 = 메일함 보낸편지함의 모든 외부 수신자(단체·참조·숨은참조 포함) + 이 툴로 보낸 기록.</span>'
@@ -828,20 +788,23 @@ function exportBookCsv(){
 }
 
 /* 담당자별 채움 상태 — 네이버웍스에서 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 진행 · 오류 */
-function bookStatusHtml(list){
+function bookStatusHtml(list, usage){
   if(!list.length) return "";
+  const u = usage || {};
+  const usageLine = '<div class="muted" style="margin:6px 0">🗄 <span>메일 데이터베이스 (본문 포함)</span> — ' + (u.usedMB||0) + ' / ' + (u.capMB||0) + ' MB' +
+    (u.full ? ' · <b style="color:#a23b2e"><span>용량 상한에 도달해 이후 메일은 본문 없이 기록만 저장합니다</span></b>' : '') + '</div>';
   const stateOf = x => x.error ? '<span class="tag" style="background:#fde8e6;color:#a23b2e">오류</span>'
-    : (x.sentCaughtUp && x.foldersCaughtUp) ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">완료</span>'
+    : (x.sentCaughtUp && x.foldersCaughtUp && x.msgsCaughtUp) ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">완료</span>'
     : x.at ? '<span class="tag" style="background:#fff3d6;color:#8a5a00">채우는 중</span>'
     : '<span class="tag" style="background:#f1f1f1;color:#666">대기</span>';
   return '<details style="margin:0 0 12px"><summary class="muted" style="cursor:pointer">📊 담당자별 채움 상태</summary>' +
-    '<div class="scroll"><table><thead><tr><th>담당자</th><th>상태</th><th>보낸편지함 폴더</th><th>보낸 주소</th><th>받은 주소</th><th>마지막 동기화</th></tr></thead><tbody>' +
+    '<div class="scroll"><table><thead><tr><th>담당자</th><th>상태</th><th>보낸편지함 폴더</th><th>보낸 주소</th><th>받은 주소</th><th>저장된 메일</th><th>마지막 동기화</th></tr></thead><tbody>' +
     list.map(x => '<tr><td>'+esc(x.staffName||x.staff)+'</td><td>'+stateOf(x)+
       (x.error ? '<div class="muted" style="font-size:11px">'+esc(x.error)+'</div>' : '')+'</td>' +
       '<td class="muted">'+esc(x.sentFolder||"—")+'</td>' +
-      '<td class="mono">'+(x.sentBook||0)+'</td><td class="mono">'+(x.recvBook||0)+'</td>' +
+      '<td class="mono">'+(x.sentBook||0)+'</td><td class="mono">'+(x.recvBook||0)+'</td><td class="mono">'+(x.messages||0)+'</td>' +
       '<td class="mono muted">'+esc(fmt(x.at))+'</td></tr>').join("") +
-    '</tbody></table></div></details>';
+    '</tbody></table></div>' + usageLine + '</details>';
 }
 /* 🔄 네이버웍스에서 지금 채우기 — 고른 담당자(없으면 전원)의 메일함을 끝까지 읽을 때까지 자동 반복.
    한 번 호출은 60초 제한 안에서 이어서 처리하고(커서), 다 읽으면 다음 담당자로 넘어간다. */
@@ -852,7 +815,7 @@ async function fillBook(){
   const box = $("bookFill");
   const people = $("by").value ? [{ email: $("by").value, name: ($("by").selectedOptions[0]||{}).textContent || $("by").value }]
     : [...$("by").options].slice(1).map(o => ({ email: o.value, name: o.textContent }));
-  const MAX_ROUNDS = 30;
+  const MAX_ROUNDS = 40;   // 한 사람당 최대 약 30분 — 남으면 자동 수집이 이어서 처리한다
   const done = [], failed = [];
   try {
     for(let i = 0; i < people.length; i++){
@@ -868,7 +831,8 @@ async function fillBook(){
         }
         const x = (r.results || [])[0] || {};
         if(x.error){ failed.push(p.name + " — " + x.error); break; }
-        const more = x.waiting || (x.folders || []).some(f => f.truncated || f.skipped);
+        // 주소록 + 메일 데이터베이스(본문)까지 다 따라잡을 때까지
+        const more = x.waiting || (x.folders || []).some(f => f.truncated || f.skipped) || x.messagesCaughtUp === false;
         if(!more){ done.push(p.name); break; }
         if(round === MAX_ROUNDS) failed.push(p.name + " — 아직 남음, 다시 누르면 이어서 처리");
       }
@@ -884,14 +848,7 @@ async function fillBook(){
   }
 }
 
-/* ── 회신 누락 점검 ──
-   고른 담당자의 실제 메일함(받은편지함+사용자 폴더)을 훑어, 외부 발신자마다
-   기록됨 / 수집 대기(회신인데 아직 기록 전) / 보낸 기록 없음 으로 나눠 보여준다. */
-const DIAG_LABEL = {
-  recorded: '<span class="tag" style="background:#e8f5ec;color:#1f7a44">기록됨</span>',
-  pending: '<span class="tag" style="background:#fff3d6;color:#8a5a00">수집 대기</span>',
-  "not-contacted": '<span class="tag" style="background:#f1f1f1;color:#666">보낸 기록 없음</span>'
-};
+/* 서버 요청 (주소록 채우기 등) — 시간 초과·오류 페이지도 알아볼 수 있는 메시지로 */
 async function postJson(url, body){ return reqJson(url, { method:"POST", body }); }
 /* JSON 이 아닌 응답(시간 초과·서버 오류 페이지)도 알아볼 수 있는 메시지로 바꾼다 */
 async function reqJson(url, o){
@@ -909,60 +866,6 @@ async function reqJson(url, o){
   }
   if(d.error) throw new Error(d.error);
   return d;
-}
-async function diagnoseReplies(){
-  const who = $("by").value; if(!who) return;
-  const box = $("repDiag");
-  box.innerHTML = '<div class="muted" style="margin:8px 0">메일함을 훑는 중… (최대 1분)</div>';
-  let d;
-  try { d = await reqJson("/api/replies?diagnose=1&user=" + encodeURIComponent(who)); }
-  catch(e){ box.innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; return; }
-  const folders = (d.folders||[]).map(f => f.path + " " + f.scanned + (f.truncated || f.skipped ? "+" : "")).join(" · ");
-  box.innerHTML =
-    '<div class="note">' +
-      '<span>메일함 외부 발신자</span> <b>'+d.people+'명</b> · ' +
-      '<span>기록됨</span> <b>'+d.recorded+'명</b> · ' +
-      '<span>수집 대기</span> <b>'+d.pending+'명</b> · ' +
-      '<span>보낸 기록 없음</span> <b>'+d.notContacted+'명</b>' +
-      '<div class="muted" style="margin-top:4px"><span>본 폴더</span> — '+esc(folders)+'</div>' +
-      (!d.sentToDone ? '<div class="muted"><span>보낸편지함 주소를 아직 채우는 중입니다 — 끝나면 판정이 더 정확해집니다.</span></div>' : '') +
-      '<div class="muted" style="margin-top:4px"><span>수집 대기 = 우리가 보낸 적 있는 사람의 메일인데 아직 기록 전입니다 (자동 수집이 곧 반영, [지금 다시 수집]으로 바로 반영). 보낸 기록 없음 = 발송 기록과 이 메일함 보낸편지함 어디에도 그 주소로 보낸 흔적이 없는 메일입니다 (먼저 연락 온 사람·광고·다른 주소로 온 회신 등).</span></div>' +
-    '</div>' +
-    '<div class="scroll" style="max-height:420px;margin-bottom:14px"><table><thead><tr>' +
-      '<th>발신자</th><th>상태</th><th>메일 수</th><th>최근</th><th>폴더</th><th>최근 제목</th>' +
-    '</tr></thead><tbody>' +
-    (d.rows||[]).map(r => '<tr>' +
-      '<td><b>'+esc(r.name||"—")+'</b><div class="muted">'+esc(r.email)+'</div></td>' +
-      '<td>'+(DIAG_LABEL[r.status]||"")+'</td>' +
-      '<td class="mono">'+(r.count||0)+'</td>' +
-      '<td class="mono muted">'+esc(fmt(r.lastAt))+'</td>' +
-      '<td class="muted">'+esc((r.folders||[]).join(", "))+'</td>' +
-      '<td class="muted">'+esc(r.lastSubject||"")+'</td></tr>').join("") +
-    '</tbody></table></div>';
-}
-async function recollectReplies(){
-  const who = $("by").value; if(!who) return;
-  const msg = $("repMsg");
-  msg.textContent = "수집 중… (최대 1분)";
-  try {
-    const r = await postJson("/api/replies", { user: who });
-    const t = r.totals || {};
-    const html = '<span>새 회신</span> <b>'+(t.found||0)+'건</b>' +
-      (t.waiting ? ' · <span style="color:#a8801f">보낸편지함을 읽는 중입니다 — 한 번 더 눌러 주세요.</span>' : '');
-    msg.innerHTML = html;
-    await load();
-    const m2 = $("repMsg"); if(m2) m2.innerHTML = html;
-  } catch(e){ msg.textContent = String(e.message||e); }
-}
-function exportRepliersCsv(){
-  const rows = REPLIER_ROWS || [];
-  if(!rows.length){ alert("내보낼 회신 인원이 없습니다."); return; }
-  const head = ["Creator name","Creator email","Handle","Replies","Last reply","Replied to (staff)","Last subject"];
-  const lines = [head.map(csvCell).join(",")].concat(
-    rows.map(r => [r.name, r.email, r.handle, r.count, fmt(r.lastAt), (r.staff||[]).join(" / "), r.lastSubject].map(csvCell).join(","))
-  );
-  downloadCsv("repliers_" + new Date().toISOString().slice(0,10) + ".csv", lines);
-  const m = $("repMsg"); if(m) m.textContent = rows.length + "명 내보냄";
 }
 
 function renderConversations(d){

@@ -148,7 +148,8 @@ module.exports = async (req, res) => {
         const r = await S.syncAccount(acc, contacted, { until: deadline });
         results.push({
           user: acc.email, found: r.replies.found || 0, duplicate: r.replies.duplicate || 0,
-          waiting: Boolean(r.replies.waiting), notContacted: r.replies.notContacted || 0, folders: r.folders
+          waiting: Boolean(r.replies.waiting), notContacted: r.replies.notContacted || 0, folders: r.folders,
+          messagesCaughtUp: Boolean(r.messagesCaughtUp), messages: r.messages || null
         });
       } catch (e) {
         results.push({ user: acc.email, error: String((e && e.message) || e) });

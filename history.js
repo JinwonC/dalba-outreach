@@ -461,6 +461,62 @@ async function bookAll(dir, acct) {
   return out;
 }
 
+// ─── 메일 데이터베이스 (본문까지) ──────────────────────────────────
+// 담당자 메일함의 보낸·받은 메일(회사 밖 상대)을 한 통씩 저장한다:
+//   outreach:msg:<메일함>            HASH  messageId → { dir(in|out), at, from, to[], cc[], subject, box, text }
+//   outreach:msgp:<메일함>:<상대>    SET   그 상대와 주고받은 messageId 들 (상대별 조회 색인)
+// 같은 메일은 한 번만 저장(HSETNX). 이 저장소는 **중복 발송 차단도 함께 쓰므로**, 본문이 전체 용량을
+// 잡아먹지 않게 상한(MSG_STORE_MAX_MB, 기본 150MB)을 둔다 — 넘으면 본문 없이 기록만 남긴다.
+const MSG_BYTES_KEY = "outreach:msg:bytes";
+const MSG_CAP = Math.max(1, Number(process.env.MSG_STORE_MAX_MB) || 150) * 1024 * 1024;
+const msgKey = acct => "outreach:msg:" + normEmail(acct);
+const msgPeerKey = (acct, peer) => "outreach:msgp:" + normEmail(acct) + ":" + normEmail(peer);
+async function storeMessages(acct, items) {
+  const list = (items || []).filter(m => m && m.id);
+  if (!enabled() || !list.length) return { stored: 0, noText: 0, full: false };
+  let used = Number(await cmd(["GET", MSG_BYTES_KEY])) || 0;
+  let stored = 0, noText = 0, full = used >= MSG_CAP;
+  const key = msgKey(acct);
+  for (let i = 0; i < list.length; i += 200) {
+    const chunk = list.slice(i, i + 200);
+    const cmds = [], sizes = [], pos = [];
+    let add = 0;
+    for (const m of chunk) {
+      const rec = Object.assign({}, m); delete rec.peers;
+      if ((full || used + add >= MSG_CAP) && rec.text) { full = true; delete rec.text; rec.textDropped = true; }
+      const val = JSON.stringify(rec);
+      const size = Buffer.byteLength(val);
+      pos.push(cmds.length); sizes.push({ size, dropped: Boolean(rec.textDropped) });
+      cmds.push(["HSETNX", key, m.id, val]);
+      (m.peers || []).forEach(p => { if (normEmail(p)) cmds.push(["SADD", msgPeerKey(acct, p), m.id]); });
+      add += size;
+    }
+    const out = await pipeline(cmds);
+    let newBytes = 0;
+    pos.forEach((p, j) => { if (Number(out[p]) === 1) { stored++; newBytes += sizes[j].size; if (sizes[j].dropped) noText++; } });
+    if (newBytes) { used = Number(await cmd(["INCRBY", MSG_BYTES_KEY, String(newBytes)])) || (used + newBytes); }
+    if (used >= MSG_CAP) full = true;
+  }
+  return { stored, noText, full };
+}
+async function messageCount(acct) {
+  if (!enabled()) return 0;
+  try { return Number(await cmd(["HLEN", msgKey(acct)])) || 0; } catch (_) { return 0; }
+}
+async function messageUsage() {
+  if (!enabled()) return { usedMB: 0, capMB: 0, full: false };
+  const used = Number(await cmd(["GET", MSG_BYTES_KEY]).catch(() => 0)) || 0;
+  return { usedMB: Math.round(used / 1048576 * 10) / 10, capMB: Math.round(MSG_CAP / 1048576), full: used >= MSG_CAP };
+}
+// 한 상대와 주고받은 저장된 메일 (오래된 → 최신)
+async function messagesWith(acct, peer) {
+  if (!enabled()) return [];
+  const ids = await cmd(["SMEMBERS", msgPeerKey(acct, peer)]);
+  if (!Array.isArray(ids) || !ids.length) return [];
+  const vals = await cmd(["HMGET", msgKey(acct)].concat(ids));
+  return (vals || []).map(parseRec).filter(Boolean).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+}
+
 // ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
 // 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
 // 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
@@ -719,6 +775,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender,
-  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

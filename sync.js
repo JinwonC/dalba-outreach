@@ -240,6 +240,63 @@ async function scanSentBook(account, budgetMs) {
   return { caughtUp, scanned: r.scanned, addresses: r.book.size, sentFolder: r.path };
 }
 
+// ─── 메일 데이터베이스 패스 (본문까지 저장) ─────────────────────────
+// 주소록·회신 판정과 **따로** 자체 커서로 돈다 — 5월부터 전부 저장하고, 이후엔 새 메일만.
+// (주소록 커서와 섞으면 과거분을 다시 읽을 때 주소록 숫자가 두 번 세어진다)
+// 회사 밖 상대가 있는 메일만: 보낸편지함은 외부 수신자가 있을 때, 받은 쪽은 외부 발신자일 때.
+const msgBoxKey = acct => "outreach:cursor:msgbox:" + H.normEmail(acct.email);
+async function storeMessagesPass(account, budgetMs) {
+  const until = Date.now() + Math.max(4000, Number(budgetMs) || 20000);
+  const me = H.normEmail(account.email);
+  let stored = 0, noText = 0, full = false, sentCaughtUp = false, boxesCaughtUp = false;
+  const idOf = (m, at) => m.messageId || (account.email + "|" + (m.uid || "") + "|" + at);
+
+  // ① 보낸편지함
+  const sMin = await getUidCursor("msgsent", account);
+  const sent = await M.read(account, { kind: "sent", since: SINCE_DEFAULT, limit: 20000, minUid: sMin,
+    budgetMs: Math.max(3000, Math.floor((until - Date.now()) * 0.4)), withBody: true });
+  const sItems = [];
+  for (const m of sent.rows) {
+    const ext = [...new Set((m.toAll || []).concat(m.ccAll || [], m.bccAll || []).map(p => H.normEmail(p.email))
+      .filter(e => e && e.indexOf("@") > 0 && !isInternal(e)))];
+    if (!ext.length) continue;
+    const at = m.at ? new Date(m.at).toISOString() : "";
+    sItems.push({ id: idOf(m, at), dir: "out", at, from: me,
+      to: (m.toAll || []).map(p => p.email), cc: (m.ccAll || []).map(p => p.email), bcc: (m.bccAll || []).map(p => p.email),
+      subject: m.subject || "", box: sent.path, text: m.text || "", peers: ext });
+  }
+  let r = await H.storeMessages(account.email, sItems);
+  stored += r.stored; noText += r.noText; full = full || r.full;
+  await setUidCursor("msgsent", account, maxUidOf(sent.rows));   // 저장을 마친 뒤에 커서를 올린다
+  sentCaughtUp = !sent.truncated;
+
+  // ② 받은편지함 + 사용자 폴더
+  if (until - Date.now() > 3000) {
+    let cursors = {};
+    try { cursors = JSON.parse(await H.readRaw(msgBoxKey(account)) || "{}") || {}; } catch (_) { cursors = {}; }
+    const res = await M.readFolders(account, { since: SINCE_DEFAULT, limit: 20000, cursors, budgetMs: until - Date.now(), withBody: true });
+    const rItems = [];
+    const next = Object.assign({}, cursors);
+    for (const f of res.folders) {
+      for (const m of f.rows) {
+        const e = H.normEmail(m.from && m.from.email);
+        if (!e || e.indexOf("@") < 1 || e === me || isInternal(e)) continue;
+        const at = m.at ? new Date(m.at).toISOString() : "";
+        rItems.push({ id: idOf(m, at) + (m.messageId ? "" : "|" + f.path), dir: "in", at, from: e, fromName: (m.from && m.from.name) || "",
+          to: (m.toAll || []).map(p => p.email), cc: (m.ccAll || []).map(p => p.email),
+          subject: m.subject || "", box: f.path, text: m.text || "", peers: [e] });
+      }
+      const mx = maxUidOf(f.rows);
+      if (mx > (Number(next[f.path]) || 0)) next[f.path] = mx;
+    }
+    r = await H.storeMessages(account.email, rItems);
+    stored += r.stored; noText += r.noText; full = full || r.full;
+    try { await H.writeRaw(msgBoxKey(account), JSON.stringify(next)); } catch (_) {}
+    boxesCaughtUp = !res.folders.some(f => f.truncated || f.skipped);
+  }
+  return { caughtUp: sentCaughtUp && boxesCaughtUp, stored, noText, full };
+}
+
 // 한 사람의 보낸편지함·받은편지함을 잇달아 처리한다 (자동 실행이 쓰는 단위)
 // 자동 실행은 **증분 스캔(커서)** 을 켠다. until(절대시각)까지 끝낸다 — 함수 제한시간 60초 안.
 async function syncAccount(account, contacted, opts) {
@@ -270,21 +327,31 @@ async function syncAccount(account, contacted, opts) {
   }
 
   const rep = await collectReplies(account, contacted, Object.assign({}, o, { budgetMs: Math.max(4000, left() - 3000) }));
+  // 메일 데이터베이스(본문 저장) — 남은 예산으로 이어서 처리한다
+  let msgs = null;
+  if (left() > 8000) {
+    try { msgs = await storeMessagesPass(account, left() - 3000); } catch (e) { msgs = { error: String((e && e.message) || e) }; }
+  }
+  const prevInfo = (await H.syncInfo(account.email)) || {};
   await H.saveSyncInfo(account.email, {
     sentFolder: st.sentFolder, sentCaughtUp: true,
     folders: rep.folders, foldersCaughtUp: !(rep.folders || []).some(f => f.truncated || f.skipped),
-    found: rep.found, notContacted: rep.notContacted
+    found: rep.found, notContacted: rep.notContacted,
+    msgsCaughtUp: msgs ? Boolean(msgs.caughtUp) : Boolean(prevInfo.msgsCaughtUp), msgsFull: Boolean(msgs && msgs.full),
+    msgsError: msgs && msgs.error || undefined
   });
   return {
     user: account.email,
     sent: sentWrite,
     replies: { found: rep.found, duplicate: rep.duplicate, notContacted: rep.notContacted },
     folders: rep.folders,
+    messages: msgs,
+    messagesCaughtUp: msgs ? Boolean(msgs.caughtUp) : Boolean(prevInfo.msgsCaughtUp),
     scanned: { sent: sentRead.scanned, inbox: rep.scanned }
   };
 }
 
 module.exports = {
   SINCE_DEFAULT, MAX_RECIPIENTS,
-  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, scanSentBook, bookReady, isInternal
+  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, scanSentBook, bookReady, storeMessagesPass, isInternal
 };
