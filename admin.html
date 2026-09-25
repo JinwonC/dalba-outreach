@@ -292,7 +292,12 @@ async function loadAdmin(){
   if($("by").value) qs.set("by", $("by").value);
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
   if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
-  if(VIEW === "book") qs.set("dir", BOOK_DIR);
+  if(VIEW === "book"){
+    // 담당자·기간·검색·방향이 바뀌면 첫 페이지로
+    const sig = [BOOK_DIR, $("by").value, $("days").value, $("q").value.trim()].join("|");
+    if(sig !== BOOK_SIG){ BOOK_SIG = sig; BOOK_OFFSET = 0; }
+    qs.set("dir", BOOK_DIR); qs.set("offset", String(BOOK_OFFSET)); qs.set("pageSize", String(BOOK_PAGE));
+  }
   const d = await fetchJson("/api/admin?" + qs);
   HIDDEN_BOX = new Set((d.hiddenMailboxes || []).map(x => String(x).toLowerCase()));
 
@@ -569,10 +574,11 @@ const DEC_STYLE = {
   replied: { bg:"#fdecea", bd:"#d93025", tagBg:"#fbd3cf", tagFg:"#a1251b" },
   recent:  { bg:"#fff4e0", bd:"#e8890c", tagBg:"#ffe2b3", tagFg:"#8a4b00" },
   ok:      { bg:"#e8f0fe", bd:"#1a73e8", tagBg:"#d2e3fc", tagFg:"#174ea6" },
+  inhouse: { bg:"#f5ecfb", bd:"#8e24aa", tagBg:"#ead3f7", tagFg:"#6a1b9a" },
   unknown: { bg:"",        bd:"#bbb",    tagBg:"#eee",    tagFg:"#666" }
 };
 function decLabel(dec, n){
-  return dec === "replied" ? "🔴 회신 옴" : dec === "recent" ? "🟠 최근 "+n+"일 내 발송" : dec === "ok" ? "🔵 "+n+"일 지남" : "⚪ 발송일 모름";
+  return dec === "inhouse" ? "🤝 협업 중" : dec === "replied" ? "🔴 회신 옴" : dec === "recent" ? "🟠 최근 "+n+"일 내 발송" : dec === "ok" ? "🔵 "+n+"일 지남" : "⚪ 발송일 모름";
 }
 function setBlkFilter(f){ BLK_FILTER = f; if(BLK_DATA) renderBlocked(BLK_DATA); }
 function renderBlocked(d){
@@ -580,7 +586,9 @@ function renderBlocked(d){
   const N = d.reapproveDays || 15;
   const allRows = d.rows||[];
   const cnt = k => allRows.filter(r => r.decision === k).length;
-  const rows = BLK_FILTER === "all" ? allRows : allRows.filter(r => r.decision === BLK_FILTER);
+  // 🤝 협업 중은 따로 뺀다 — '전체'에도 넣지 않고 전용 필터에서만 본다
+  const mainRows = allRows.filter(r => r.decision !== "inhouse");
+  const rows = BLK_FILTER === "all" ? mainRows : allRows.filter(r => r.decision === BLK_FILTER);
   // 본인 재시도(원래 보낸 사람 == 시도한 사람)와 다른 담당자와의 겹침을 구분한다.
   // 본인 재시도는 규칙 변경(본인 재발송 허용) **이전**에 막혔던 과거 기록 — 지금은 그냥 발송된다.
   const isSelf = r => {
@@ -602,7 +610,8 @@ function renderBlocked(d){
     if(!list.length) h += '<span class="muted">—</span>';
     else {
       const nSent = r.originsTotal || list.length;
-      if(nSent > 1) h += '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+nSent+'건</div>';
+      if(nSent > 1) h += '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+nSent+'건' +
+        (nSent > list.length ? ' <span>(최근 '+list.length+'건 표시)</span>' : '') + '</div>';
       h += list.map(o => line(o.by,
         '<b>'+esc(o.byName||o.by||'—')+'</b> <span class="mono muted">'+esc(fmt(o.at))+'</span>'+
         (o.campaign ? ' · <span class="muted">'+esc(o.campaign)+'</span>' : '')+
@@ -611,7 +620,9 @@ function renderBlocked(d){
     }
     // 크리에이터가 회신했으면 — 누구에게·어떤 제목인지. 누르면 그 회신 내용이 열린다.
     if(reps.length){
+      const nRep = r.repliesTotal || reps.length;
       h += '<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px">' +
+        (nRep > reps.length ? '<div class="muted" style="font-size:11px;margin-bottom:2px">회신 '+nRep+'건 (최근 '+reps.length+'건 표시)</div>' : '') +
         reps.map(q => line(q.inbox||q.by,
           '<span class="tag" style="background:#e8f5ec;color:#1f7a44">💬 회신</span> '+
           '<b>'+esc(q.byName||q.by||'—')+'</b> <span class="mono muted">'+esc(fmt(q.at))+'</span>'+
@@ -631,14 +642,17 @@ function renderBlocked(d){
     '<div class="note" style="line-height:1.9"><b>승인 판단</b> — ' +
       '<span style="color:#a1251b">🔴 회신 옴 — 승인하지 않음</span> · ' +
       '<span style="color:#8a4b00">🟠 최근 '+N+'일 내 발송 — 보내지 않음</span> · ' +
-      '<span style="color:#174ea6">🔵 '+N+'일 지남 — 재발송 가능</span>' +
+      '<span style="color:#174ea6">🔵 '+N+'일 지남 — 재발송 가능</span> · ' +
+      '<span style="color:#6a1b9a">🤝 협업 중 — 따로 모음 (관리자만 발송)</span>' +
       '<div class="muted" style="font-size:12px"><span>마지막 발송은 툴 발송과 네이버웍스 보낸편지함(단체·숨은참조 포함) 중 가장 최근, 회신은 모든 담당자 메일함 기준입니다.</span></div>' +
       ((d.partial && d.partial.mailbox) ? '<div style="color:#a23b2e;font-size:12px;margin-top:4px"><span>이번엔 시간이 부족해 네이버웍스 메일함(주소록) 대조를 건너뛰었습니다 — 판정이 툴 기록만 기준입니다. 새로고침하면 다시 시도합니다.</span></div>' : '') +
       ((d.partial && d.partial.inhouse) ? '<div class="muted" style="font-size:12px"><span>협업 시트를 제때 읽지 못해 🤝 표시를 건너뛰었습니다.</span></div>' : '') +
+      (d.trimmed ? '<div class="muted" style="font-size:12px"><span>양이 많아 줄마다 이력을 줄여서 보여줍니다 — 기간·담당자로 좁히면 더 자세히 보입니다.</span></div>' : '') +
     '</div>' +
     '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
-      fbtn("all", "전체 "+allRows.length) + fbtn("replied", "🔴 회신 옴 "+cnt("replied")) +
+      fbtn("all", "전체 "+mainRows.length) + fbtn("replied", "🔴 회신 옴 "+cnt("replied")) +
       fbtn("recent", "🟠 최근 "+N+"일 내 "+cnt("recent")) + fbtn("ok", "🔵 "+N+"일 지남 "+cnt("ok")) +
+      '<span style="margin-left:8px"></span>' + fbtn("inhouse", "🤝 협업 중 "+cnt("inhouse")) +
     '</div>' +
     '<div class="note">이미 발송된 크리에이터라서 <b>발송되지 않은</b> 시도입니다. ' +
     '<b>다른 담당자와 겹친 것</b>이 명단 배분을 조정할 신호입니다. ' +
@@ -777,7 +791,10 @@ async function exportApprovalsCsv(){
    내용·제목은 보여주지 않는다(기록은 그대로 보관). 메일 내용(대화)도 여기서 열 수 없다. */
 let BOOK_DIR = "replied";
 let BOOK_ROWS = [];
-function setBookDir(d){ BOOK_DIR = d; load(); }
+let BOOK_OFFSET = 0, BOOK_SIG = "";
+const BOOK_PAGE = 2000;
+function setBookDir(d){ BOOK_DIR = d; BOOK_OFFSET = 0; load(); }
+function bookPage(delta){ BOOK_OFFSET = Math.max(0, BOOK_OFFSET + delta * BOOK_PAGE); load(); }
 function renderBook(d){
   const rows = d.rows || [];
   BOOK_ROWS = rows;
@@ -790,7 +807,7 @@ function renderBook(d){
     btn("replied","📨") + btn("sent","📤") + btn("recv","📥") +
     '<button class="btn" onclick="exportBookCsv()">⬇️ 주소록 Excel(CSV)</button>' +
     '<button class="btn dark" onclick="fillBook()">🔄 네이버웍스에서 지금 채우기</button>' +
-    '<span class="muted"><span>'+LABEL[dir]+'</span> <b>'+rows.length+'명</b></span></div>' +
+    '<span class="muted"><span>'+LABEL[dir]+'</span> <b>'+(d.total != null ? d.total : rows.length)+'명</b></span></div>' +
     '<div id="bookFill"></div>' + bookStatusHtml(d.status || [], d.msgUsage);
   const note = '<div class="note">' + (
     dir === "replied" ? '<span>회신 온 사람 = 담당자 메일함으로 메일이 온 사람 중, 우리가 먼저 보낸 적 있는 주소 (관리자 포함 전원).</span>'
@@ -819,11 +836,30 @@ function renderBook(d){
       '<td class="mono muted">'+esc(fmt(r.first))+'</td>' +
       '<td class="mono muted">'+esc(fmt(r.last))+'</td>' + tail(r) + '</tr>').join("") +
     '</tbody></table></div>' +
-    (rows.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 Excel(CSV) 로 받으세요.</div>' : '');
-  return rows.length + "명";
+    // 페이지 이동 (한 번에 2000개씩 받아 온다 — 응답 한도 때문에)
+    ((d.total || 0) > BOOK_PAGE
+      ? '<div class="filters" style="margin-top:8px">' +
+          (BOOK_OFFSET > 0 ? '<button class="btn" onclick="bookPage(-1)">◀ 이전</button>' : '') +
+          '<span class="muted">'+(BOOK_OFFSET+1)+'–'+(BOOK_OFFSET+rows.length)+' / '+d.total+'</span>' +
+          (d.hasMore ? '<button class="btn" onclick="bookPage(1)">다음 ▶</button>' : '') + '</div>' : '');
+  return (d.total != null ? d.total : rows.length) + "명";
 }
-function exportBookCsv(){
-  const rows = BOOK_ROWS || [];
+async function exportBookCsv(){
+  // 화면은 한 페이지(2000개)씩이지만 엑셀은 **전 페이지**를 모아서 만든다
+  const qs = new URLSearchParams({ view:"book", dir: BOOK_DIR, pageSize: "5000" });
+  if($("q").value.trim()) qs.set("q", $("q").value.trim());
+  if($("days").value !== "0") qs.set("days", $("days").value);
+  if($("by").value) qs.set("by", $("by").value);
+  let rows = [], offset = 0;
+  try {
+    for(let guard = 0; guard < 200; guard++){
+      qs.set("offset", String(offset));
+      const d = await fetchJson("/api/admin?" + qs);
+      rows = rows.concat(d.rows || []);
+      if(!d.hasMore || !(d.rows||[]).length) break;
+      offset += (d.rows||[]).length;
+    }
+  } catch(e){ alert(String(e.message||e)); return; }
   if(!rows.length){ alert("내보낼 주소가 없습니다"); return; }
   const dir = BOOK_DIR;
   const H = r => r.handle ? "@"+String(r.handle).replace(/^@/,"") : "";

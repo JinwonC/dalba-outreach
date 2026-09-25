@@ -401,6 +401,18 @@ module.exports = async (req, res) => {
     const q = req.query || {};
     const view = String(q.view || "summary");
     const t0 = Date.now();   // 요청 시작 — 무거운 보완 작업은 남은 시간을 보고 건너뛴다
+    // Vercel 함수 응답은 4.5MB 까지다 — 넘으면 JSON 대신 오류 페이지가 가서 화면이 깨진다.
+    // 한도에 가까우면 알아볼 수 있는 JSON 오류로 바꿔 보낸다.
+    const rawJson = res.json.bind(res);
+    res.json = obj => {
+      let body = "";
+      try { body = JSON.stringify(obj); } catch (_) { body = ""; }
+      if (Buffer.byteLength(body) > 4.2e6) {
+        res.status(413);
+        return rawJson({ error: "보여줄 데이터가 너무 많습니다 — 담당자·기간·검색으로 범위를 좁혀 보세요" });
+      }
+      return rawJson(obj);
+    };
     const displayLimit = Math.max(1, Math.min(Number(q.limit) || 1000, H.LOG_MAX));
     const days = Number(q.days) || 0;
     const needle = String(q.q || "").trim().toLowerCase();
@@ -565,6 +577,18 @@ module.exports = async (req, res) => {
       //   recent   우리 쪽 마지막 발송이 REAPPROVE_DAYS(기본 15일) 안 → 보내지 않음
       //   ok       마지막 발송이 그보다 오래됨 → 다시 보내도 됨 (파랑)
       const blockedIdx = new Map(blockedRows.map((r, i) => [r, i]));
+      // 이력 한 줄에서 화면에 안 쓰는 값은 빼고, 긴 글자는 자른다
+      const cut = (v, n) => { const t = String(v == null ? "" : v); return t.length > n ? t.slice(0, n) + "…" : t; };
+      const slim = o => {
+        const x = { by: o.by || "", at: o.at || "" };
+        if (o.byName && o.byName !== o.by) x.byName = o.byName;
+        if (o.campaign) x.campaign = cut(o.campaign, 60);
+        if (o.subject) x.subject = cut(o.subject, 60);
+        if (o.inbox && o.inbox !== o.by) x.inbox = o.inbox;
+        if (o.mailbox) x.mailbox = true;
+        if (o.forced) x.forced = true;
+        return x;
+      };
       const rows = blockedRows.map(r => {
         const origins = originsOf(r);
         const e = H.normEmail(r.to);
@@ -586,13 +610,14 @@ module.exports = async (req, res) => {
         const lastSentAt = origins.map(o => o.at).filter(Boolean).sort().pop() || (prior && prior.at) || "";
         const t = Date.parse(lastSentAt);
         const daysSinceSent = isFinite(t) ? Math.floor((Date.now() - t) / 86400e3) : null;
-        const decision = reps.length ? "replied" : daysSinceSent == null ? "unknown" : daysSinceSent < REAPPROVE_DAYS ? "recent" : "ok";
         const ih = ihMatch(r, [...(e2h.get(H.normEmail(r.to)) || [])]);
+        // 🤝 협업 중(인하우스)은 따로 모은다 — 승인 대상이 아니므로 다른 판정보다 먼저
+        const decision = ih ? "inhouse" : reps.length ? "replied" : daysSinceSent == null ? "unknown" : daysSinceSent < REAPPROVE_DAYS ? "recent" : "ok";
         return Object.assign({}, r, {
-          // 응답 크기를 줄이려고 최근 20건씩만 싣는다 (전체 건수는 따로)
-          origins: origins.slice(-20), originsTotal: origins.length,
+          // 응답 크기를 줄이려고 최근 5건씩만 싣는다 (전체 건수는 따로) — Vercel 응답 한도 4.5MB
+          origins: origins.slice(-5).map(slim), originsTotal: origins.length,
           lastSentAt, daysSinceSent, decision,
-          replies: reps.slice(-20), repliesTotal: reps.length,
+          replies: reps.slice(-5).map(slim), repliesTotal: reps.length,
           prior: prior || (origins[0] || null),
           approved: H.approvalFieldsOf({ to: r.to, handle: r.handle }, r.by).some(f => appr.has(f)),
           inhouse: Boolean(ih), inhouseHandle: ih ? ih.handle : "", inhouseVia: ih ? ih.via : "",
@@ -602,7 +627,15 @@ module.exports = async (req, res) => {
           handleLinked: !H.normHandle(r.handle) && Boolean([...(e2h.get(H.normEmail(r.to)) || [])][0] || (links && links[blockedIdx.get(r)] && links[blockedIdx.get(r)].handles[0]))
         });
       });
-      res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS, partial,
+      // 원래 발송이 있으면 prior 는 중복이라 뺀다 (크기 절약)
+      rows.forEach(x => { if (x.origins && x.origins.length) delete x.prior; });
+      // 그래도 크면 단계적으로 줄인다: 이력 2건 → 제목 빼기 → 최근 줄만
+      let trimmed = false;
+      const sizeOf = () => Buffer.byteLength(JSON.stringify(rows));
+      if (sizeOf() > 3.2e6) { trimmed = true; rows.forEach(x => { x.origins = x.origins.slice(-2); x.replies = x.replies.slice(-2); }); }
+      if (sizeOf() > 3.2e6) rows.forEach(x => { x.origins.forEach(o => { delete o.campaign; }); x.replies.forEach(q => { delete q.subject; }); });
+      while (rows.length > 100 && sizeOf() > 3.2e6) rows.length = Math.floor(rows.length * 0.8);
+      res.status(200).json(Object.assign(base, { rows, reapproveDays: REAPPROVE_DAYS, partial, trimmed,
         timing: { readMs: tRead, heavyMs: tHeavyMs, totalMs: Date.now() - t0 } }));
       return;
     }
@@ -684,10 +717,14 @@ module.exports = async (req, res) => {
         }
         map.forEach(x => rows.push(x));
       }
-      const kept = rows.filter(x => withinDays({ at: x.last }, days) &&
+      const kept0 = rows.filter(x => withinDays({ at: x.last }, days) &&
         (!needle || [x.email, x.name, x.handle, x.box].filter(Boolean).join(" ").toLowerCase().indexOf(needle) >= 0))
         .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")))
         .map(x => { const o = Object.assign({}, x); delete o.subj; delete o.fromLog; return o; });   // 내용(제목)은 싣지 않는다
+      // 한 번에 다 보내면 전원 보기에서 수십 MB 가 된다(응답 한도 4.5MB) → 페이지로 나눈다.
+      const offset = Math.max(0, Number(q.offset) || 0);
+      const pageSize = Math.max(1, Math.min(Number(q.pageSize) || 2000, 5000));
+      const kept = kept0.slice(offset, offset + pageSize);
       // 담당자별 채움 상태 — 어느 폴더를 보낸편지함으로 읽었는지 · 주소 수 · 마지막 동기화 · 오류
       const status = [];
       for (const st of staffList) {
@@ -695,7 +732,8 @@ module.exports = async (req, res) => {
         status.push(Object.assign({ staff: st, staffName: NM.get(st) || st, sentBook: sn, recvBook: rn, messages: mn }, info || {}));
       }
       const msgUsage = await H.messageUsage();   // 메일 데이터베이스 용량 (본문 저장)
-      res.status(200).json(Object.assign(base, { dir, rows: kept, status, msgUsage }));
+      res.status(200).json(Object.assign(base, { dir, rows: kept, total: kept0.length, offset, pageSize,
+        hasMore: offset + kept.length < kept0.length, status, msgUsage }));
       return;
     }
     if (view === "repliers") {
