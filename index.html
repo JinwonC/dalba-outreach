@@ -124,6 +124,8 @@
   /* 보류 — 실패(빨강)도 성공(초록)도 아니다. 담당자가 판단할 거리라는 뜻의 호박색 */
   .hold { background:#fdf6e3; border:1px solid #ecdcae; color:#8a6d1f; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
   .holdtag { color:#a8801f; font-weight:700; white-space:nowrap; }
+  .tag { display:inline-block; border-radius:6px; padding:1px 7px; font-size:12px; white-space:nowrap; }
+  .note { background:#fafafa; border:1px solid #eee; border-radius:10px; padding:10px 14px; font-size:12.5px; }
   .ok  { background:#eaf7ef; border:1px solid #bfe3cd; color:#256b43; border-radius:10px; padding:11px 14px; font-size:12.5px; margin-bottom:12px; line-height:1.6; }
 
   /* 대량 */
@@ -583,7 +585,7 @@
       <h2>🔎 중복 검사 — 이미 보낸 크리에이터인지 확인</h2>
       <div class="hint">
         <div>핸들 또는 이메일을 한 줄에 하나씩(또는 콤마로 구분) 붙여넣으면 한 번에 검사합니다.</div>
-        <div>전체 담당자(관리자 포함)가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 찾아 줍니다.</div>
+        <div>전체 담당자(관리자 포함)가 이 사람들에게 보낸 적이 있는지 · 누가 · 언제 보냈는지 · 회신이 왔는지 찾아 색으로 판단해 줍니다.</div>
       </div>
       <textarea id="checkQ" rows="6" placeholder="@handle1&#10;creator@example.com&#10;@handle2&#10;..." style="width:100%"
                 oninput="paintCheckCount()"
@@ -1930,9 +1932,29 @@ async function runCheck(){
 
 function setCheckFilter(f){ CHECK_FILTER = f; renderChecks(); }
 
+/* 판단 색 — 관리자 페이지 ⏸ 중복시도와 같다.
+   🔴 회신 옴(보내지 않음) · 🟠 최근 N일 내 발송(보내지 않음) · 🔵 N일 지남(다시 보내도 됨) · ✅ 없음 · 🤝 협업 중(따로) */
+const CHK_STYLE = {
+  replied: { bg:"#fdecea", bd:"#d93025", tagBg:"#fbd3cf", tagFg:"#a1251b" },
+  recent:  { bg:"#fff4e0", bd:"#e8890c", tagBg:"#ffe2b3", tagFg:"#8a4b00" },
+  ok:      { bg:"#e8f0fe", bd:"#1a73e8", tagBg:"#d2e3fc", tagFg:"#174ea6" },
+  inhouse: { bg:"#f5ecfb", bd:"#8e24aa", tagBg:"#ead3f7", tagFg:"#6a1b9a" },
+  unknown: { bg:"",        bd:"#bbb",    tagBg:"#eee",    tagFg:"#666" },
+  clean:   { bg:"",        bd:"#1e9e4a", tagBg:"#e3f4e8", tagFg:"#1f7a44" }
+};
+const CHK_ORDER = { replied:0, recent:1, unknown:2, ok:3, clean:4, inhouse:5 };
+function chkLabel(dec, n){
+  return dec === "inhouse" ? "🤝 협업 중" : dec === "replied" ? "🔴 회신 옴" : dec === "recent" ? "🟠 최근 "+n+"일 내 발송"
+    : dec === "ok" ? "🔵 "+n+"일 지남" : dec === "unknown" ? "⚪ 발송일 모름" : "✅ 없음";
+}
+// 보내도 되는 것 = ✅ 없음 + 🔵 N일 지남 (🤝 협업 중은 관리자만 보내므로 뺀다)
+const chkSendable = r => r.decision === "clean" || r.decision === "ok";
+
 async function copyChecks(kind){
   const rows = (CHECK_DATA && CHECK_DATA.results) || [];
-  const list = (kind === "clean" ? rows.filter(r=>!r.found) : rows.filter(r=>r.found)).map(r=>r.query);
+  const pick = kind === "send" ? rows.filter(chkSendable)
+    : kind === "clean" ? rows.filter(r=>!r.found) : rows.filter(r=>r.found);
+  const list = pick.map(r=>r.query);
   if(!list.length){ return; }
   try { await navigator.clipboard.writeText(list.join("\n"));
     const el = $("copyMsg"); if(el){ el.textContent = "복사됨 ("+list.length+"개)"; setTimeout(()=>{ if(el) el.textContent=""; }, 2000); }
@@ -1941,45 +1963,67 @@ async function copyChecks(kind){
 
 function renderChecks(){
   const d = CHECK_DATA; if(!d) return;
-  const rows = d.results || [];
-  const dups = rows.filter(r=>r.found), clean = rows.filter(r=>!r.found);
-  // 전체 보기에선 '이미 보냄'을 위로 올린다 (확인이 필요한 쪽)
-  const inh = rows.filter(r=>r.inhouse);
-  let list = CHECK_FILTER==="dup" ? dups : CHECK_FILTER==="clean" ? clean
-    : CHECK_FILTER==="inhouse" ? inh
-    : rows.slice().sort((a,b)=> (b.found?1:0)-(a.found?1:0));
+  const N = d.reapproveDays || 15;
+  const rows = (d.results || []).map(r => Object.assign({ decision: r.found ? "unknown" : "clean" }, r));
+  const cnt = k => rows.filter(r => r.decision === k).length;
+  // 🤝 협업 중은 따로 뺀다 — '전체'에도 넣지 않고 전용 필터에서만 본다 (관리자 페이지와 같게)
+  const main = rows.filter(r => r.decision !== "inhouse");
+  const list = (CHECK_FILTER === "all" ? main : rows.filter(r => r.decision === CHECK_FILTER))
+    .slice().sort((a,b) => (CHK_ORDER[a.decision]||0) - (CHK_ORDER[b.decision]||0));
 
   const btn = (f,label,n) => '<button class="pvtab'+(CHECK_FILTER===f?' active':'')+'" onclick="setCheckFilter(\''+f+'\')">'+label+' '+n+'</button>';
-  let h = '<div class="'+(d.foundCount?'hold':'ok')+'">' +
-    '총 <b>'+d.count+'개</b> · ⏸ 이미 보냄 <b>'+d.foundCount+'</b> · ✅ 없음 <b>'+d.cleanCount+'</b>' +
-    ((d.inhouseCount||0) ? ' · 🤝 협업 중 <b>'+d.inhouseCount+'</b>' : '') +
-    (d.truncated ? ' <span class="muted">(입력이 많아 일부만 검사됨)</span>' : '') + '</div>';
+  const nSend = rows.filter(chkSendable).length;
+  let h = '<div class="note" style="line-height:1.9"><b>판단</b> — ' +
+      '<span style="color:#a1251b">🔴 회신 옴 — 보내지 않음</span> · ' +
+      '<span style="color:#8a4b00">🟠 최근 '+N+'일 내 발송 — 보내지 않음</span> · ' +
+      '<span style="color:#174ea6">🔵 '+N+'일 지남 — 재발송 가능</span> · ' +
+      '<span style="color:#1f7a44">✅ 없음 — 보내도 됨</span> · ' +
+      '<span style="color:#6a1b9a">🤝 협업 중 — 따로 모음 (관리자만 발송)</span>' +
+      '<div class="muted" style="font-size:12px"><span>마지막 발송은 툴 발송과 네이버웍스 보낸편지함(단체·숨은참조 포함) 중 가장 최근, 회신은 모든 담당자 메일함 기준입니다.</span></div>' +
+      ((d.partial && d.partial.mailbox) ? '<div style="color:#a23b2e;font-size:12px;margin-top:4px"><span>이번엔 시간이 부족해 메일함으로 들어온 회신 대조를 건너뛰었습니다 — 다시 검사하면 재시도합니다.</span></div>' : '') +
+      ((d.partial && d.partial.inhouse) ? '<div class="muted" style="font-size:12px"><span>협업 시트를 제때 읽지 못해 🤝 표시를 건너뛰었습니다.</span></div>' : '') +
+      (d.truncated ? '<div class="muted" style="font-size:12px"><span>(입력이 많아 일부만 검사됨)</span></div>' : '') +
+    '</div>';
   h += '<div class="pvbar" style="margin-top:10px;flex-wrap:wrap">' +
-    btn("all","전체",d.count) + btn("dup","이미 보냄",d.foundCount) + btn("clean","없음",d.cleanCount) +
-    ((d.inhouseCount||0) ? btn("inhouse","협업 중",d.inhouseCount) : "") +
-    '<span style="flex:1"></span>' +
+    btn("all","전체",main.length) + btn("replied","🔴 회신 옴",cnt("replied")) +
+    btn("recent","🟠 최근 "+N+"일 내",cnt("recent")) + btn("ok","🔵 "+N+"일 지남",cnt("ok")) +
+    btn("clean","✅ 없음",cnt("clean")) +
+    (cnt("unknown") ? btn("unknown","⚪ 발송일 모름",cnt("unknown")) : "") +
+    '<span style="margin-left:8px"></span>' + btn("inhouse","🤝 협업 중",cnt("inhouse")) + '</div>' +
+    '<div class="pvbar" style="margin-top:6px;flex-wrap:wrap">' +
+    '<button class="btn dark" onclick="copyChecks(\'send\')">📋 보내도 되는 것 복사 ('+nSend+')</button>' +
     '<button class="btn" onclick="copyChecks(\'clean\')">✅ 안 보낸 것 복사</button>' +
     '<button class="btn" onclick="copyChecks(\'dup\')">⏸ 이미 보낸 것 복사</button>' +
     '<span class="muted" id="copyMsg"></span></div>';
 
   const CAP = 500;
+  const decCell = r => {
+    const st = CHK_STYLE[r.decision] || CHK_STYLE.unknown;
+    const tags = ['<span class="tag" style="background:'+st.tagBg+';color:'+st.tagFg+';font-weight:600">'+chkLabel(r.decision, N)+'</span>'];
+    if(r.inhouse) tags.push('<div style="margin-top:3px">'+ihTag(r.inhouseHandle, r.inhouseVia)+'</div>');
+    if(r.daysSinceSent != null) tags.push('<div class="muted" style="font-size:11px;margin-top:3px">마지막 발송 '+r.daysSinceSent+'일 전</div>');
+    if(r.forced) tags.push(' <span class="holdtag">강제</span>');
+    return '<td style="white-space:nowrap">'+tags.join("")+'</td>';
+  };
   h += '<div class="scroll" style="margin-top:10px;max-height:460px"><table class="rcp"><thead><tr>' +
-    '<th>입력</th><th>상태</th><th>담당자</th><th>최근 발송</th><th>회신</th></tr></thead><tbody>' +
-    list.slice(0, CAP).map(r =>
-      '<tr'+(r.found?' style="background:#fffaf0"':'')+'>' +
-      '<td><b>'+esc(r.query)+'</b>'+(r.found && r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+
+    '<th>입력</th><th>판단</th><th>보낸 담당자</th><th>최근 발송</th><th>회신</th></tr></thead><tbody>' +
+    list.slice(0, CAP).map(r => {
+      const st = CHK_STYLE[r.decision] || CHK_STYLE.unknown;
+      return '<tr class="chk-'+esc(r.decision)+'" style="'+(st.bg?'background:'+st.bg+';':'')+'box-shadow:inset 4px 0 0 '+st.bd+'">' +
+      '<td><b>'+esc(r.query)+'</b>'+(r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+
         ((r.linked||[]).length ? '<div class="muted" title="발송 기록에서 이메일↔핸들로 연결된 값">🔗 '+esc(r.linked.map(x => r.kind==="email" ? "@"+x : x).join(", "))+'</div>' : '')+'</td>' +
-      '<td>'+(function(){ const parts=[];
-          if(r.inhouse) parts.push(ihTag(r.inhouseHandle, r.inhouseVia));
-          if(r.sentCount>0) parts.push('<span class="rowbad">⏸ 이미 보냄 '+r.sentCount+'건</span>'+(r.forced?' <span class="holdtag">강제</span>':''));
-          if(!parts.length) parts.push('<span class="rowok">✅ 없음</span>');
-          return parts.join(' ');
-        })()+'</td>' +
-      '<td>'+esc((r.senders||[]).join(", "))+'</td>' +
-      '<td class="muted">'+esc(r.found?fmtAt(r.lastAt):'')+(r.lastCampaign?'<div class="muted">'+esc(r.lastCampaign)+'</div>':'')+'</td>' +
-      '<td class="muted">'+(r.replyCount?r.replyCount+'건':'')+'</td></tr>').join("") +
+      decCell(r) +
+      '<td>'+esc((r.senders||[]).join(", "))+(r.sentCount>1?'<div class="muted" style="font-size:11px">발송 '+r.sentCount+'건</div>':'')+'</td>' +
+      '<td class="muted">'+esc(r.lastAt?fmtAt(r.lastAt):'')+(r.lastCampaign?'<div class="muted">'+esc(r.lastCampaign)+'</div>':'')+'</td>' +
+      '<td>'+(r.replyCount
+        ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">💬 '+r.replyCount+'건</span>' +
+          ((r.replyBy||[]).length ? ' <b>'+esc(r.replyBy.join(", "))+'</b>' : '') +
+          (r.lastReplyAt ? '<div class="muted" style="font-size:11px">'+esc(fmtAt(r.lastReplyAt))+'</div>' : '')
+        : '')+'</td></tr>';
+    }).join("") +
     '</tbody></table></div>' +
-    (list.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 복사 버튼으로 받으세요.</div>' : '');
+    (list.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 복사 버튼으로 받으세요.</div>' : '') +
+    (list.length ? '' : '<div class="muted" style="padding:14px 0">해당하는 항목이 없습니다.</div>');
   $("checkResult").innerHTML = h;
 }
 

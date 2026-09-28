@@ -62,10 +62,11 @@ async function buildIndex() {
     push(sEmail, e, i); push(sHandle, h, i);
     if (e && h) { link(e2h, e, h); link(h2e, h, e); }
   });
+  // 회신 — 누가(어느 담당자 메일함) · 언제 받았는지만 (제목·내용은 싣지 않는다)
+  const replies = (replyAll || []).filter(Boolean).map(r => ({ owner: H.normEmail(r.inbox || r.by), at: r.at || "" }));
   const rEmail = new Map(), rHandle = new Map();
-  const bump = (map, key) => { if (!key) return; map.set(key, (map.get(key) || 0) + 1); };
-  (replyAll || []).forEach(r => { bump(rEmail, H.normEmail(r.from)); bump(rHandle, H.normHandle(r.handle)); });
-  return { sent, sEmail, sHandle, e2h, h2e, rEmail, rHandle };
+  (replyAll || []).filter(Boolean).forEach((r, i) => { push(rEmail, H.normEmail(r.from), i); push(rHandle, H.normHandle(r.handle), i); });
+  return { sent, sEmail, sHandle, e2h, h2e, rEmail, rHandle, replies };
 }
 
 // 한 입력(핸들 또는 이메일)에 대한 조회 결과. match 가 있으면 협업 리스트도 함께 대조한다
@@ -80,9 +81,11 @@ function summarizeOne(q, idx, match) {
   emails.forEach(e => (idx.sEmail.get(e) || []).forEach(i => ids.add(i)));
   handles.forEach(h => (idx.sHandle.get(h) || []).forEach(i => ids.add(i)));
 
-  let replyCount = 0;
-  emails.forEach(e => { replyCount += idx.rEmail.get(e) || 0; });
-  handles.forEach(h => { replyCount += idx.rHandle.get(h) || 0; });
+  // 회신 기록 — 이메일·핸들 양쪽으로 잡힌 같은 회신은 번호로 합쳐 한 번만 센다
+  const rids = new Set();
+  emails.forEach(e => (idx.rEmail.get(e) || []).forEach(i => rids.add(i)));
+  handles.forEach(h => (idx.rHandle.get(h) || []).forEach(i => rids.add(i)));
+  const replies = [...rids].map(i => idx.replies[i]);
 
   const a = { count: 0, senders: new Set(), lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" };
   ids.forEach(i => {
@@ -102,7 +105,8 @@ function summarizeOne(q, idx, match) {
   const base = {
     query: q, kind: isEmail ? "email" : "handle", inhouse,
     inhouseHandle: m ? m.handle : "", inhouseVia: m ? m.via : "",
-    linked, replyCount
+    linked, replyCount: replies.length, replies,
+    _emails: [...emails]
   };
   if (!a.count) {
     return Object.assign(base, { found: inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" });
@@ -114,8 +118,53 @@ function summarizeOne(q, idx, match) {
   });
 }
 
+// ── 승인 판단 (관리자 페이지 ⏸ 중복시도와 같은 기준) ──
+//   inhouse  🤝 협업 리스트에 있음 → 따로 (관리자만 발송)
+//   replied  회신이 온 크리에이터 → 보내지 않음 (빨강)
+//   recent   마지막 발송이 REAPPROVE_DAYS(기본 15일) 안 → 보내지 않음 (주황)
+//   ok       마지막 발송이 그보다 오래됨 → 다시 보내도 됨 (파랑)
+//   unknown  보낸 기록은 있는데 날짜를 모름
+//   clean    보낸 적도 회신도 없음 → 보내도 됨
+// 회신은 회신 기록 + 모든 담당자 메일함으로 들어온 메일(받은 주소록)까지 본다.
+const REAPPROVE_DAYS = Math.max(1, Number(process.env.BLOCKED_REAPPROVE_DAYS) || 15);
+const withTimeout = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(() => fallback), new Promise(r => setTimeout(() => r(fallback), ms))]);
+
+async function decide(results, t0) {
+  const accts = A.parseAccounts().map(a => H.normEmail(a.email)).filter(Boolean);
+  const names = new Map(A.parseAccounts().map(a => [H.normEmail(a.email), a.name || a.email]));
+  const emails = [...new Set(results.flatMap(r => r._emails || []))];
+  const room = Math.max(0, 50e3 - (Date.now() - t0));
+  const recv = room > 3000 ? await withTimeout(H.bookGetMany("recv", accts, emails), Math.min(12000, room - 1000), null) : null;
+  const now = Date.now();
+  results.forEach(r => {
+    const reps = (r.replies || []).slice();
+    (r._emails || []).forEach(e => (((recv && recv.get(e)) || [])).forEach(b => {
+      // 회신 기록에 이미 있는 담당자 메일함이면 같은 회신이라 더하지 않는다
+      if (reps.some(x => x.owner === b.owner)) return;
+      reps.push({ owner: b.owner, at: b.last || b.first || "", mailbox: true });
+    }));
+    const who = [...new Set(reps.map(x => x.owner).filter(Boolean))].map(o => names.get(o) || o);
+    const lastReplyAt = reps.map(x => x.at).filter(Boolean).sort().pop() || "";
+    const t = Date.parse(r.lastAt || "");
+    const daysSinceSent = r.sentCount > 0 && isFinite(t) ? Math.max(0, Math.floor((now - t) / 86400e3)) : null;
+    const decision = r.inhouse ? "inhouse" : reps.length ? "replied"
+      : r.sentCount > 0 ? (daysSinceSent == null ? "unknown" : daysSinceSent < REAPPROVE_DAYS ? "recent" : "ok")
+      : "clean";
+    r.replyCount = reps.length;
+    r.replyBy = who;
+    r.lastReplyAt = lastReplyAt;
+    r.daysSinceSent = daysSinceSent;
+    r.decision = decision;
+    // 회신만 있고 발송 기록이 없어도 '이미 접촉함'으로 본다 (안 보낸 것 복사에서 빠진다)
+    r.found = decision !== "clean";
+    delete r.replies; delete r._emails;
+  });
+  return { partial: { mailbox: !recv } };
+}
+
 module.exports = async (req, res) => {
   try {
+    const t0 = Date.now();
     res.setHeader("Cache-Control", "no-store");
 
     if (A.enabled()) {
@@ -135,7 +184,8 @@ module.exports = async (req, res) => {
     }
 
     // 인하우스 협업 리스트도 함께 대조한다 (핸들·이메일). 못 읽어도 검사는 계속(아무도 매칭 안 됨).
-    const match = await IH.matcher();
+    // 시트를 제때 못 읽으면(8초) 🤝 대조만 건너뛰고 나머지는 그대로 — 발송 이력 읽기와 동시에 진행
+    const matchP = withTimeout(IH.matcher(), 8000, null);
 
     // ─── POST: 여러 개 한 번에 ───────────────────────────────────
     if (req.method === "POST") {
@@ -155,11 +205,16 @@ module.exports = async (req, res) => {
       }
       if (!queries.length) { res.status(400).json({ error: "검사할 핸들 또는 이메일을 입력하세요" }); return; }
 
-      const idx = await buildIndex();
+      const [idx, match] = await Promise.all([buildIndex(), matchP]);
       const results = queries.map(q => summarizeOne(q, idx, match));
+      const { partial } = await decide(results, t0);
+      partial.inhouse = !match;
       const foundCount = results.filter(r => r.found).length;
+      const dc = k => results.filter(r => r.decision === k).length;
       res.status(200).json({
         historyEnabled: true,
+        reapproveDays: REAPPROVE_DAYS, partial,
+        decisions: { replied: dc("replied"), recent: dc("recent"), ok: dc("ok"), unknown: dc("unknown"), clean: dc("clean"), inhouse: dc("inhouse") },
         count: results.length,
         foundCount,
         cleanCount: results.length - foundCount,
@@ -175,8 +230,9 @@ module.exports = async (req, res) => {
     const q = String((req.query && req.query.q) || "").trim();
     if (!q) { res.status(400).json({ error: "핸들 또는 이메일을 입력하세요" }); return; }
 
-    const idx = await buildIndex();
+    const [idx, match] = await Promise.all([buildIndex(), matchP]);
     const one = summarizeOne(q, idx, match);
+    await decide([one], t0);
     // 단건은 기존 화면과 호환되게 sent/replies 상세도 흉내 내지 않고 요약 형태로 준다
     res.status(200).json(Object.assign({ historyEnabled: true, found: one.found, sentCount: one.sentCount, replyCount: one.replyCount, senders: one.senders }, { results: [one] }));
   } catch (e) {
