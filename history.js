@@ -609,6 +609,51 @@ async function messagesWith(acct, peer) {
   return (vals || []).map(parseRec).filter(Boolean).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
 }
 
+// 여러 크리에이터 × 여러 메일함의 **보낸 메일**(제목·시각)을 한 번에 — 중복 검사 화면용. 본문은 빼고 준다.
+// pairs: [[메일함, 이메일], …] — 그 메일함이 그 주소로 보낸 적이 있는 쌍만 넘기면 저장소 요청이 적다.
+// 반환: Map 이메일 → [{ id, by(메일함), at, subject }]
+async function outMessagesFor(pairsIn) {
+  const out = new Map();
+  const seenPair = new Set(), pairs = [];
+  (pairsIn || []).forEach(([o0, e0]) => {
+    const o = normEmail(o0), e = normEmail(e0);
+    if (!o || !e || e.indexOf("@") < 1 || seenPair.has(o + "|" + e)) return;
+    seenPair.add(o + "|" + e); pairs.push([o, e]);
+  });
+  if (!enabled() || !pairs.length) return out;
+  const idsOf = new Map();          // "메일함|이메일" → [id]
+  const want = new Map();           // 메일함 → Set(id)
+  for (let i = 0; i < pairs.length; i += 500) {
+    const part = pairs.slice(i, i + 500);
+    const res = await pipeline(part.map(([o, e]) => ["SMEMBERS", msgPeerKey(o, e)]));
+    part.forEach(([o, e], j) => {
+      const ids = Array.isArray(res[j]) ? res[j] : [];
+      if (!ids.length) return;
+      idsOf.set(o + "|" + e, ids);
+      const w = want.get(o) || new Set(); ids.forEach(id => w.add(id)); want.set(o, w);
+    });
+  }
+  const recs = new Map();           // "메일함|id" → { at, subject }
+  for (const [o, set] of want) {
+    const ids = [...set];
+    for (let i = 0; i < ids.length; i += 300) {
+      const part = ids.slice(i, i + 300);
+      const vals = await cmd(["HMGET", msgKey(o)].concat(part));
+      (vals || []).forEach((v, j) => {
+        const m = parseRec(v);
+        if (m && m.dir === "out") recs.set(o + "|" + part[j], { by: o, at: m.at || "", subject: m.subject || "" });
+      });
+    }
+  }
+  for (const [k, ids] of idsOf) {
+    const e = k.slice(k.indexOf("|") + 1), o = k.slice(0, k.indexOf("|"));
+    const arr = out.get(e) || [];
+    ids.forEach(id => { const r = recs.get(o + "|" + id); if (r) arr.push(Object.assign({ id: o + "|" + id }, r)); });
+    if (arr.length) out.set(e, arr);
+  }
+  return out;
+}
+
 // ─── 실시간 접속 (presence) ────────────────────────────────────────
 // 열어 둔 화면이 주기적으로 신호를 보낸다(하트비트). 마지막 신호 시각으로 접속 중/자리 비움을 가린다.
 //   outreach:presence        ZSET  이메일 → 마지막 신호(ms)
@@ -928,6 +973,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, presencePing,
-  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

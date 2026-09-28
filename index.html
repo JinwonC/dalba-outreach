@@ -1974,9 +1974,13 @@ function sendsCell(r){
   const list = r.sends || [];
   if(!list.length && !r.sentCount) return '<span class="muted">—</span>';
   const total = Math.max(r.sendsTotal || 0, list.length);
-  return list.map(sendLine).join("") +
-    '<div style="margin-top:3px"><a href="javascript:void 0" class="muted sendsmore" style="font-size:11.5px" onclick="toggleSends(this)">📨 발송 전체 보기'+(total ? ' ('+total+'건)' : '')+'</a></div>' +
-    '<div class="sendsall" style="display:none"></div>';
+  // 발송된 메일 전부 — 길면 칸 안에서 스크롤
+  return (total > 1 ? '<div class="muted" style="font-size:11px;margin-bottom:2px">발송 '+total+'건</div>' : '') +
+    '<div style="max-height:220px;overflow:auto">' + list.map(sendLine).join("") + '</div>' +
+    // 응답이 커서 일부만 실렸을 때만 — 나머지를 따로 불러온다
+    (total > list.length
+      ? '<div style="margin-top:3px"><a href="javascript:void 0" class="muted sendsmore" style="font-size:11.5px" onclick="toggleSends(this)">📨 발송 전체 보기 ('+total+'건)</a></div><div class="sendsall" style="display:none"></div>'
+      : '');
 }
 async function toggleSends(a){
   const tr = a.closest("tr"), box = tr.querySelector(".sendsall");
@@ -2015,6 +2019,8 @@ function renderChecks(){
       '<div class="muted" style="font-size:12px"><span>마지막 발송은 툴 발송과 네이버웍스 보낸편지함(단체·숨은참조 포함) 중 가장 최근, 회신은 모든 담당자 메일함 기준입니다.</span></div>' +
       ((d.partial && d.partial.mailbox) ? '<div style="color:#a23b2e;font-size:12px;margin-top:4px"><span>이번엔 시간이 부족해 메일함으로 들어온 회신 대조를 건너뛰었습니다 — 다시 검사하면 재시도합니다.</span></div>' : '') +
       ((d.partial && d.partial.inhouse) ? '<div class="muted" style="font-size:12px"><span>협업 시트를 제때 읽지 못해 🤝 표시를 건너뛰었습니다.</span></div>' : '') +
+      ((d.partial && d.partial.sends) ? '<div class="muted" style="font-size:12px"><span>저장된 보낸 메일을 제때 불러오지 못해 발송 기록 기준으로 보여줍니다 — 일부 제목이 빠질 수 있습니다.</span></div>' : '') +
+      (d.sendsCut ? '<div class="muted" style="font-size:12px"><span>검사한 양이 많아 줄마다 최근 발송만 보여줍니다 — "📨 발송 전체 보기"로 전부 볼 수 있습니다.</span></div>' : '') +
       (d.truncated ? '<div class="muted" style="font-size:12px"><span>(입력이 많아 일부만 검사됨)</span></div>' : '') +
     '</div>';
   h += '<div class="pvbar" style="margin-top:10px;flex-wrap:wrap">' +
