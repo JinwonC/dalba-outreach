@@ -50,7 +50,7 @@ async function buildIndex() {
         const e = H.normEmail(b.email);
         if (!e || have.has(H.normEmail(owner) + "|" + e)) continue;
         sent.push({ to: e, by: owner, byName: names.get(H.normEmail(owner)) || owner, at: b.last || b.first || "",
-          campaign: "", count: Number(b.n) || 1, source: "mailbox" });
+          campaign: "", subject: b.subj || "", count: Number(b.n) || 1, source: "mailbox" });
       }
     }
   } catch (_) { /* 주소록을 못 읽어도 발송 기록만으로 검사는 계속 */ }
@@ -69,9 +69,29 @@ async function buildIndex() {
   return { sent, sEmail, sHandle, e2h, h2e, rEmail, rHandle, replies };
 }
 
+// ─── 발송 제목 · 발신자 ─────────────────────────────────────────
+// 발송 한 건을 화면용으로 줄인다: 누가(담당자) · 언제 · 제목.
+// 제목 출처: 툴 발송 기록(subject) → 메일함에서 가져온 발송(campaign 에 제목이 들어 있음) → 주소록의 마지막 제목.
+// 관리자 메일함에서 나간 메일의 제목은 그 관리자 본인만 본다 (관리자 대화는 어느 화면에서든 숨김).
+const INLINE_SENDS = 3;
+const cutS = (v, n) => { const t = String(v == null ? "" : v).trim(); return t.length > n ? t.slice(0, n) + "…" : t; };
+function subjectHidden(by, viewer) {
+  const b = H.normEmail(by);
+  return Boolean(b) && A.adminEmails().includes(b) && b !== H.normEmail(viewer);
+}
+function sendItem(r, viewer) {
+  const subj = r.subject || (r.source === "imap" ? r.campaign : "") || "";
+  const x = { by: H.normEmail(r.by), byName: r.byName || r.by || "", at: r.at || "" };
+  if (subjectHidden(r.by, viewer)) x.hidden = true;
+  else if (subj) x.subject = cutS(subj, 120);
+  if (r.campaign && r.source !== "imap") x.campaign = cutS(r.campaign, 60);
+  if (r.source === "mailbox") { x.mailbox = true; if (Number(r.count) > 1) x.n = Number(r.count); }
+  return x;
+}
+
 // 한 입력(핸들 또는 이메일)에 대한 조회 결과. match 가 있으면 협업 리스트도 함께 대조한다
 // (핸들 · 연결된 핸들 · 시트 이메일 · 이메일 주소 추정).
-function summarizeOne(q, idx, match) {
+function summarizeOne(q, idx, match, viewer) {
   const isEmail = EMAIL_RE.test(q);
   const emails = new Set(), handles = new Set();
   if (isEmail) { const e = H.normEmail(q); emails.add(e); (idx.e2h.get(e) || []).forEach(h => handles.add(h)); }
@@ -88,8 +108,10 @@ function summarizeOne(q, idx, match) {
   const replies = [...rids].map(i => idx.replies[i]);
 
   const a = { count: 0, senders: new Set(), lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" };
+  const sends = [];
   ids.forEach(i => {
     const r = idx.sent[i];
+    sends.push(sendItem(r, viewer));
     a.count += Number(r.count) || 1;
     const who = r.byName || r.by || "";
     if (who) a.senders.add(who);
@@ -106,7 +128,9 @@ function summarizeOne(q, idx, match) {
     query: q, kind: isEmail ? "email" : "handle", inhouse,
     inhouseHandle: m ? m.handle : "", inhouseVia: m ? m.via : "",
     linked, replyCount: replies.length, replies,
-    _emails: [...emails]
+    // 발송된 메일 — 최근 순 몇 건만 (전체는 '전체 보기'에서 따로 불러온다)
+    sends: sends.sort((x, y) => String(y.at).localeCompare(String(x.at))).slice(0, INLINE_SENDS), sendsTotal: sends.length,
+    _emails: [...emails], _ids: [...ids]
   };
   if (!a.count) {
     return Object.assign(base, { found: inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" });
@@ -157,9 +181,52 @@ async function decide(results, t0) {
     r.decision = decision;
     // 회신만 있고 발송 기록이 없어도 '이미 접촉함'으로 본다 (안 보낸 것 복사에서 빠진다)
     r.found = decision !== "clean";
-    delete r.replies; delete r._emails;
+    delete r.replies; delete r._emails; delete r._ids;
   });
   return { partial: { mailbox: !recv } };
+}
+
+// 한 크리에이터의 발송 전체 — 저장된 메일(보낸편지함, 툴 발송 포함)을 기본으로, 발송 기록 중 그와 겹치지 않는 것
+// (시각 15분 안 · 같은 담당자면 같은 메일)을 더한다. 주소록 요약은 그 담당자 것이 하나도 없을 때만.
+async function allSends(one, idx, viewer) {
+  const emails = one._emails || [];
+  const accts = A.parseAccounts().filter(a => a && a.email && !H.isIgnoredSender(a.email));
+  const names = new Map(accts.map(a => [H.normEmail(a.email), a.name || a.email]));
+  const jobs = [];
+  accts.forEach(a => emails.forEach(e => jobs.push(
+    withTimeout(H.messagesWith(a.email, e), 8000, []).then(ms => (ms || []).filter(m => m && m.dir === "out").map(m => ({ by: H.normEmail(a.email), m })))
+  )));
+  const msgs = [], seen = new Set();
+  (await Promise.all(jobs)).flat().forEach(({ by, m }) => {
+    const k = by + "|" + (m.at || "") + "|" + (m.subject || "");
+    if (seen.has(k)) return; seen.add(k);
+    msgs.push({ by, byName: names.get(by) || by, at: m.at || "", subject: m.subject || "", mailbox: true });
+  });
+  const near = (x, y) => { const a = Date.parse(x), b = Date.parse(y); return isFinite(a) && isFinite(b) && Math.abs(a - b) <= 15 * 60e3; };
+  const out = msgs.slice();
+  const recs = (one._ids || []).map(i => idx.sent[i]).filter(Boolean);
+  recs.filter(r => r.source !== "mailbox").forEach(r => {
+    const by = H.normEmail(r.by);
+    const same = msgs.find(m => m.by === by && near(m.at, r.at));
+    if (same) { if (r.campaign && r.source !== "imap") same.campaign = r.campaign; return; }
+    out.push(Object.assign({ by, byName: r.byName || r.by || "", at: r.at || "" },
+      (r.subject || (r.source === "imap" && r.campaign)) ? { subject: r.subject || r.campaign } : {},
+      (r.campaign && r.source !== "imap") ? { campaign: r.campaign } : {}));
+  });
+  recs.filter(r => r.source === "mailbox").forEach(r => {
+    const by = H.normEmail(r.by);
+    if (out.some(x => x.by === by)) return;
+    out.push({ by, byName: r.byName || by, at: r.at || "", subject: r.subject || "", mailbox: true, n: Number(r.count) || 1, summary: true });
+  });
+  return out.map(x => {
+    const y = { by: x.by, byName: x.byName, at: x.at };
+    if (subjectHidden(x.by, viewer)) y.hidden = true;
+    else if (x.subject) y.subject = cutS(x.subject, 200);
+    if (x.campaign) y.campaign = cutS(x.campaign, 80);
+    if (x.mailbox) y.mailbox = true;
+    if (x.summary) { y.summary = true; if (x.n > 1) y.n = x.n; }
+    return y;
+  }).sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
 module.exports = async (req, res) => {
@@ -167,9 +234,11 @@ module.exports = async (req, res) => {
     const t0 = Date.now();
     res.setHeader("Cache-Control", "no-store");
 
+    let viewer = "";   // 관리자 메일함 제목은 본인만 — 누가 보는지
     if (A.enabled()) {
       const me = A.currentUser(req);
       if (!me) { res.status(401).json({ error: "로그인이 필요합니다" }); return; }
+      viewer = me.email || "";
     } else {
       const PW = process.env.DASHBOARD_PASSWORD;
       if (PW) {
@@ -206,9 +275,14 @@ module.exports = async (req, res) => {
       if (!queries.length) { res.status(400).json({ error: "검사할 핸들 또는 이메일을 입력하세요" }); return; }
 
       const [idx, match] = await Promise.all([buildIndex(), matchP]);
-      const results = queries.map(q => summarizeOne(q, idx, match));
+      const results = queries.map(q => summarizeOne(q, idx, match, viewer));
       const { partial } = await decide(results, t0);
       partial.inhouse = !match;
+      // 응답 한도(4.5MB) 안으로 — 크면 줄마다 보여 주는 발송 제목을 줄인다 (전체는 '전체 보기'로)
+      const sizeOf = () => Buffer.byteLength(JSON.stringify(results));
+      if (sizeOf() > 3.2e6) results.forEach(r => { r.sends = (r.sends || []).slice(0, 1); });
+      if (sizeOf() > 3.2e6) results.forEach(r => { (r.sends || []).forEach(x => { delete x.campaign; if (x.subject) x.subject = cutS(x.subject, 40); }); });
+      if (sizeOf() > 3.8e6) results.forEach(r => { r.sends = []; });
       const foundCount = results.filter(r => r.found).length;
       const dc = k => results.filter(r => r.decision === k).length;
       res.status(200).json({
@@ -230,8 +304,17 @@ module.exports = async (req, res) => {
     const q = String((req.query && req.query.q) || "").trim();
     if (!q) { res.status(400).json({ error: "핸들 또는 이메일을 입력하세요" }); return; }
 
+    // ?sends=1 — 이 크리에이터에게 지금까지 발송된 메일 전부 (제목 · 발신자 · 시각). 내용은 싣지 않는다.
+    if (req.query && req.query.sends) {
+      const idx = await buildIndex();
+      const one = summarizeOne(q, idx, null, viewer);
+      const list = await allSends(one, idx, viewer);
+      res.status(200).json({ historyEnabled: true, query: q, total: list.length, sends: list.slice(0, 300) });
+      return;
+    }
+
     const [idx, match] = await Promise.all([buildIndex(), matchP]);
-    const one = summarizeOne(q, idx, match);
+    const one = summarizeOne(q, idx, match, viewer);
     await decide([one], t0);
     // 단건은 기존 화면과 호환되게 sent/replies 상세도 흉내 내지 않고 요약 형태로 준다
     res.status(200).json(Object.assign({ historyEnabled: true, found: one.found, sentCount: one.sentCount, replyCount: one.replyCount, senders: one.senders }, { results: [one] }));

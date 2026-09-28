@@ -1961,6 +1961,39 @@ async function copyChecks(kind){
   } catch(e){ alert("복사 실패: "+(e.message||e)); }
 }
 
+/* 발송된 메일 — 발신자 · 시각 · 제목. 관리자 메일함에서 나간 메일의 제목은 그 관리자 본인만 본다. */
+function sendLine(x){
+  return '<div class="sendline"><b>'+esc(x.byName||x.by||'—')+'</b> <span class="mono muted">'+esc(fmtAt(x.at))+'</span> · ' +
+    (x.hidden ? '<span class="muted">🔒 관리자 메일함 — 제목 비공개</span>'
+      : x.subject ? '<span>'+esc(x.subject)+'</span>' : '<span class="muted">(제목 없음)</span>') +
+    (x.campaign && x.campaign !== x.subject ? ' <span class="muted">['+esc(x.campaign)+']</span>' : '') +
+    (x.mailbox ? ' <span class="tag" style="background:#f1f1f1;color:#555" title="네이버웍스 보낸편지함 (단체·참조·숨은참조 포함)">메일함</span>' : '') +
+    (x.summary ? ' <span class="muted" style="font-size:11px">(마지막 1건'+(x.n>1?' · 총 '+x.n+'건':'')+')</span>' : '') + '</div>';
+}
+function sendsCell(r){
+  const list = r.sends || [];
+  if(!list.length && !r.sentCount) return '<span class="muted">—</span>';
+  const total = Math.max(r.sendsTotal || 0, list.length);
+  return list.map(sendLine).join("") +
+    '<div style="margin-top:3px"><a href="javascript:void 0" class="muted sendsmore" style="font-size:11.5px" onclick="toggleSends(this)">📨 발송 전체 보기'+(total ? ' ('+total+'건)' : '')+'</a></div>' +
+    '<div class="sendsall" style="display:none"></div>';
+}
+async function toggleSends(a){
+  const tr = a.closest("tr"), box = tr.querySelector(".sendsall");
+  if(box.style.display !== "none"){ box.style.display = "none"; return; }
+  box.style.display = ""; box.innerHTML = '<div class="muted">불러오는 중…</div>';
+  try {
+    const r = await fetch("/api/lookup?sends=1&q=" + encodeURIComponent(tr.getAttribute("data-q")), { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error);
+    const list = d.sends || [];
+    box.innerHTML = '<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px;max-height:260px;overflow:auto">' +
+      (list.length ? '<div class="muted" style="font-size:11px;margin-bottom:2px">전체 '+d.total+'건'+(d.total > list.length ? ' <span>(최근 '+list.length+'건 표시)</span>' : '')+'</div>' + list.map(sendLine).join("")
+        : '<div class="muted">저장된 발송 메일이 없습니다.</div>') + '</div>';
+  } catch(e){ box.innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
+}
+
 function renderChecks(){
   const d = CHECK_DATA; if(!d) return;
   const N = d.reapproveDays || 15;
@@ -2006,15 +2039,14 @@ function renderChecks(){
     return '<td style="white-space:nowrap">'+tags.join("")+'</td>';
   };
   h += '<div class="scroll" style="margin-top:10px;max-height:460px"><table class="rcp"><thead><tr>' +
-    '<th>입력</th><th>판단</th><th>보낸 담당자</th><th>최근 발송</th><th>회신</th></tr></thead><tbody>' +
+    '<th>입력</th><th>판단</th><th>발송된 메일 (발신자 · 제목)</th><th>회신</th></tr></thead><tbody>' +
     list.slice(0, CAP).map(r => {
       const st = CHK_STYLE[r.decision] || CHK_STYLE.unknown;
-      return '<tr class="chk-'+esc(r.decision)+'" style="'+(st.bg?'background:'+st.bg+';':'')+'box-shadow:inset 4px 0 0 '+st.bd+'">' +
+      return '<tr class="chk-'+esc(r.decision)+'" data-q="'+esc(r.query)+'" style="'+(st.bg?'background:'+st.bg+';':'')+'box-shadow:inset 4px 0 0 '+st.bd+'">' +
       '<td><b>'+esc(r.query)+'</b>'+(r.name ? '<div class="muted">'+esc(r.name)+'</div>' : '')+
         ((r.linked||[]).length ? '<div class="muted" title="발송 기록에서 이메일↔핸들로 연결된 값">🔗 '+esc(r.linked.map(x => r.kind==="email" ? "@"+x : x).join(", "))+'</div>' : '')+'</td>' +
       decCell(r) +
-      '<td>'+esc((r.senders||[]).join(", "))+(r.sentCount>1?'<div class="muted" style="font-size:11px">발송 '+r.sentCount+'건</div>':'')+'</td>' +
-      '<td class="muted">'+esc(r.lastAt?fmtAt(r.lastAt):'')+(r.lastCampaign?'<div class="muted">'+esc(r.lastCampaign)+'</div>':'')+'</td>' +
+      '<td>'+sendsCell(r)+'</td>' +
       '<td>'+(r.replyCount
         ? '<span class="tag" style="background:#e8f5ec;color:#1f7a44">💬 '+r.replyCount+'건</span>' +
           ((r.replyBy||[]).length ? ' <b>'+esc(r.replyBy.join(", "))+'</b>' : '') +

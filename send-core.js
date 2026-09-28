@@ -251,7 +251,7 @@ async function sendBatch(opts) {
       H.log({
         to, handle: logHandle, name: d.creatorName || "",
         at: new Date().toISOString(), by: account.email, byName: account.name,
-        campaign: d.campaignTitle || "", forced: force || undefined
+        campaign: d.campaignTitle || "", subject: cleanHeader(built.subject).slice(0, 200), forced: force || undefined
       });
       // 회신이 없으면 정한 주기로 팔로업을 보내도록 예약해 둔다 (크론이 처리)
       if (remindOn) {
