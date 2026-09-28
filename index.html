@@ -1947,8 +1947,9 @@ function chkLabel(dec, n){
   return dec === "inhouse" ? "🤝 협업 중" : dec === "replied" ? "🔴 회신 옴" : dec === "recent" ? "🟠 최근 "+n+"일 내 발송"
     : dec === "ok" ? "🔵 "+n+"일 지남" : dec === "unknown" ? "⚪ 발송일 모름" : "✅ 없음";
 }
-// 보내도 되는 것 = ✅ 없음 + 🔵 N일 지남 (🤝 협업 중은 관리자만 보내므로 뺀다)
-const chkSendable = r => r.decision === "clean" || r.decision === "ok";
+// 보내도 되는 것 = ✅ 없음 + 🔵 N일 지남 + 본인 발송 이력 있음 (🤝 협업 중은 관리자만 — 단, 본인이 보냈던 사람은 가능)
+// 본인이 이전에 보낸 크리에이터(mine)는 색과 상관없이 본인은 계속 보낼 수 있다
+const chkSendable = r => r.mine || r.decision === "clean" || r.decision === "ok";
 
 async function copyChecks(kind){
   const rows = (CHECK_DATA && CHECK_DATA.results) || [];
@@ -2040,6 +2041,7 @@ function renderChecks(){
     const st = CHK_STYLE[r.decision] || CHK_STYLE.unknown;
     const tags = ['<span class="tag" style="background:'+st.tagBg+';color:'+st.tagFg+';font-weight:600">'+chkLabel(r.decision, N)+'</span>'];
     if(r.inhouse) tags.push('<div style="margin-top:3px">'+ihTag(r.inhouseHandle, r.inhouseVia)+'</div>');
+    if(r.mine) tags.push('<div style="margin-top:3px"><span class="tag" style="background:#e3f4e8;color:#1f7a44;font-weight:600" title="본인이 이전에 보낸 크리에이터 — 다른 담당자 기록이 있어도 막히지 않습니다">✉️ 본인 발송 이력 — 계속 보낼 수 있음</span></div>');
     if(r.daysSinceSent != null) tags.push('<div class="muted" style="font-size:11px;margin-top:3px">마지막 발송 '+r.daysSinceSent+'일 전</div>');
     if(r.forced) tags.push(' <span class="holdtag">강제</span>');
     return '<td style="white-space:nowrap">'+tags.join("")+'</td>';

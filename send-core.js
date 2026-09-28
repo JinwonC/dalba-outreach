@@ -180,8 +180,10 @@ async function sendBatch(opts) {
     try { linked = (await H.bridge([d]))[0] || linked; } catch (_) {}
 
     // ─── 인하우스(협업 중) 크리에이터 차단 (핸들·이메일 기준, 관리자 제외) ──
-    // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자만 예외.
-    const ih = inhouseMatch ? inhouseMatch(d, linked.handles) : null;
+    // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자와, 본인이 이전에 보낸 적 있는 담당자만 예외.
+    let ih = inhouseMatch ? inhouseMatch(d, linked.handles) : null;
+    // 본인이 이전에 보낸 적 있는 크리에이터면 협업 중이어도 계속 소통할 수 있다
+    if (ih) { try { if ((await H.ownPriors([d], account.email, [linked]))[0]) ih = null; } catch (_) {} }
     if (ih) {
       results.push({
         to, ok: false, held: true, inhouse: true, inhouseHandle: ih.handle, inhouseVia: ih.via,

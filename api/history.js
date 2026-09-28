@@ -59,10 +59,11 @@ module.exports = async (req, res) => {
     res.status(200).json({
       enabled: H.enabled(),
       windowDays: H.WINDOW_DAYS,
-      held: priors.filter(Boolean).length,
+      held: priors.filter(p => p && !p.own).length,
       results: recipients.map((r, i) => ({
         to: r.to, prior: priors[i] || null,
-        inhouse: match(r, (links[i] && links[i].handles) || []) || null
+        // 본인이 이전에 보낸 크리에이터(own)는 협업 중이어도 발송 가능 — 보류로 표시하지 않는다
+        inhouse: (priors[i] && priors[i].own) ? null : (match(r, (links[i] && links[i].handles) || []) || null)
       }))
     });
   } catch (e) {

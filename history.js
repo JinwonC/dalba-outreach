@@ -200,6 +200,58 @@ function parseRec(s) {
   try { return JSON.parse(s); } catch (_) { return null; }
 }
 
+// ─── 본인 발송 이력 ──────────────────────────────────────────────
+// 담당자가 **본인이** 이 크리에이터에게 보낸 적이 있으면(기간 무관) 계속 소통할 수 있어야 한다 —
+// 다른 담당자 기록이 함께 있어도, 협업 리스트에 올라가 있어도 막지 않는다.
+// 확인하는 곳: ① 그 담당자 메일함의 보낸 주소록(네이버웍스에서 직접·단체·숨은참조로 보낸 것 포함)
+//             ② 발송 기록(툴 발송·메일함에서 가져온 발송) — 이메일·핸들·연결된 이메일/핸들 모두
+const OWN_TTL_MS = 60e3;
+const ownCache = new Map();          // 담당자 → { at, byEmail: Map, byHandle: Map } (함수 인스턴스 안에서 1분)
+async function ownLogIndex(me) {
+  const c = ownCache.get(me);
+  if (c && Date.now() - c.at < OWN_TTL_MS) return c;
+  const byEmail = new Map(), byHandle = new Map();
+  const newer = (m, k, r) => { const o = m.get(k); if (!o || String(r.at || "") > String(o.at || "")) m.set(k, r); };
+  (await recent(LOG_MAX)).forEach(r => {
+    if (!r || normEmail(r.by) !== me) return;
+    const e = normEmail(r.to), h = normHandle(r.handle);
+    if (e) newer(byEmail, e, r);
+    if (h) newer(byHandle, h, r);
+  });
+  const v = { at: Date.now(), byEmail, byHandle };
+  ownCache.set(me, v);
+  return v;
+}
+// items: 수신자 목록, links: bridge(items) 결과(없으면 새로 읽음) → 같은 순서로 [본인 이전 발송 기록 | null]
+async function ownPriors(items, me, links) {
+  const meN = normEmail(me || "");
+  const list = Array.isArray(items) ? items : [];
+  if (!enabled() || !meN || !list.length) return list.map(() => null);
+  const lk = links || await bridge(list);
+  const emailsOf = i => [...new Set([normEmail(list[i] && (list[i].to || list[i].email))].concat((lk[i] && lk[i].emails) || []).filter(e => e && e.indexOf("@") > 0))];
+  const handlesOf = i => [...new Set([normHandle(list[i] && (list[i].handle || list[i].creatorHandle))].concat((lk[i] && lk[i].handles) || []).filter(Boolean))];
+  const allE = [...new Set(list.flatMap((_, i) => emailsOf(i)))];
+  const book = new Map();
+  for (let i = 0; i < allE.length; i += 400) {
+    const part = allE.slice(i, i + 400);
+    let vals = [];
+    try { vals = await cmd(["HMGET", bookKey("sent", meN)].concat(part)); } catch (_) { vals = []; }
+    (vals || []).forEach((v, j) => { const b = parseRec(v); if (b) book.set(part[j], b); });
+  }
+  let idx = null;
+  const logIdx = async () => { if (!idx) { try { idx = await ownLogIndex(meN); } catch (_) { idx = { byEmail: new Map(), byHandle: new Map() }; } } return idx; };
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const es = emailsOf(i), hs = handlesOf(i);
+    const b = es.map(e => [e, book.get(e)]).find(x => x[1]);
+    if (b) { out.push({ to: b[0], by: meN, at: b[1].last || b[1].first || "", n: Number(b[1].n) || 1, campaign: "", source: "mailbox", own: true }); continue; }
+    const L = await logIdx();
+    const r = es.map(e => L.byEmail.get(e)).find(Boolean) || hs.map(h => L.byHandle.get(h)).find(Boolean);
+    out.push(r ? Object.assign({}, r, { own: true }) : null);
+  }
+  return out;
+}
+
 // ─── 조회 ────────────────────────────────────────────────────────
 // 수신자 목록을 받아 같은 순서로 [이전 발송기록 | null] 을 돌려준다.
 async function lookup(list, me) {
@@ -222,7 +274,10 @@ async function lookup(list, me) {
   // 담당자 보낸편지함(주소록)도 대조 — 단체·숨은참조로 보낸 상대
   const emailsOf = idx => [normEmail(items[idx] && (items[idx].to || items[idx].email))].concat(links[idx].emails || []).filter(Boolean);
   const bp = await bookSentPriors([].concat(...items.map((_, i) => emailsOf(i))));
+  // 본인이 보낸 적이 있으면 본인 기록을 돌려준다 — 화면에서 '보류'로 보이지 않는다 (계속 소통 가능)
+  const mine = meN ? await ownPriors(items, meN, links) : items.map(() => null);
   return spans.map((s, idx) => {
+    if (mine[idx]) return mine[idx];
     const cands = [];
     for (let i = 0; i < s.n; i++) {
       const rec = parseRec(out[s.at + i]);
@@ -280,6 +335,22 @@ async function reserve(r, meta, force) {
   // 보내면, 자기 키(B·X)에는 기록이 없어도 연결된 A 키에 다른 담당자 기록이 있다 → 막는다.
   // 연결 키에는 자리를 잡지 않는다(보내는 주소가 아니므로) — 실패 시 반납할 것도 없다.
   const br = (await bridge([r]))[0] || { handles: [], emails: [] };
+
+  // ── 본인이 이전에 보낸 크리에이터면 무조건 통과 (다른 담당자 기록이 있어도) ──
+  // 빈 자리만 새로 잡고(NX), 다른 담당자가 잡은 자리는 건드리지 않는다. 본인 자리는 새로 고친다.
+  if (me) {
+    const own = (await ownPriors([r], me, [br]))[0];
+    if (own) {
+      const res = await pipeline(keys.map(k => ["SET", k, val, "NX", "EX", String(TTL_SEC)]));
+      const taken = keys.filter((k, i) => !res[i]);
+      if (taken.length) {
+        const cur = await pipeline(taken.map(k => ["GET", k]));
+        const mineKeys = taken.filter((k, i) => { const p = parseRec(cur[i]); return p && normEmail(p.by) === me; });
+        if (mineKeys.length) await pipeline(mineKeys.map(k => ["SET", k, val, "EX", String(TTL_SEC)]));
+      }
+      return { ok: true, record: rec, resent: true, own: true };
+    }
+  }
   const aliasKeys = aliasKeysOf(br).filter(k => keys.indexOf(k) < 0);
   if (aliasKeys.length) {
     const vals = await pipeline(aliasKeys.map(k => ["GET", k]));
@@ -411,6 +482,7 @@ async function release(r) {
 // 성공한 발송을 시간순 로그에도 남긴다 (조회용, 실패해도 발송에는 영향 없음)
 async function log(rec) {
   if (!enabled()) return;
+  ownCache.delete(normEmail(rec && rec.by));   // 본인 발송 이력 캐시 — 새 발송이 바로 반영되게
   try {
     await pipeline([
       ["LPUSH", LOG_KEY, JSON.stringify(rec)],
@@ -744,6 +816,7 @@ async function importSends(list) {
   const items = (list || []).filter(x => x && x.rec);
   const res = { imported: 0, duplicate: 0, blocking: 0, expired: 0 };
   if (!enabled() || !items.length) return res;
+  ownCache.clear();
   for (let i = 0; i < items.length; i += 300) {
     const chunk = items.slice(i, i + 300);
     const seen = await pipeline(chunk.map(x => x.id ? ["SISMEMBER", IMPORTED_KEY, String(x.id)] : ["ECHO", "0"]));
@@ -968,7 +1041,7 @@ async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY,
 module.exports = {
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
-  recordReply, recordReplies, recent, recentBlocked, recentReplies, count,
+  recordReply, recordReplies, recent, ownPriors, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,

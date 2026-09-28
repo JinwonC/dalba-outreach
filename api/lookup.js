@@ -116,6 +116,8 @@ function summarizeOne(q, idx, match, viewer) {
     query: q, kind: isEmail ? "email" : "handle", inhouse,
     inhouseHandle: m ? m.handle : "", inhouseVia: m ? m.via : "",
     linked, replyCount: replies.length, replies,
+    // 보는 사람 본인이 이 크리에이터에게 보낸 적이 있음 → 본인은 계속 보낼 수 있다 (발송 시 막히지 않음)
+    mine: Boolean(viewer) && [...ids].some(i => idx.sent[i] && H.normEmail(idx.sent[i].by) === H.normEmail(viewer)),
     _emails: [...emails], _ids: [...ids]
   };
   if (!a.count) {
