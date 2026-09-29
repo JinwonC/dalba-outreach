@@ -11,6 +11,7 @@
 
 const H = require("./history.js");
 const M = require("./mail.js");
+const B = require("./bounce-lib.js");
 
 // 이력을 어느 날부터 채울지. 그 전 메일은 읽지 않는다.
 const SINCE_DEFAULT = process.env.HISTORY_SINCE || "2026-05-01";
@@ -298,6 +299,28 @@ async function storeMessagesPass(account, budgetMs) {
   return { caughtUp: sentCaughtUp && boxesCaughtUp, stored, noText, full };
 }
 
+// ─── 반송 알림 → 발송 제외 ─────────────────────────────────────────
+// 받은편지함의 "보낼 수 없음" 알림에서 없는 주소를 찾아 발송 제외(반송)로 남긴다. 자체 커서로 새 알림만.
+// 우리가 보낸 적 있는 주소(이 메일함 보낸 주소 + 전 담당자 발송 기록)만 기록한다 — bounce-lib.js 참고.
+async function bouncePass(account, contacted, budgetMs) {
+  const me = H.normEmail(account.email);
+  const minUid = await getUidCursor("bounce", account);
+  const r = await M.readBounces(account, { since: SINCE_DEFAULT, minUid, budgetMs });
+  const items = [];
+  if (r.rows.length) {
+    const sentTo = await H.sentToSet(account.email);
+    for (const m of r.rows) {
+      if (!B.isBounceMessage(m)) continue;
+      const at = m.at ? new Date(m.at).toISOString() : "";
+      B.failedRecipients(m.raw, { me, isInternal, sentTo: e => sentTo.has(e) || (contacted && contacted.has(e)) })
+        .forEach(x => items.push({ email: x.email, type: "bounce", reason: x.reason, by: me, at, source: "imap" }));
+    }
+  }
+  const added = items.length ? await H.suppressAdd(items) : 0;
+  await setUidCursor("bounce", account, r.maxUid);      // 기록을 마친 뒤에 커서를 올린다
+  return { scanned: r.rows.length, found: items.length, added, caughtUp: !r.truncated };
+}
+
 // 한 사람의 보낸편지함·받은편지함을 잇달아 처리한다 (자동 실행이 쓰는 단위)
 // 자동 실행은 **증분 스캔(커서)** 을 켠다. until(절대시각)까지 끝낸다 — 함수 제한시간 60초 안.
 async function syncAccount(account, contacted, opts) {
@@ -307,7 +330,7 @@ async function syncAccount(account, contacted, opts) {
   // 이번 실행에서 읽을 커서·표시들을 한 번에(MGET = 저장소 명령 1개) — 하나씩 GET 하면 계정마다 6번
   if (o.useCursor) {
     try {
-      await H.prefetchRaw(["sent2", "booksent", "msgsent"].map(k => "outreach:cursor:" + k + ":" + account.email)
+      await H.prefetchRaw(["sent2", "booksent", "msgsent", "bounce"].map(k => "outreach:cursor:" + k + ":" + account.email)
         .concat([boxCursorKey(account), msgBoxKey(account), BOOK_READY(account)]));
     } catch (_) { /* 못 읽으면 평소처럼 하나씩 읽는다 */ }
   }
@@ -338,6 +361,11 @@ async function syncAccount(account, contacted, opts) {
   }
 
   const rep = await collectReplies(account, contacted, Object.assign({}, o, { budgetMs: Math.max(4000, left() - 3000) }));
+  // 반송 알림 → 발송 제외 (없는 주소로 다시 보내지 않게)
+  let bounces = null;
+  if (left() > 9000) {
+    try { bounces = await bouncePass(account, contacted, Math.min(10000, left() - 7000)); } catch (e) { bounces = { error: String((e && e.message) || e) }; }
+  }
   // 메일 데이터베이스(본문 저장) — 남은 예산으로 이어서 처리한다
   let msgs = null;
   if (left() > 8000) {
@@ -349,7 +377,8 @@ async function syncAccount(account, contacted, opts) {
     folders: rep.folders, foldersCaughtUp: !(rep.folders || []).some(f => f.truncated || f.skipped),
     found: rep.found, notContacted: rep.notContacted,
     msgsCaughtUp: msgs ? Boolean(msgs.caughtUp) : Boolean(prevInfo.msgsCaughtUp), msgsFull: Boolean(msgs && msgs.full),
-    msgsError: msgs && msgs.error || undefined
+    msgsError: msgs && msgs.error || undefined,
+    bouncesAdded: bounces && bounces.added || undefined, bounceError: bounces && bounces.error || undefined
   });
   return {
     user: account.email,
@@ -357,6 +386,7 @@ async function syncAccount(account, contacted, opts) {
     replies: { found: rep.found, duplicate: rep.duplicate, notContacted: rep.notContacted },
     folders: rep.folders,
     messages: msgs,
+    bounces,
     messagesCaughtUp: msgs ? Boolean(msgs.caughtUp) : Boolean(prevInfo.msgsCaughtUp),
     scanned: { sent: sentRead.scanned, inbox: rep.scanned }
   };
@@ -364,5 +394,5 @@ async function syncAccount(account, contacted, opts) {
 
 module.exports = {
   SINCE_DEFAULT, MAX_RECIPIENTS,
-  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, scanSentBook, bookReady, storeMessagesPass, isInternal
+  candidates, readSent, writeSent, contactedMap, collectReplies, syncAccount, classify, scanSentBook, bookReady, storeMessagesPass, bouncePass, isInternal
 };

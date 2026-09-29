@@ -395,6 +395,13 @@ module.exports = async (req, res) => {
         res.status(200).json({ approved: done, skipped });
         return;
       }
+      // 발송 제외에서 지우기 (잘못 들어간 반송 주소, 해제된 수신 거부)
+      if (body.action === "unsuppress") {
+        const fields = (Array.isArray(body.fields) ? body.fields : []).map(String).filter(f => /^[eh]:./.test(f)).slice(0, 2000);
+        const removed = await H.suppressRemove(fields);
+        res.status(200).json({ removed });
+        return;
+      }
       res.status(400).json({ error: "알 수 없는 요청입니다" });
       return;
     }
@@ -414,6 +421,14 @@ module.exports = async (req, res) => {
       }
       return rawJson(obj);
     };
+    // ─── ⛔ 발송 제외 — 반송된 없는 주소 · 수신 거부 ───────────────
+    if (view === "suppress") {
+      const NM = nameByEmail();
+      const rows = (await H.suppressAll()).map(r => Object.assign({}, r, { byName: NM.get(r.by) || r.by || "", addedByName: NM.get(r.addedBy) || r.addedBy || "" }));
+      res.status(200).json({ historyEnabled: true, me: A.publicUser(me), accounts: roster(), hiddenMailboxes: A.adminEmails().filter(e => e !== meEmail), rows });
+      return;
+    }
+
     // ─── 💬 답장 대기 — 크리에이터가 회신했는데 아직 답하지 않은 대화 (담당자별) ───
     // 무거운 공통 읽기(아래) 전에 따로 처리한다. 관리자 메일함은 본인만 (A.canViewMailbox).
     if (view === "unanswered") {

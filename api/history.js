@@ -55,6 +55,9 @@ module.exports = async (req, res) => {
     let links = [];
     try { links = await H.bridge(recipients); } catch (_) { links = []; }
     const priors = await H.lookup(recipients, me && me.email, links);
+    // 발송 제외(반송 주소·수신 거부) — 화면에서 미리 빼 두도록
+    let sups = [];
+    try { sups = await H.suppressCheck(recipients, links); } catch (_) { sups = []; }
     // 협업 리스트 대조 — 핸들이 비어 있어도 이메일(시트·발송 기록 연결·주소 추정)로 잡는다
     const match = await IH.matcher();
     res.status(200).json({
@@ -64,7 +67,8 @@ module.exports = async (req, res) => {
       results: recipients.map((r, i) => ({
         to: r.to, prior: priors[i] || null,
         // 본인이 이전에 보낸 크리에이터(own)는 협업 중이어도 발송 가능 — 보류로 표시하지 않는다
-        inhouse: (priors[i] && priors[i].own) ? null : (match(r, (links[i] && links[i].handles) || []) || null)
+        inhouse: (priors[i] && priors[i].own) ? null : (match(r, (links[i] && links[i].handles) || []) || null),
+        suppressed: sups[i] ? { type: sups[i].type, reason: sups[i].reason || "", at: sups[i].at || "" } : null
       }))
     });
   } catch (e) {

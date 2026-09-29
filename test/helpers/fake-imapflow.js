@@ -4,7 +4,7 @@ class ImapFlow {
   async connect() {} async logout() {} close() {}
   async list() { return global.FAKE.boxes.map(b => Object.assign({ delimiter: "/" }, b)); }
   async getMailboxLock(path) { const l = global.FAKE.msgs[path]; if (!l) throw new Error("no box " + path); this.cur = path; this.mailbox = { exists: l.length }; return { release() {} }; }
-  async search(c) { const l = global.FAKE.msgs[this.cur] || []; return l.filter(m => (!c.since || new Date(m.date) >= c.since) && (!c.from || m.from === c.from) && (!c.to || (m.to || []).includes(c.to))).map(m => m.uid); }
+  async search(c) { const l = global.FAKE.msgs[this.cur] || []; return l.filter(m => (!c.since || new Date(m.date) >= c.since) && (!c.from || String(m.from || "").toLowerCase().includes(String(c.from).toLowerCase())) && (!c.subject || String(m.subject || "").toLowerCase().includes(String(c.subject).toLowerCase())) && (!c.to || (m.to || []).includes(c.to))).map(m => m.uid); }
   async *fetch(range, q) {
     const l = global.FAKE.msgs[this.cur] || [];
     global.FETCH_QUERIES = (global.FETCH_QUERIES || []).concat([q]);

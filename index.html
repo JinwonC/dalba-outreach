@@ -1125,8 +1125,10 @@ function renderBulkTable(){
 
   let h = '<table class="rcp"><thead><tr><th>#</th><th>이메일</th><th>이름</th><th>핸들</th><th>금액</th><th>커미션</th><th>개인화</th></tr></thead><tbody>';
   rows.forEach((r,i) => {
-    const p = heldPriorOf(r.to);   // 다른 담당자가 보낸 경우만 보류 표시 (본인 재발송은 그대로 나감)
-    h += '<tr'+(p ? ' style="background:#fffaf0"' : '')+'><td>'+(i+1)+'</td><td>'+esc(r.to)+
+    const x = supOf(r);            // 발송 제외 (반송 주소 · 수신 거부)
+    const p = x ? null : heldPriorOf(r.to);   // 다른 담당자가 보낸 경우만 보류 표시 (본인 재발송은 그대로 나감)
+    h += '<tr'+(x ? ' style="background:#fdecea"' : p ? ' style="background:#fffaf0"' : '')+'><td>'+(i+1)+'</td><td>'+esc(r.to)+
+         (x ? ' '+supTag(x) : '') +
          (p ? ' <span class="holdtag" title="'+esc(priorText(p))+'">⏸ 보류</span>' : '') +
          '</td><td>'+esc(r.creatorName||'')+'</td><td>'+esc(r.handle||'')+
          '</td><td>'+esc(r.amount||'')+'</td><td>'+esc(r.commission||'')+'</td><td>'+esc((r.whyYou||'').slice(0,40))+'</td></tr>';
@@ -1348,6 +1350,7 @@ function loadPrefill(){
    담당자가 먼저 보낼 수 있고, 그 경합은 서버에서만 막을 수 있기 때문. */
 let DUP = {};            // 정규화한 주소 → 이전 발송 기록
 let INH = {};            // 정규화한 주소 → 협업 리스트 매칭 {handle, via} (서버가 이메일까지 대조)
+let SUP = {};            // 정규화한 주소 → 발송 제외 {type:"bounce"|"dnc", reason} — 누구도 보낼 수 없다
 let dupTimer = null;
 const dupKey = e => {
   const s = String(e||"").trim().toLowerCase();
@@ -1407,14 +1410,15 @@ async function checkDup(){
       if(d.error) throw new Error(d.error);
       (d.results||[]).forEach((x, j) => {
         const src = part[j] || { to: x.to, handle: "" };
-        DUP_CACHE.set(dupCacheKey(src), { prior: x.prior || null, inhouse: x.inhouse || null, t: Date.now() });
+        DUP_CACHE.set(dupCacheKey(src), { prior: x.prior || null, inhouse: x.inhouse || null, suppressed: x.suppressed || null, t: Date.now() });
       });
     }
-    DUP = {}; INH = {};
+    DUP = {}; INH = {}; SUP = {};
     list.forEach(x => {
       const c = DUP_CACHE.get(dupCacheKey(x)); if(!c) return;
       if(c.prior) DUP[dupKey(x.to)] = c.prior;
       if(c.inhouse) INH[dupKey(x.to)] = c.inhouse;
+      if(c.suppressed) SUP[dupKey(x.to)] = c.suppressed;
     });
     paintDup();
     if(MODE === "bulk") renderBulkTable();
@@ -1430,11 +1434,27 @@ function priorText(p){
   return who + (when ? " · " + when : "") + (p.campaign ? " · " + p.campaign : "");
 }
 
+/* 발송 제외 (반송된 없는 주소 · 수신 거부) — 서버가 누구에게도 보내지 않는다 */
+function supOf(r){ return (r && SUP[dupKey(r.to)]) || null; }
+function supTag(x){
+  return x && x.type === "dnc"
+    ? '<span class="rowbad" title="크리에이터가 수신을 거부했습니다">🚫 수신 거부</span>'
+    : '<span class="rowbad" title="'+esc((x && x.reason) || "")+'">⛔ 반송 주소</span>';
+}
+function supHtml(list){
+  const sup = list.filter(r => supOf(r));
+  if(!sup.length) return "";
+  return '<div class="err" style="margin-top:10px">⛔ 발송 제외 '+sup.length+'명은 보내지 않습니다 (반송된 없는 주소 · 수신 거부).</div>' +
+    '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>사유</th></tr></thead><tbody>' +
+    sup.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td>'+supTag(supOf(r))+'</td></tr>').join("") +
+    '</tbody></table></div>';
+}
 function paintDup(){
   const list = recipients();
-  const held = list.filter(r => heldPriorOf(r.to));   // 다른 담당자가 보낸 경우만 보류
-  const inh = list.filter(r => inhouseOf(r));         // 협업 리스트 (핸들·이메일)
-  if(!held.length && !inh.length){ $("dupInfo").innerHTML = ""; return; }
+  const held = list.filter(r => !supOf(r) && heldPriorOf(r.to));   // 다른 담당자가 보낸 경우만 보류
+  const inh = list.filter(r => !supOf(r) && inhouseOf(r));         // 협업 리스트 (핸들·이메일)
+  const supH = supHtml(list);
+  if(!held.length && !inh.length){ $("dupInfo").innerHTML = supH; return; }
   const forced = $("forceSend").checked;
   const inhHtml = !inh.length ? "" :
     '<div class="' + (CFG.admin ? "hold" : "err") + '" style="margin-top:10px">' +
@@ -1445,8 +1465,8 @@ function paintDup(){
     '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>협업 리스트</th></tr></thead><tbody>' +
     inh.slice(0,50).map(r => { const m = inhouseOf(r); return '<tr><td>'+esc(r.to)+'</td><td>'+ihTag(m.handle, m.via)+'</td></tr>'; }).join("") +
     '</tbody></table></div>';
-  if(!held.length){ $("dupInfo").innerHTML = inhHtml; return; }
-  $("dupInfo").innerHTML = inhHtml +
+  if(!held.length){ $("dupInfo").innerHTML = supH + inhHtml; return; }
+  $("dupInfo").innerHTML = supH + inhHtml +
     '<div class="' + (forced ? "err" : "hold") + '" style="margin-top:10px">' +
       (forced
         ? '⚠️ 다른 담당자가 이미 보낸 <b>'+held.length+'명</b> 에게도 <b>강제 발송</b>합니다.'
@@ -1661,8 +1681,9 @@ function startSend(){
   }
 
   const forced = $("forceSend").checked;
-  const held = forced ? [] : list.filter(r => heldPriorOf(r.to));   // 다른 담당자 것만 보류
-  const going = list.length - held.length;
+  const sup = list.filter(r => supOf(r));                          // 발송 제외 — 강제 발송이어도 안 나감
+  const held = forced ? [] : list.filter(r => !supOf(r) && heldPriorOf(r.to));   // 다른 담당자 것만 보류
+  const going = list.length - held.length - sup.length;
   // 인하우스(협업 중) 핸들 — 관리자가 아니면 서버가 보류한다. 미리 알려 준다.
   const inh = CFG.admin ? [] : list.filter(r => inhouseOf(r));
   const noH = list.filter(r => !String(r.handle||"").trim()).length;   // 핸들 없이 보내는 인원
@@ -1670,6 +1691,7 @@ function startSend(){
   $("confirmBody").innerHTML =
     '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
     (held.length ? ' <span style="color:#a8801f">(다른 담당자가 보낸 '+held.length+'명 보류)</span>' : '') +
+    (sup.length ? '<br /><span style="color:#a23b2e">⛔ 발송 제외 '+sup.length+'명은 보내지 않습니다 (반송된 없는 주소 · 수신 거부).</span>' : '') +
     (inh.length ? '<br /><span style="color:#a23b2e">🤝 협업 중인 크리에이터 '+inh.length+'명은 보류됩니다 (인하우스 리스트 · 관리자만 발송).</span>' : '') +
     (noH ? '<br /><span style="color:#8a6d1f">'+noHandleWarn(noH)+'</span>' : '') +
     (forced && list.some(r => heldPriorOf(r.to))
@@ -1985,7 +2007,8 @@ function chkLabel(dec, n){
 }
 // 보내도 되는 것 = ✅ 없음 + 🔵 N일 지남 + 본인 발송 이력 있음 (🤝 협업 중은 관리자만 — 단, 본인이 보냈던 사람은 가능)
 // 본인이 이전에 보낸 크리에이터(mine)는 색과 상관없이 본인은 계속 보낼 수 있다
-const chkSendable = r => r.mine || r.decision === "clean" || r.decision === "ok";
+// 발송 제외(반송 주소·수신 거부)는 누구도 보낼 수 없으므로 항상 뺀다
+const chkSendable = r => !r.suppressed && (r.mine || r.decision === "clean" || r.decision === "ok");
 
 async function copyChecks(kind){
   const rows = (CHECK_DATA && CHECK_DATA.results) || [];
@@ -2042,7 +2065,7 @@ function renderChecks(){
   const cnt = k => rows.filter(r => r.decision === k).length;
   // 🤝 협업 중은 따로 뺀다 — '전체'에도 넣지 않고 전용 필터에서만 본다 (관리자 페이지와 같게)
   const main = rows.filter(r => r.decision !== "inhouse");
-  const list = (CHECK_FILTER === "all" ? main : rows.filter(r => r.decision === CHECK_FILTER))
+  const list = (CHECK_FILTER === "all" ? main : CHECK_FILTER === "suppressed" ? rows.filter(r => r.suppressed) : rows.filter(r => r.decision === CHECK_FILTER))
     .slice().sort((a,b) => (CHK_ORDER[a.decision]||0) - (CHK_ORDER[b.decision]||0));
 
   const btn = (f,label,n) => '<button class="pvtab'+(CHECK_FILTER===f?' active':'')+'" onclick="setCheckFilter(\''+f+'\')">'+label+' '+n+'</button>';
@@ -2065,7 +2088,8 @@ function renderChecks(){
     btn("recent","🟠 최근 "+N+"일 내",cnt("recent")) + btn("ok","🔵 "+N+"일 지남",cnt("ok")) +
     btn("clean","✅ 없음",cnt("clean")) +
     (cnt("unknown") ? btn("unknown","⚪ 발송일 모름",cnt("unknown")) : "") +
-    '<span style="margin-left:8px"></span>' + btn("inhouse","🤝 협업 중",cnt("inhouse")) + '</div>' +
+    '<span style="margin-left:8px"></span>' + btn("inhouse","🤝 협업 중",cnt("inhouse")) +
+    (rows.some(r => r.suppressed) ? btn("suppressed","⛔ 발송 제외",rows.filter(r => r.suppressed).length) : "") + '</div>' +
     '<div class="pvbar" style="margin-top:6px;flex-wrap:wrap">' +
     '<button class="btn dark" onclick="copyChecks(\'send\')">📋 보내도 되는 것 복사 ('+nSend+')</button>' +
     '<button class="btn" onclick="copyChecks(\'clean\')">✅ 안 보낸 것 복사</button>' +
@@ -2077,7 +2101,8 @@ function renderChecks(){
     const st = CHK_STYLE[r.decision] || CHK_STYLE.unknown;
     const tags = ['<span class="tag" style="background:'+st.tagBg+';color:'+st.tagFg+';font-weight:600">'+chkLabel(r.decision, N)+'</span>'];
     if(r.inhouse) tags.push('<div style="margin-top:3px">'+ihTag(r.inhouseHandle, r.inhouseVia)+'</div>');
-    if(r.mine) tags.push('<div style="margin-top:3px"><span class="tag" style="background:#e3f4e8;color:#1f7a44;font-weight:600" title="본인이 이전에 보낸 크리에이터 — 다른 담당자 기록이 있어도 막히지 않습니다">✉️ 본인 발송 이력 — 계속 보낼 수 있음</span></div>');
+    if(r.suppressed) tags.push('<div style="margin-top:3px">'+supTag(r.suppressed)+'</div>');
+    if(r.mine && !r.suppressed) tags.push('<div style="margin-top:3px"><span class="tag" style="background:#e3f4e8;color:#1f7a44;font-weight:600" title="본인이 이전에 보낸 크리에이터 — 다른 담당자 기록이 있어도 막히지 않습니다">✉️ 본인 발송 이력 — 계속 보낼 수 있음</span></div>');
     if(r.daysSinceSent != null) tags.push('<div class="muted" style="font-size:11px;margin-top:3px">마지막 발송 '+r.daysSinceSent+'일 전</div>');
     if(r.forced) tags.push(' <span class="holdtag">강제</span>');
     return '<td style="white-space:nowrap">'+tags.join("")+'</td>';

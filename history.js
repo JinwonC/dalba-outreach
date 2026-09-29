@@ -735,6 +735,79 @@ async function outMessagesFor(pairsIn) {
   return out;
 }
 
+// ─── 발송 제외 (반송 주소 · 수신 거부) ──────────────────────────────
+//   outreach:suppress   HASH  "e:<이메일>" | "h:<핸들>" → { type:"bounce"|"dnc", reason, by, at, source, addedBy }
+// 반송(bounce): 주소가 없어 되돌아온 메일에서 자동으로 — 없는 주소로 계속 보내면 발신 평판이 떨어진다.
+// 수신 거부(dnc): 크리에이터가 그만 보내 달라고 한 경우 — 담당자가 등록한다.
+// 여기 있으면 **누구도(관리자 포함) 보낼 수 없다.** 잘못 들어갔으면 관리자가 지운다.
+// 한 번에 여러 명을 HMGET 하나(명령 1개)로 확인한다.
+const SUP_KEY = "outreach:suppress";
+const supField = (kind, v) => kind + ":" + v;
+function supFieldsOf(r, link) {
+  const f = [];
+  const e = normEmail(r && (r.to || r.email)), h = normHandle(r && (r.handle || r.creatorHandle));
+  if (e && e.indexOf("@") > 0) f.push(supField("e", e));
+  if (h) f.push(supField("h", h));
+  ((link && link.emails) || []).forEach(x => { x = normEmail(x); if (x) f.push(supField("e", x)); });
+  ((link && link.handles) || []).forEach(x => { x = normHandle(x); if (x) f.push(supField("h", x)); });
+  return [...new Set(f)];
+}
+// items: [{ email?, handle?, type, reason, by, at, source, addedBy }] — 수신 거부가 반송보다 우선(덮어쓰지 않음)
+async function suppressAdd(items) {
+  const list = [];
+  (items || []).forEach(it => {
+    const e = normEmail(it && it.email), h = normHandle(it && it.handle);
+    const rec = { type: it.type === "dnc" ? "dnc" : "bounce", reason: String(it.reason || "").slice(0, 200),
+      by: normEmail(it.by || ""), at: it.at || new Date().toISOString(), source: it.source || "", addedBy: normEmail(it.addedBy || "") };
+    if (e && e.indexOf("@") > 0) list.push([supField("e", e), rec]);
+    if (h) list.push([supField("h", h), rec]);
+  });
+  if (!enabled() || !list.length) return 0;
+  const fields = [...new Set(list.map(x => x[0]))];
+  const cur = await cmd(["HMGET", SUP_KEY].concat(fields));
+  const had = new Map(fields.map((f, i) => [f, parseRec(cur && cur[i])]));
+  const args = [];
+  const seen = new Set();
+  list.forEach(([f, rec]) => {
+    if (seen.has(f)) return;
+    const old = had.get(f);
+    if (old && old.type === "dnc" && rec.type !== "dnc") return;      // 수신 거부는 반송으로 덮지 않는다
+    if (old && old.type === rec.type && rec.type === "bounce") return; // 이미 반송으로 기록됨
+    seen.add(f); args.push(f, JSON.stringify(rec));
+  });
+  if (args.length) await cmd(["HSET", SUP_KEY].concat(args));
+  return args.length / 2;
+}
+async function suppressRemove(fields) {
+  const list = (fields || []).filter(f => /^[eh]:./.test(String(f)));
+  if (!enabled() || !list.length) return 0;
+  return Number(await cmd(["HDEL", SUP_KEY].concat(list))) || 0;
+}
+// 수신자 목록(+ 연결 목록) → 같은 순서로 [{ field, type, reason, … } | null]
+async function suppressCheck(list, links) {
+  const items = Array.isArray(list) ? list : [];
+  if (!enabled() || !items.length) return items.map(() => null);
+  const per = items.map((r, i) => supFieldsOf(r, links && links[i]));
+  const all = [...new Set(per.flat())];
+  const hit = new Map();
+  for (let i = 0; i < all.length; i += 500) {
+    const part = all.slice(i, i + 500);
+    const vals = await cmd(["HMGET", SUP_KEY].concat(part));
+    part.forEach((f, j) => { const r = parseRec(vals && vals[j]); if (r) hit.set(f, Object.assign({ field: f }, r)); });
+  }
+  // 수신 거부를 반송보다 먼저 보여준다
+  return per.map(fs => { const hs = fs.map(f => hit.get(f)).filter(Boolean); return hs.find(h => h.type === "dnc") || hs[0] || null; });
+}
+async function suppressAll() {
+  if (!enabled()) return [];
+  const flat = await cmd(["HGETALL", SUP_KEY]);
+  const out = [];
+  const push = (f, v) => { const r = parseRec(v); if (r) out.push(Object.assign({ field: f, kind: f.slice(0, 1) === "h" ? "handle" : "email", value: f.slice(2) }, r)); };
+  if (Array.isArray(flat)) { for (let i = 0; i + 1 < flat.length; i += 2) push(flat[i], flat[i + 1]); }
+  else if (flat && typeof flat === "object") Object.keys(flat).forEach(k => push(k, flat[k]));
+  return out.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+}
+
 // ─── 연결(브리지) 재구성 — 지난 발송 로그에서 한 번 채운다 ─────────
 // 새 발송은 log() 가 그때그때 연결을 남긴다. 이 함수는 **이미 쌓인** 기록에서
 // 이메일+핸들 짝을 모아 채우고, 예전 정규화(URL 을 안 풀던)로 잘못 잡힌 핸들 차단 키를
@@ -1052,7 +1125,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany,
+  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

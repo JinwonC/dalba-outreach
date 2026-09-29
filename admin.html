@@ -146,6 +146,7 @@
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="book" onclick="go('book')">📒 주소록</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
+    <button class="tab" data-v="suppress" onclick="go('suppress')">⛔ 발송 제외</button>
   </div>
 
   <div class="panel">
@@ -319,7 +320,53 @@ async function loadAdmin(){
   if(VIEW === "book")     return renderBook(d);
   if(VIEW === "pipeline") return renderPipeline(d);
   if(VIEW === "unanswered") return renderUnanswered(d);
+  if(VIEW === "suppress") return renderSuppress(d);
   return "";
+}
+
+/* ⛔ 발송 제외 — 반송된 없는 주소(자동) · 수신 거부(담당자 등록). 여기 있으면 누구도 보낼 수 없다.
+   잘못 들어간 건 골라서 지운다. */
+let SUP_DATA = null, SUP_FILTER = "all";
+const SUP_SRC = { imap: "반송 알림(메일함)", smtp: "발송 즉시 거절", manual: "직접 등록" };
+function setSupFilter(f){ SUP_FILTER = f; if(SUP_DATA) renderSuppress(SUP_DATA); }
+function renderSuppress(d){
+  SUP_DATA = d;
+  const needle = $("q").value.trim().toLowerCase();
+  const all = (d.rows || []).filter(r => !needle || [r.value, r.reason, r.byName, r.addedByName].join(" ").toLowerCase().includes(needle));
+  const rows = SUP_FILTER === "all" ? all : all.filter(r => r.type === SUP_FILTER);
+  const n = t => all.filter(r => r.type === t).length;
+  const fbtn = (k, text) => '<button class="btn'+(SUP_FILTER===k?' dark':'')+'" onclick="setSupFilter(\''+k+'\')">'+text+'</button>';
+  $("body").innerHTML =
+    '<div class="note" style="line-height:1.8"><b>발송 제외</b> — <span>여기 있는 주소·핸들에는 누구도(관리자·강제 발송 포함) 보낼 수 없습니다.</span>' +
+      '<div class="muted" style="font-size:12px"><span>⛔ 반송 주소: 없는 주소로 되돌아온 메일에서 자동으로 등록됩니다 (우리가 보낸 적 있는 주소 · 영구 실패만).</span></div>' +
+      '<div class="muted" style="font-size:12px"><span>🚫 수신 거부: 크리에이터가 그만 보내 달라고 한 경우 담당자가 등록합니다.</span></div>' +
+      '<div class="muted" style="font-size:12px"><span>잘못 들어간 건 골라서 지우면 다시 보낼 수 있습니다.</span></div></div>' +
+    '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
+      fbtn("all", "전체 "+all.length) + fbtn("bounce", "⛔ 반송 주소 "+n("bounce")) + fbtn("dnc", "🚫 수신 거부 "+n("dnc")) +
+      (rows.length ? '<span style="margin-left:8px"></span><button class="btn" onclick="removeSuppress()">🗑 선택 지우기</button>' : '') +
+      '<span class="muted" id="supMsg"></span></div>' +
+    (rows.length
+      ? '<div class="scroll"><table><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll(\'.supchk\').forEach(c => c.checked = this.checked)" title="전체 선택" /></th>' +
+        '<th>대상</th><th>종류</th><th>사유</th><th>출처</th><th>기록</th></tr></thead><tbody>' +
+        rows.map(r => '<tr><td><input type="checkbox" class="supchk" data-field="'+esc(r.field)+'" /></td>' +
+          '<td class="mono">'+(r.kind === "handle" ? "@" : "")+esc(r.value)+'</td>' +
+          '<td>'+(r.type === "dnc" ? '<span class="tag" style="background:#fbd3cf;color:#a1251b">🚫 수신 거부</span>' : '<span class="tag" style="background:#eee;color:#555">⛔ 반송 주소</span>')+'</td>' +
+          '<td class="muted" style="max-width:280px">'+esc(r.reason || "")+'</td>' +
+          '<td class="muted">'+esc(SUP_SRC[r.source] || r.source || "")+(r.byName ? '<div style="font-size:11px">'+esc(r.byName)+'</div>' : '')+'</td>' +
+          '<td class="mono muted">'+esc(fmt(r.at))+(r.addedByName ? '<div style="font-size:11px">'+esc(r.addedByName)+'</div>' : '')+'</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="muted" style="padding:20px 0">발송 제외된 주소가 없습니다.</div>');
+  return rows.length + "건";
+}
+async function removeSuppress(){
+  const fields = [...document.querySelectorAll(".supchk:checked")].map(c => c.getAttribute("data-field"));
+  if(!fields.length){ $("supMsg").textContent = "지울 항목을 고르세요"; return; }
+  if(!confirm(fields.length + "건을 발송 제외에서 지웁니다. 다시 보낼 수 있게 됩니다.")) return;
+  try {
+    const d = await postJson("/api/admin", { action: "unsuppress", fields });
+    $("supMsg").textContent = (d.removed || 0) + "건 지움";
+    load();
+  } catch(e){ $("supMsg").textContent = String(e.message || e); }
 }
 
 /* 📥 답장 대기 — 크리에이터가 회신했는데 담당자가 아직 답하지 않은 대화.

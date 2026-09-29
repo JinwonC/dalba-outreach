@@ -302,4 +302,49 @@ async function readFolders(account, opts) {
   return { folders: out };
 }
 
-module.exports = { read, readFolders, readThread, isReplyFolder, findMailbox, cleanBody, IMAP_HOST, IMAP_PORT };
+// ─── 반송 알림 읽기 ───────────────────────────────────────────────
+// 받은편지함에서 "보낼 수 없음" 알림만 **서버에서 검색해** 골라 받는다 (보낸 사람 mailer-daemon·postmaster,
+// 또는 반송 제목). 알림은 드물어 몇 통만 내려받는다. 원문 앞부분(64KB)을 그대로 돌려준다 —
+// 실패한 주소는 첨부(delivery-status)나 본문에 있어 본문만 뽑으면 놓친다.
+const BOUNCE_SEARCHES = [
+  { from: "mailer-daemon" }, { from: "postmaster" },
+  { subject: "Undeliver" }, { subject: "Delivery Status Notification" }, { subject: "Returned mail" },
+  { subject: "Mail delivery failed" }, { subject: "failure notice" }, { subject: "발송 실패" }, { subject: "발송실패" }, { subject: "전송 실패" }
+];
+async function readBounces(account, opts) {
+  const o = opts || {};
+  const since = o.since ? new Date(o.since) : new Date(Date.now() - 30 * 86400e3);
+  const limit = Math.max(1, Math.min(Number(o.limit) || 200, 1000));
+  const deadline = Date.now() + Math.max(3000, Number(o.budgetMs) || 15000);
+  const client = makeClient(account);
+  await client.connect();
+  const rows = [];
+  let total = 0, maxUid = 0;
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const set = new Set();
+      for (const c of BOUNCE_SEARCHES) {
+        if (Date.now() > deadline) break;
+        try { ((await client.search(Object.assign({ since }, c), { uid: true })) || []).forEach(u => set.add(Number(u))); } catch (_) { /* 서버가 모르는 조건이면 건너뜀 */ }
+      }
+      const uids = [...set].filter(u => !o.minUid || u > Number(o.minUid)).sort((a, b) => a - b);
+      total = uids.length;
+      const take = uids.slice(0, limit);                       // 오래된 것부터 — 커서로 이어서
+      if (take.length) {
+        for await (const msg of client.fetch(take, { envelope: true, source: { start: 0, maxLength: BODY_FETCH_BYTES } }, { uid: true })) {
+          const env = msg.envelope || {};
+          rows.push({ uid: msg.uid, at: env.date, subject: env.subject || "", from: one(env.from),
+            raw: msg.source ? msg.source.toString("utf8") : "" });
+          if (Number(msg.uid) > maxUid) maxUid = Number(msg.uid);
+          if (Date.now() > deadline) break;
+        }
+      }
+    } finally { lock.release(); }
+  } finally {
+    try { await Promise.race([client.logout(), new Promise(r => setTimeout(r, 2000))]); } catch (_) { try { client.close(); } catch (_) {} }
+  }
+  return { rows, total, maxUid, truncated: total > rows.length };
+}
+
+module.exports = { read, readFolders, readBounces, readThread, isReplyFolder, findMailbox, cleanBody, IMAP_HOST, IMAP_PORT };

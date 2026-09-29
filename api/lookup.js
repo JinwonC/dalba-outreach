@@ -118,7 +118,7 @@ function summarizeOne(q, idx, match, viewer) {
     linked, replyCount: replies.length, replies,
     // 보는 사람 본인이 이 크리에이터에게 보낸 적이 있음 → 본인은 계속 보낼 수 있다 (발송 시 막히지 않음)
     mine: Boolean(viewer) && [...ids].some(i => idx.sent[i] && H.normEmail(idx.sent[i].by) === H.normEmail(viewer)),
-    _emails: [...emails], _ids: [...ids]
+    _emails: [...emails], _handles: [...handles], _ids: [...ids]
   };
   if (!a.count) {
     return Object.assign(base, { found: inhouse, sentCount: 0, senders: [], lastAt: "", lastBy: "", lastCampaign: "", forced: false, name: "", handle: "" });
@@ -220,7 +220,15 @@ function sendPairs(r, idx, boxes) {
   const owners = [...new Set((r._ids || []).map(i => idx.sent[i] && H.normEmail(idx.sent[i].by)).filter(o => o && boxes.has(o)))];
   return owners.flatMap(o => (r._emails || []).map(e => [o, e]));
 }
-function stripInternal(r) { delete r._emails; delete r._ids; return r; }
+function stripInternal(r) { delete r._emails; delete r._handles; delete r._ids; return r; }
+// 발송 제외(반송 주소·수신 거부) — 입력과 연결된 이메일·핸들까지 한 번에(HMGET 1개) 대조
+async function attachSuppression(results) {
+  const items = results.map(r => ({ to: (r._emails || [])[0] || "", handle: (r._handles || [])[0] || "" }));
+  const links = results.map(r => ({ emails: (r._emails || []).slice(1), handles: (r._handles || []).slice(1) }));
+  let hits = [];
+  try { hits = await H.suppressCheck(items, links); } catch (_) { hits = []; }
+  results.forEach((r, i) => { const x = hits[i]; if (x) r.suppressed = { type: x.type, reason: x.reason || "", at: x.at || "" }; });
+}
 function staffNames() { return new Map(A.parseAccounts().map(a => [H.normEmail(a.email), a.name || a.email])); }
 function staffBoxes() { return A.parseAccounts().map(a => H.normEmail(a.email)).filter(e => e && !H.isIgnoredSender(e)); }
 
@@ -284,7 +292,7 @@ module.exports = async (req, res) => {
       const [idx, match] = await Promise.all([buildIndex(), matchP]);
       const results = queries.map(q => summarizeOne(q, idx, match, viewer));
       // 발송된 메일 전부(제목·발신자)와 회신 대조를 동시에
-      const [sendInfo, { partial }] = await Promise.all([attachSends(results, idx, viewer, t0), decide(results, t0)]);
+      const [sendInfo, { partial }] = await Promise.all([attachSends(results, idx, viewer, t0), decide(results, t0), attachSuppression(results)]);
       partial.sends = !sendInfo.messages;
       results.forEach(stripInternal);
       partial.inhouse = !match;
@@ -334,6 +342,7 @@ module.exports = async (req, res) => {
     const [idx, match] = await Promise.all([buildIndex(), matchP]);
     const one = summarizeOne(q, idx, match, viewer);
     await decide([one], t0);
+    await attachSuppression([one]);
     stripInternal(one);
     // 단건은 기존 화면과 호환되게 sent/replies 상세도 흉내 내지 않고 요약 형태로 준다
     res.status(200).json(Object.assign({ historyEnabled: true, found: one.found, sentCount: one.sentCount, replyCount: one.replyCount, senders: one.senders }, { results: [one] }));

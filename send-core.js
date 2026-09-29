@@ -13,6 +13,7 @@ const path = require("path");
 const T = require("./email-template.js");
 const H = require("./history.js");
 const IH = require("./inhouse.js");
+const B = require("./bounce-lib.js");
 
 // 서버 고정값 — 클라이언트가 바꿀 수 없다
 const SMTP_HOST = process.env.NW_SMTP_HOST || "smtp.worksmobile.com";
@@ -179,6 +180,20 @@ async function sendBatch(opts) {
     let linked = { handles: [], emails: [] };
     try { linked = (await H.bridge([d]))[0] || linked; } catch (_) {}
 
+    // ─── 발송 제외 (반송된 없는 주소 · 수신 거부) — 누구도(관리자·강제 발송 포함) 보낼 수 없다 ──
+    // 잘못 들어간 주소는 관리자 페이지 [⛔ 발송 제외] 에서 지운다. 저장소를 못 읽으면 아래 중복 확인이 막는다.
+    let sup = null;
+    try { sup = (await H.suppressCheck([d], [linked]))[0]; } catch (_) { sup = null; }
+    if (sup) {
+      results.push({
+        to, ok: false, held: true, suppressed: sup.type, suppressReason: sup.reason || "",
+        error: sup.type === "dnc"
+          ? "수신 거부한 크리에이터입니다 — 보낼 수 없습니다"
+          : "반송된 주소입니다 (없는 주소) — 관리자 페이지 [⛔ 발송 제외]에서 해제할 수 있습니다"
+      });
+      continue;
+    }
+
     // ─── 인하우스(협업 중) 크리에이터 차단 (핸들·이메일 기준, 관리자 제외) ──
     // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자와, 본인이 이전에 보낸 적 있는 담당자만 예외.
     let ih = inhouseMatch ? inhouseMatch(d, linked.handles) : null;
@@ -274,6 +289,10 @@ async function sendBatch(opts) {
       }
     } catch (e) {
       if (reserved) { try { await H.release(d); } catch (_) {} }
+      // 발송 즉시 '없는 주소'로 거절되면 반송으로 기록해 다음부터 빼 준다
+      if (B.isHardSmtpError(e)) {
+        try { await H.suppressAdd([{ email: to, type: "bounce", reason: String((e && (e.response || e.message)) || "").slice(0, 120), by: account.email, source: "smtp" }]); } catch (_) {}
+      }
       results.push({ to, ok: false, error: String((e && e.message) || e) });
     }
   }
