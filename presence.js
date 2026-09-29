@@ -1,13 +1,13 @@
 // 실시간 접속 표시 위젯 — 발송 화면(index.html)·관리자 화면(admin.html) 공용.
 //
-// 서버리스라 연결을 열어 둘 수 없어서 45초마다 신호(하트비트)를 보낸다. 탭을 보고 있을 때만
-// 보내고(다른 탭이면 멈춤 — 저장소 요청을 아끼려고), 창을 닫으면 바로 빠진다.
-// 🟢 접속 중(90초 안) · 🟡 자리 비움(5분 안). 어느 화면에 있는지는 관리자에게만 온다.
+// 서버리스라 연결을 열어 둘 수 없어서 3분마다 신호(하트비트)를 보낸다. 탭을 보고 있고 최근 10분 안에
+// 마우스·키보드를 쓴 경우에만 보낸다(저장소 요청 한도 때문 — 켜 두기만 한 탭은 멈춤). 창을 닫으면 바로 빠진다.
+// 🟢 접속 중(4분 안) · 🟡 자리 비움(10분 안). 어느 화면에 있는지는 관리자에게만 온다.
 (function () {
   var VIEW_LABEL = { send: "발송", pipeline: "파이프라인", check: "중복 검사", inhouse: "협업 리스트",
     summary: "담당자별", daily: "일별", weekly: "주차별", conversations: "대화", book: "주소록", blocked: "중복시도" };
   var PAGE_LABEL = { send: "발송 화면", admin: "관리자 페이지" };
-  var HEARTBEAT_MS = 45000;
+  var HEARTBEAT_MS = 180000, IDLE_MS = 600000, lastActive = Date.now();
   var opts = null, timer = null, isOpen = false, last = null, started = false, refreshT = null;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -42,11 +42,12 @@
     var n = last.online || 0;
     el.className = "pres";
     el.innerHTML = '<button class="pres-btn" type="button"><span class="pres-dot on"></span><span>' + n + '명 접속 중</span></button>' + (isOpen ? panel() : "");
-    el.querySelector(".pres-btn").onclick = function (e) { e.stopPropagation(); isOpen = !isOpen; render(); if (isOpen) ping(); };
+    el.querySelector(".pres-btn").onclick = function (e) { e.stopPropagation(); isOpen = !isOpen; render(); if (isOpen) ping(false, true); };
   }
-  function ping(leave) {
+  function ping(leave, force) {
     if (!opts) return;
     if (!leave && document.visibilityState !== "visible") return;
+    if (!leave && !force && Date.now() - lastActive > IDLE_MS) return;   // 자리를 비운 탭은 신호를 멈춘다
     var h = opts.headers && opts.headers();
     if (!h) return;
     try {
@@ -64,7 +65,10 @@
     started = true; opts = o; css();
     ping();
     timer = setInterval(function () { ping(); }, HEARTBEAT_MS);
-    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") ping(); });
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { lastActive = Date.now(); ping(); } });
+    // 마우스·키보드를 쓰면 '활동 중' — 오래 쉬다 돌아오면 곧바로 알린다
+    var markActive = function () { var idle = Date.now() - lastActive > IDLE_MS; lastActive = Date.now(); if (idle) ping(); };
+    ["mousemove", "keydown", "click", "scroll", "touchstart"].forEach(function (ev) { window.addEventListener(ev, markActive, { passive: true }); });
     window.addEventListener("pagehide", function () { ping(true); });
     document.addEventListener("click", function () { if (isOpen) { isOpen = false; render(); } });
   }

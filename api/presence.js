@@ -1,18 +1,19 @@
 // Vercel Serverless Function — 배포 경로: /api/presence
 //
 // 실시간 접속 표시 (디스코드처럼 '지금 누가 들어와 있나').
-// 서버리스라 연결을 열어 둘 수 없으므로, 열어 둔 화면이 45초마다 신호를 보낸다(하트비트).
+// 서버리스라 연결을 열어 둘 수 없으므로, 열어 둔 화면이 3분마다 신호를 보낸다(하트비트).
+// (저장소 Upstash 는 명령 수 한도가 있어 신호를 드물게, 한 번에 명령 2개로 — 45초·5개일 때 한도를 넘겼다)
 //
-//   POST /api/presence { page, view }   → 신호를 남기고 최근 5분 안의 접속자 목록을 받는다
+//   POST /api/presence { page, view }   → 신호를 남기고 최근 10분 안의 접속자 목록을 받는다
 //   POST /api/presence { leave:true }   → 창을 닫을 때 바로 빠진다
 //
-// 상태: 마지막 신호가 90초 안 → online(🟢 접속 중), 5분 안 → away(🟡 자리 비움).
+// 상태: 마지막 신호가 4분 안 → online(🟢 접속 중), 10분 안 → away(🟡 자리 비움).
 // 이름·상태는 로그인한 모두가 본다. **어느 화면에 있는지는 관리자만** 본다.
 
 const A = require("../auth.js");
 const H = require("../history.js");
 
-const ONLINE_MS = 90e3;
+const ONLINE_MS = 4 * 60e3;
 
 function readBody(req) {
   const b = req.body;

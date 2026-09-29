@@ -51,11 +51,12 @@ module.exports = async (req, res) => {
 
     // 보내는 사람(로그인)을 넘기면 **다른 담당자** 기록을 우선 보여준다 (본인 기록은 보류 사유가 아님)
     const me = A.enabled() ? A.currentUser(req) : null;
-    const priors = await H.lookup(recipients, me && me.email);
-    // 협업 리스트 대조 — 핸들이 비어 있어도 이메일(시트·발송 기록 연결·주소 추정)로 잡는다
-    const match = await IH.matcher();
+    // 이메일↔핸들 연결은 한 번만 읽어 중복 확인과 협업 대조에 같이 쓴다 (저장소 요청 절약)
     let links = [];
     try { links = await H.bridge(recipients); } catch (_) { links = []; }
+    const priors = await H.lookup(recipients, me && me.email, links);
+    // 협업 리스트 대조 — 핸들이 비어 있어도 이메일(시트·발송 기록 연결·주소 추정)로 잡는다
+    const match = await IH.matcher();
     res.status(200).json({
       enabled: H.enabled(),
       windowDays: H.WINDOW_DAYS,

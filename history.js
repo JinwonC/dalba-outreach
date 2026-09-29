@@ -166,18 +166,22 @@ async function bridge(list) {
   const items = Array.isArray(list) ? list : [];
   const empty = () => ({ handles: [], emails: [] });
   if (!enabled() || !items.length) return items.map(empty);
-  const cmds = [], spans = [];
+  // 이메일 → 핸들은 HMGET 한 번(명령 1개)으로 모아 읽는다 (예전엔 이메일마다 HGET 1개)
+  const cmds = [], spans = [], emails = [];
   items.forEach(r => {
     const e = normEmail(r && (r.to || r.email)), h = normHandle(r && (r.handle || r.creatorHandle));
     const s = { e, h, ei: -1, hi: -1 };
-    if (e) { s.ei = cmds.length; cmds.push(["HGET", BRIDGE_E2H, e]); }
+    if (e) { s.ei = emails.length; emails.push(e); }
     if (h) { s.hi = cmds.length; cmds.push(["SMEMBERS", bridgeHKey(h)]); }
     spans.push(s);
   });
+  const E_CHUNK = 500, eAt = cmds.length;
+  for (let i = 0; i < emails.length; i += E_CHUNK) cmds.push(["HMGET", BRIDGE_E2H].concat(emails.slice(i, i + E_CHUNK)));
   let out = [];
   try { out = cmds.length ? await pipeline(cmds) : []; } catch (_) { return items.map(empty); }
+  const e2h = i => { const arr = out[eAt + Math.floor(i / E_CHUNK)]; return Array.isArray(arr) ? arr[i % E_CHUNK] : null; };
   return spans.map(s => {
-    const lh = s.ei >= 0 ? normHandle(out[s.ei]) : "";
+    const lh = s.ei >= 0 ? normHandle(e2h(s.ei)) : "";
     const le = s.hi >= 0 && Array.isArray(out[s.hi]) ? out[s.hi].map(normEmail) : [];
     return {
       handles: lh && lh !== s.h ? [lh] : [],
@@ -254,23 +258,28 @@ async function ownPriors(items, me, links) {
 
 // ─── 조회 ────────────────────────────────────────────────────────
 // 수신자 목록을 받아 같은 순서로 [이전 발송기록 | null] 을 돌려준다.
-async function lookup(list, me) {
+async function lookup(list, me, linksIn) {
   const items = Array.isArray(list) ? list : [];
   const meN = normEmail(me || "");
   if (!enabled()) return items.map(() => null);
 
   // 수신자마다 키 개수가 달라서 인덱스가 밀리지 않도록 위치를 기록해 둔다.
   // 자기 키(이메일·핸들)를 먼저, 연결된 키(브리지)를 뒤에 — 직접 일치가 우선이다.
-  const links = await bridge(items);
-  const cmds = [];
+  const links = (Array.isArray(linksIn) && linksIn.length === items.length) ? linksIn : await bridge(items);
+  // 모든 키를 MGET 으로 모아 읽는다 (명령 1개 — 예전엔 키마다 GET 1개씩이라 수백 명이면 수백 개)
+  const allKeys = [];
   const spans = items.map((r, idx) => {
     const ks = keysOf(r).concat(aliasKeysOf(links[idx]));
-    const at = cmds.length;
-    ks.forEach(k => cmds.push(["GET", k]));
+    const at = allKeys.length;
+    ks.forEach(k => allKeys.push(k));
     return { at, n: ks.length };
   });
-
-  const out = await pipeline(cmds);
+  const out = [];
+  for (let i = 0; i < allKeys.length; i += 500) {
+    const part = allKeys.slice(i, i + 500);
+    const vals = await cmd(["MGET"].concat(part));
+    part.forEach((_, j) => out.push(Array.isArray(vals) ? vals[j] : null));
+  }
   // 담당자 보낸편지함(주소록)도 대조 — 단체·숨은참조로 보낸 상대
   const emailsOf = idx => [normEmail(items[idx] && (items[idx].to || items[idx].email))].concat(links[idx].emails || []).filter(Boolean);
   const bp = await bookSentPriors([].concat(...items.map((_, i) => emailsOf(i))));
@@ -731,26 +740,29 @@ async function outMessagesFor(pairsIn) {
 //   outreach:presence        ZSET  이메일 → 마지막 신호(ms)
 //   outreach:presence:info   HASH  이메일 → { name, page, view, at }
 const PRES_KEY = "outreach:presence", PRES_INFO = "outreach:presence:info";
+// 저장소 요청 절약: 신호 한 번에 명령 2개(HSET + HGETALL). 마지막 신호 시각은 정보 안(at)에 담고,
+// 오래된(하루 지난) 사람은 발견될 때만 지운다. 최근 PRES_WINDOW_MS 안에 신호가 있던 사람만 돌려준다.
+const PRES_WINDOW_MS = 10 * 60e3;
 async function presencePing(email, info, now, leave) {
   const e = normEmail(email);
   if (!enabled() || !e) return [];
   const t = Number(now) || Date.now();
-  const cmds = leave
-    ? [["ZREM", PRES_KEY, e], ["HDEL", PRES_INFO, e]]
-    : [["ZADD", PRES_KEY, String(t), e], ["HSET", PRES_INFO, e, JSON.stringify(Object.assign({}, info, { at: t }))]];
-  cmds.push(["ZREMRANGEBYSCORE", PRES_KEY, "0", String(t - 86400e3)]);          // 하루 지난 기록 정리
-  cmds.push(["ZRANGEBYSCORE", PRES_KEY, String(t - 300e3), "+inf", "WITHSCORES"]); // 최근 5분
-  cmds.push(["HGETALL", PRES_INFO]);
-  const out = await pipeline(cmds);
-  const range = out[out.length - 2] || [], infoAll = out[out.length - 1] || [];
+  const out = await pipeline([
+    leave ? ["HDEL", PRES_INFO, e] : ["HSET", PRES_INFO, e, JSON.stringify(Object.assign({}, info, { at: t }))],
+    ["HGETALL", PRES_INFO]
+  ]);
+  const infoAll = out[1] || [];
   const infos = new Map();
   if (Array.isArray(infoAll)) { for (let i = 0; i + 1 < infoAll.length; i += 2) infos.set(infoAll[i], parseRec(infoAll[i + 1]) || {}); }
   else if (infoAll && typeof infoAll === "object") Object.keys(infoAll).forEach(k => infos.set(k, parseRec(infoAll[k]) || {}));
-  const people = [];
-  for (let i = 0; i + 1 < range.length; i += 2) {
-    const who = range[i], at = Number(range[i + 1]) || 0;
-    people.push(Object.assign({ email: who }, infos.get(who) || {}, { at }));
-  }
+  if (leave) infos.delete(e);
+  const people = [], stale = [];
+  infos.forEach((v, who) => {
+    const at = Number(v.at) || 0;
+    if (t - at > 86400e3) stale.push(who);
+    else if (t - at <= PRES_WINDOW_MS) people.push(Object.assign({ email: who }, v, { at }));
+  });
+  if (stale.length) { try { await cmd(["HDEL", PRES_INFO].concat(stale)); } catch (_) {} }
   return people;
 }
 
@@ -964,8 +976,34 @@ async function recordReplies(items) {
 }
 
 // 작은 값 하나를 그대로 읽고 쓴다 (자동 실행의 커서·마지막 상태 보관용)
-async function readRaw(key) { return enabled() ? cmd(["GET", key]) : null; }
-async function writeRaw(key, val) { if (enabled()) await cmd(["SET", key, String(val)]); }
+// 저장소 요청 절약 (Upstash 는 명령 수로 과금·한도):
+//  · prefetchRaw: 여러 키를 MGET 한 번(=명령 1개)으로 미리 읽어 두면, 곧바로 이어지는 readRaw 는 저장소를 안 부른다
+//  · writeRaw: 방금 읽었거나 쓴 값과 같으면 다시 쓰지 않는다 (커서가 그대로인 동기화에서 SET 이 매번 나가던 것)
+// 캐시는 짧게(90초) — 동기화 한 번 안에서만 쓰이고, 다른 실행과 엇갈릴 일이 없게.
+const RAW_TTL_MS = 90e3;
+const rawCache = new Map();     // key → { v, t, pre }
+async function prefetchRaw(keys) {
+  const list = [...new Set((keys || []).filter(Boolean))];
+  if (!enabled() || !list.length) return;
+  const vals = await cmd(["MGET"].concat(list));
+  const t = Date.now();
+  list.forEach((k, i) => rawCache.set(k, { v: (vals && vals[i] != null) ? String(vals[i]) : null, t, pre: true }));
+}
+async function readRaw(key) {
+  if (!enabled()) return null;
+  const c = rawCache.get(key);
+  if (c && c.pre && Date.now() - c.t < RAW_TTL_MS) { c.pre = false; return c.v; }   // 미리 읽은 값은 한 번만 쓴다
+  const v = await cmd(["GET", key]);
+  rawCache.set(key, { v: v == null ? null : String(v), t: Date.now() });
+  return v;
+}
+async function writeRaw(key, val) {
+  if (!enabled()) return;
+  const s = String(val), c = rawCache.get(key);
+  if (c && Date.now() - c.t < RAW_TTL_MS && c.v === s) return;   // 그대로면 쓰지 않는다
+  await cmd(["SET", key, s]);
+  rawCache.set(key, { v: s, t: Date.now() });
+}
 
 // ─── 리마인드(자동 팔로업) 예약 ─────────────────────────────────
 // 첫 메일에 회신이 없을 때 며칠 뒤 다시 보낼 계획을 저장한다. 담당자+크리에이터 한 쌍당
@@ -1039,7 +1077,7 @@ async function allSchedules() {
 async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY, String(id)]); }
 
 module.exports = {
-  enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw,
+  enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw, prefetchRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
   recordReply, recordReplies, recent, ownPriors, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,

@@ -304,6 +304,13 @@ async function syncAccount(account, contacted, opts) {
   const o = Object.assign({ useCursor: true }, opts || {});
   const until = Number(o.until) || (Date.now() + 48e3);
   const left = () => until - Date.now();
+  // 이번 실행에서 읽을 커서·표시들을 한 번에(MGET = 저장소 명령 1개) — 하나씩 GET 하면 계정마다 6번
+  if (o.useCursor) {
+    try {
+      await H.prefetchRaw(["sent2", "booksent", "msgsent"].map(k => "outreach:cursor:" + k + ":" + account.email)
+        .concat([boxCursorKey(account), msgBoxKey(account), BOOK_READY(account)]));
+    } catch (_) { /* 못 읽으면 평소처럼 하나씩 읽는다 */ }
+  }
 
   // 발송 기록 가져오기(중복 차단용). v2 커서: 보낸편지함 폴더 인식 버그로 예전 커서가 엉뚱한 폴더를
   // 기준으로 앞서 가 있을 수 있어 5월부터 다시 — 오래된 것부터 400통씩 이어서, 일괄 저장.

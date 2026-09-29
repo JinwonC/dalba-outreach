@@ -103,9 +103,9 @@ module.exports = async (req, res) => {
       const contacted = await S.contactedMap();
       const start = q.force === "1" ? 0 : (await getCursor()) % accounts.length;
       i = start;
-      // 한 바퀴를 넘지 않게, 그리고 예산이 남아 있는 동안만
-      while (processed < accounts.length && Date.now() < deadline) {
-        const acc = accounts[i % accounts.length];
+      // 목록 끝까지만(한 바퀴를 넘기지 않음), 예산이 남아 있는 동안. 못 끝내면 다음 실행(15분 뒤)이 이어서.
+      while (i < accounts.length && Date.now() < deadline) {
+        const acc = accounts[i];
         try {
           results.push(await S.syncAccount(acc, contacted, { until: deadline + 5e3 }));
         } catch (e) {
@@ -114,7 +114,10 @@ module.exports = async (req, res) => {
         }
         i++; processed++;
       }
-      done = processed >= accounts.length;
+      // 목록 끝에 닿으면 한 바퀴 끝 — 여러 실행에 걸쳐 돌았어도 끝난 것으로 본다.
+      // (예전엔 한 실행 안에 전원을 다 돌아야만 '끝'으로 쳐서, 담당자가 많으면 영영 안 끝나고
+      //  1시간 간격 대신 15분마다 동기화해 저장소 요청이 4배로 나갔다)
+      done = i >= accounts.length;
       // 한 바퀴를 다 돌았을 때만 "이번 동기화 끝" 으로 시각을 찍는다 (그래야 다음 55분 타이머 시작)
       if (done) { try { await H.writeRaw(SYNC_AT_KEY, new Date().toISOString()); } catch (_) {} }
     }

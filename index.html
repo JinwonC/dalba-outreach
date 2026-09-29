@@ -1365,23 +1365,46 @@ function scheduleDupCheck(){
   dupTimer = setTimeout(checkDup, 600);
 }
 
+/* 확인 결과 캐시 — 수신자(주소+핸들)별 10분. 본문·제목을 고칠 때마다 전체 명단을 다시 묻지 않고
+   새로 들어온(바뀐) 수신자만 묻는다. 저장소(Upstash)는 요청 수 한도가 있어 매 입력마다 수백 건씩
+   나가던 것이 한도를 넘긴 원인 중 하나였다. 발송 직후엔 보낸 사람들 것을 지우고 다시 확인한다. */
+const DUP_TTL_MS = 10 * 60e3;
+let DUP_CACHE = new Map();   // "주소|핸들" → { prior, inhouse, t }
+const dupCacheKey = x => dupKey(x.to) + "|" + String(x.handle||"").trim().toLowerCase();
+function forgetDup(list){ (list||[]).forEach(x => DUP_CACHE.delete(dupCacheKey(x))); }
+
 async function checkDup(){
   if(!(CFG.history && CFG.history.enabled)) return;
   const list = recipients();
   if(!list.length){ $("dupInfo").innerHTML = ""; return; }
   try {
-    const r = await fetch("/api/history", {
-      method:"POST", cache:"no-store",
-      headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
-      body: JSON.stringify({ recipients: list.map(x => ({ to:x.to, handle:x.handle||"" })) })
+    const now = Date.now();
+    const need = [], seen = new Set();
+    list.forEach(x => {
+      const k = dupCacheKey(x); if(seen.has(k)) return; seen.add(k);
+      const c = DUP_CACHE.get(k);
+      if(!c || now - c.t > DUP_TTL_MS) need.push(x);
     });
-    if(r.status === 401) return;
-    const d = await r.json();
-    if(d.error) throw new Error(d.error);
+    for(let i = 0; i < need.length; i += 2000){
+      const part = need.slice(i, i + 2000);
+      const r = await fetch("/api/history", {
+        method:"POST", cache:"no-store",
+        headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+        body: JSON.stringify({ recipients: part.map(x => ({ to:x.to, handle:x.handle||"" })) })
+      });
+      if(r.status === 401) return;
+      const d = await r.json();
+      if(d.error) throw new Error(d.error);
+      (d.results||[]).forEach((x, j) => {
+        const src = part[j] || { to: x.to, handle: "" };
+        DUP_CACHE.set(dupCacheKey(src), { prior: x.prior || null, inhouse: x.inhouse || null, t: Date.now() });
+      });
+    }
     DUP = {}; INH = {};
-    (d.results||[]).forEach(x => {
-      if(x.prior) DUP[dupKey(x.to)] = x.prior;
-      if(x.inhouse) INH[dupKey(x.to)] = x.inhouse;
+    list.forEach(x => {
+      const c = DUP_CACHE.get(dupCacheKey(x)); if(!c) return;
+      if(c.prior) DUP[dupKey(x.to)] = c.prior;
+      if(c.inhouse) INH[dupKey(x.to)] = c.inhouse;
     });
     paintDup();
     if(MODE === "bulk") renderBulkTable();
@@ -1709,7 +1732,8 @@ async function doSend(list){
 
   paintResults(all, list.length, true);
   $("sendBtn").disabled = false;
-  checkDup();   // 방금 보낸 사람들이 이력에 잡히도록 다시 조회
+  forgetDup(list);   // 방금 보낸 사람들은 캐시를 지우고
+  checkDup();        // 이력에 잡히도록 다시 조회
 }
 
 function paintResults(results, total, final){
