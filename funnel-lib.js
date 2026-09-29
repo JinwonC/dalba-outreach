@@ -90,4 +90,47 @@ function funnel(o) {
   };
 }
 
-module.exports = { funnel, prep, campaignOf };
+// ─── 제목별 회신율 ─────────────────────────────────────────────────
+// 같은 제목 틀로 보낸 크리에이터 중 몇 %가 회신했나. 제목 틀이 기록된 발송(툴)은 그 틀로,
+// 아니면 실제 제목에서 크리에이터 이름·핸들을 {{name}} 으로 바꾸고 Re:/Fwd: 를 떼어 묶는다.
+// 제목이 없는 예전 툴 발송(제목 저장 전)은 뺀다.
+function escRe(x) { return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function normSubject(subj, name, handle) {
+  let s = String(subj || "").replace(/^\s*((re|fwd?|fw)\s*:\s*)+/i, "").trim();
+  // 긴 것부터(@핸들 → 핸들 → 이름), 단어 단위로만 — 짧은 이름이 핸들 안에서 먼저 바뀌지 않게
+  [handle && "@" + handle, handle, name].filter(x => x && String(x).length >= 2)
+    .sort((a, b) => String(b).length - String(a).length)
+    .forEach(v => { s = s.replace(new RegExp("(^|[^\\w@])" + escRe(v) + "(?![\\w])", "gi"), (m, pre) => pre + "{{name}}"); });
+  return s.replace(/\s{2,}/g, " ").slice(0, 160);
+}
+function subjectOf(s) {
+  if (s && s.subjectTpl) return String(s.subjectTpl);
+  const raw = s && (s.subject || (s.source === "imap" ? s.campaign : ""));
+  if (!raw) return "";
+  return normSubject(raw, s.name, H.normHandle(s.handle));
+}
+function subjects(o) {
+  const ctx = prep(o.allSent || o.sent, o.replies);
+  const groups = new Map();      // 제목 → Map(이메일 → 첫 발송 시각)
+  let skipped = 0;
+  (o.sent || []).forEach(s => {
+    const e = H.normEmail(s && s.to);
+    if (!e) return;
+    const k = subjectOf(s);
+    if (!k) { skipped++; return; }
+    const g = groups.get(k) || new Map();
+    const at = String(s.at || "");
+    if (!g.has(e) || at < g.get(e)) g.set(e, at);
+    groups.set(k, g);
+  });
+  const rows = [];
+  groups.forEach((g, k) => {
+    let replied = 0;
+    g.forEach((at, e) => { if (repliedSince({ email: e, handle: [...(ctx.e2h.get(e) || [])][0] || "" }, at, ctx)) replied++; });
+    rows.push({ subject: k, contacted: g.size, replied });
+  });
+  rows.sort((a, b) => (b.replied / b.contacted) - (a.replied / a.contacted) || b.contacted - a.contacted);
+  return { subjects: rows, subjectsSkipped: skipped };
+}
+
+module.exports = { funnel, subjects, normSubject, subjectOf, prep, campaignOf };

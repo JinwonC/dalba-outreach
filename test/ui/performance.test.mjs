@@ -9,7 +9,7 @@ const DATA = { historyEnabled: true, me: {}, accounts: [], inhouseChecked: true,
   totals: { contacted: 200, replied: 30, collab: 6 },
   staff: [{ staff: "luna@dalbausa.com", name: "Luna", contacted: 120, replied: 24, collab: 5 }, { staff: "seo@dalba.com", name: "Seo", contacted: 80, replied: 6, collab: 1 }],
   campaigns: [{ campaign: "Sept Promo", contacted: 150, replied: 25, collab: 5 }, { campaign: "(네이버웍스에서 직접 보낸 메일)", contacted: 50, replied: 5, collab: 1 }],
-  subjects: [] };
+  subjects: [{ subject: "Paid Collab X {{name}}", contacted: 40, replied: 10 }, { subject: "Hi {{name}} — collab?", contacted: 20, replied: 2 }, { subject: "Tiny test", contacted: 2, replied: 2 }], subjectsSkipped: 12 };
 async function mk(lang, data) {
   const page = await browser.newPage();
   page.on("pageerror", e => { if (/sandboxed/.test(e.message)) return; bad++; console.log("PAGEERROR", e.message); });
@@ -40,6 +40,12 @@ async function mk(lang, data) {
   const w = await page.$$eval("#body table tbody tr:first-child td:nth-child(4) div > span:last-child > span", e => e.map(x => x.style.width));
   ck(w[0] === "20%", "rate bar width: " + w);
   ck(views[0].includes("view=performance"), "requested performance view");
+  let st = await page.innerText("#body");
+  ck(/제목별 회신율/.test(st) && /Paid Collab X \{\{name\}\}/.test(st) && /25%/.test(st) && !/Tiny test/.test(st), "subject table, small samples hidden");
+  ck(/툴 발송 12건은 빠졌습니다/.test(st) && /표본 적은 제목도 보기 \(1\)/.test(st), "skipped note + toggle");
+  await page.evaluate(() => toggleSubjAll());
+  st = await page.innerText("#body");
+  ck(/Tiny test/.test(st) && /표본 적음/.test(st) && /표본 적은 제목 숨기기/.test(st), "toggle shows small samples tagged");
   await page.close();
 }
 {

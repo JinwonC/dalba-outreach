@@ -340,7 +340,28 @@ function funnelTable(rows, keyHead, keyCell){
       '<td class="mono">'+r.collab+'</td><td>'+rateBar(r.collab, r.contacted, "#8e24aa")+'</td></tr>').join("") +
     '</tbody></table></div>';
 }
+/* 제목별 회신율 — 표본이 적으면 우연이 크므로 기본은 5명 이상만. {{name}} 은 크리에이터 이름·핸들 자리. */
+let SUBJ_ALL = false, PERF_DATA = null;
+const SUBJ_MIN = 5;
+function toggleSubjAll(){ SUBJ_ALL = !SUBJ_ALL; if(PERF_DATA) renderPerformance(PERF_DATA); }
+function subjectSection(d){
+  const all = d.subjects || [];
+  const rows = SUBJ_ALL ? all : all.filter(r => r.contacted >= SUBJ_MIN);
+  const hidden = all.length - rows.length;
+  return '<h3 style="margin:18px 0 8px">제목별 회신율</h3>' +
+    '<div class="muted" style="font-size:12px;margin-bottom:6px"><span>같은 제목 틀로 보낸 크리에이터 중 회신한 비율입니다. {{name}} 은 크리에이터 이름·핸들 자리입니다.</span>' +
+      (d.subjectsSkipped ? ' <span>제목이 저장되기 전의 툴 발송 '+d.subjectsSkipped+'건은 빠졌습니다.</span>' : '') + '</div>' +
+    (rows.length
+      ? '<div class="scroll"><table><thead><tr><th>제목</th><th>보낸 크리에이터</th><th>회신</th><th>회신율</th></tr></thead><tbody>' +
+        rows.map(r => '<tr><td>'+esc(r.subject)+(r.contacted < SUBJ_MIN ? ' <span class="tag" style="background:#f1f1f1;color:#777">표본 적음</span>' : '')+'</td>' +
+          '<td class="mono">'+r.contacted+'</td><td class="mono">'+r.replied+'</td><td>'+rateBar(r.replied, r.contacted, "#1a73e8")+'</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="muted">'+(all.length ? '<span>'+SUBJ_MIN+'명 이상에게 보낸 제목이 아직 없습니다.</span>' : '<span>제목이 기록된 발송이 아직 없습니다.</span>')+'</div>') +
+    (hidden || SUBJ_ALL ? '<div style="margin-top:6px"><a href="javascript:void 0" onclick="toggleSubjAll()">' +
+      (SUBJ_ALL ? '<span>표본 적은 제목 숨기기</span>' : '<span>표본 적은 제목도 보기</span> ('+hidden+')') + '</a></div>' : '');
+}
 function renderPerformance(d){
+  PERF_DATA = d;
   const t = d.totals || { contacted: 0, replied: 0, collab: 0 };
   const card = (label, v, sub) => '<div class="card" style="flex:1;min-width:150px;border:1px solid #eee;border-radius:10px;padding:12px 14px">' +
     '<div class="muted" style="font-size:12px">'+label+'</div><div style="font-size:24px;font-weight:700">'+v+'</div>'+(sub ? '<div class="muted" style="font-size:12px">'+sub+'</div>' : '')+'</div>';
@@ -354,7 +375,8 @@ function renderPerformance(d){
     '<h3 style="margin:6px 0 8px">담당자별</h3>' +
     ((d.staff||[]).length ? funnelTable(d.staff, "담당자", r => esc(r.name || r.staff)) : '<div class="muted">기록이 없습니다.</div>') +
     '<h3 style="margin:18px 0 8px">캠페인별</h3>' +
-    ((d.campaigns||[]).length ? funnelTable(d.campaigns, "캠페인", r => esc(r.campaign)) : '<div class="muted">기록이 없습니다.</div>');
+    ((d.campaigns||[]).length ? funnelTable(d.campaigns, "캠페인", r => esc(r.campaign)) : '<div class="muted">기록이 없습니다.</div>') +
+    subjectSection(d);
   return t.contacted + "명";
 }
 

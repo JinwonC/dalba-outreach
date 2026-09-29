@@ -531,7 +531,8 @@ module.exports = async (req, res) => {
     if (view === "performance") {
       const IHm = require("../inhouse.js");
       const match = await Promise.race([IHm.matcher().catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))]);
-      const out = F.funnel({ sent, allSent: sentAll, replies: replyAll, match, names: nameByEmail() });
+      const out = Object.assign(F.funnel({ sent, allSent: sentAll, replies: replyAll, match, names: nameByEmail() }),
+        F.subjects({ sent, allSent: sentAll, replies: replyAll }));
       res.status(200).json(Object.assign(base, out));
       return;
     }

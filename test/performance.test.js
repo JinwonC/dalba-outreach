@@ -93,5 +93,31 @@ const call = (mod, user, req) => new Promise(res => { A.currentUser = () => user
   ck(r.body.totals.contacted === 5, "all time includes old send");
   r = await call(admin, { email: J, name: "Jinwon" }, { method: "GET", query: { view: "performance", days: "60", by: S } });
   ck(r.body.totals.contacted === 2 && r.body.staff.length === 1, "staff filter");
+  // ── 제목별 회신율 ──
+  const F = require("../funnel-lib.js");
+  lists.set("outreach:log", [
+    { to: "s1@x.com", name: "Ann Lee", at: day(20), by: L, campaign: "C", subject: "Paid Collab X Ann Lee", subjectTpl: "Paid Collab X {{name}}" },
+    { to: "s2@x.com", name: "Bo", at: day(20), by: L, campaign: "C", subject: "Paid Collab X Bo", subjectTpl: "Paid Collab X {{name}}" },
+    { to: "s3@x.com", name: "Cy", handle: "cyy", at: day(20), by: L, campaign: "Hi @cyy — collab?", source: "imap" },   // 웹메일: 실제 제목에서 핸들 치환
+    { to: "s4@x.com", name: "Di", handle: "dii", at: day(20), by: L, campaign: "Re: Hi @dii — collab?", source: "imap" },
+    { to: "s5@x.com", at: day(20), by: L, campaign: "Old tool send" }                                                     // 제목 없음 → 제외
+  ].map(x => JSON.stringify(x)));
+  lists.set("outreach:replies", [{ from: "s1@x.com", at: day(10) }, { from: "s4@x.com", at: day(25) }].map(x => JSON.stringify(x)));
+  r = await call(admin, { email: J, name: "Jinwon" }, { method: "GET", query: { view: "performance" } });
+  const sb = Object.fromEntries(r.body.subjects.map(x => [x.subject, x]));
+  ck(sb["Paid Collab X {{name}}"] && sb["Paid Collab X {{name}}"].contacted === 2 && sb["Paid Collab X {{name}}"].replied === 1, "template grouping: " + JSON.stringify(r.body.subjects));
+  ck(sb["Hi {{name}} — collab?"] && sb["Hi {{name}} — collab?"].contacted === 2 && sb["Hi {{name}} — collab?"].replied === 0, "webmail subjects normalized (Re: stripped, handle → {{name}}), reply before send not counted");
+  ck(r.body.subjectsSkipped === 1 && r.body.subjects.length === 2, "sends without subject skipped: " + r.body.subjectsSkipped);
+  ck(r.body.subjects[0].subject === "Paid Collab X {{name}}", "sorted by reply rate");
+  ck(F.normSubject("FW: Re: Hello Jane", "Jane", "") === "Hello {{name}}", "normSubject");
+  // 새 툴 발송은 제목 틀을 기록한다
+  const SC = require("../send-core.js");
+  await SC.sendBatch({ account: { email: L, name: "Luna", password: "x" }, campaign: { subject: "Collab with {{name}}?", pitch: "p", brand: "d'Alba", campaignTitle: "T" }, recipients: [{ to: "tplcheck@gmail.com", creatorName: "Zed" }], admin: false });
+  await new Promise(r => setTimeout(r, 50));   // 발송 기록은 발송을 막지 않도록 기다리지 않고 남긴다
+  const last = JSON.parse(lists.get("outreach:log")[0]);
+  ck(last.to === "tplcheck@gmail.com" && last.subjectTpl === "Collab with {{name}}?" && last.subject === "Collab with Zed?", "tool send logs subject + template: " + JSON.stringify(last));
+  await SC.sendBatch({ account: { email: L, name: "Luna", password: "x" }, campaign: { pitch: "p", brand: "d'Alba", campaignTitle: "T" }, recipients: [{ to: "tpl2@gmail.com", creatorName: "Zed" }], admin: false });
+  await new Promise(r => setTimeout(r, 50));
+  ck(JSON.parse(lists.get("outreach:log")[0]).subjectTpl === "(기본 제목)", "default subject labelled");
   console.log(`\n${ok} passed, ${bad} failed`); process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("THREW", e.stack); process.exit(1); });
