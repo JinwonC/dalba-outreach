@@ -36,6 +36,9 @@ await ap.goto("http://app.local/admin.html");
 await ap.waitForTimeout(500);
 // 중복시도
 await ap.evaluate(() => go("blocked"));
+// 이 줄은 Luna 본인 발송 이력이 있는 옛 기록(기본 숨김) — 보이게 켜고 확인한다
+await ap.waitForFunction(() => BLK_DATA);
+await ap.evaluate(() => { if(!BLK_SHOW_SELF) toggleBlkSelf(); });
 await ap.waitForFunction(() => /Re L/.test(document.getElementById("body").innerText));
 const lines = await ap.$$eval("#body .threadline", els => els.map(e => e.getAttribute("data-thread-staff")));
 ck(lines.length === 2 && lines.every(x => x === "luna@dalbausa.com"), "blocked: only Luna's lines are openable: " + JSON.stringify(lines));
