@@ -85,6 +85,11 @@ module.exports = async (req, res) => {
       if (!(await H.bridgeReady())) bridge = await H.rebuildBridge({ budgetMs: Math.min(12e3, Math.max(3e3, deadline - Date.now() - 20e3)) });
     } catch (e) { bridge = { error: String((e && e.message) || e) }; }
 
+    // ─── 담당자별 '보낸 적 있는 상대' 색인 1회 채우기 ───────────────
+    // 본인이 예전에 보낸 크리에이터를 막지 않으려고 쓰는 색인. 다 채우면 표시가 남아 다음부터 건너뛴다.
+    let ownIndex = null;
+    try { if (!(await H.ownIndexReady())) ownIndex = await H.rebuildOwnIndex(); } catch (e) { ownIndex = { error: String((e && e.message) || e) }; }
+
     // ─── 메일함 동기화는 **한 시간에 한 번**만 돈다 ──────────────
     // 크론은 예약·리마인드 때문에 15분마다 돌지만, 담당자 메일함 20개를 여는 무거운 동기화를
     // 매번 하면 저장소(Upstash) 요청이 15분마다 쌓여 한도를 넘고, 그러면 발송의 중복확인까지
@@ -145,6 +150,7 @@ module.exports = async (req, res) => {
       scheduled,
       reminders,
       bridge,               // 이메일↔핸들 연결 채우기 (다 채운 뒤엔 null)
+      ownIndex,             // 본인 발송 색인 채우기 (다 채운 뒤엔 null)
       errors: results.filter(r => r.error).map(r => ({ user: r.user, error: r.error }))
     };
 

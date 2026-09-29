@@ -1424,6 +1424,8 @@
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 {n} collab creators included (admins can send).",
       "핸들 없음 {n}명": "{n} without handle",
+      "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 숨겼습니다 — 지금은 이런 경우 막히지 않습니다.": "{n} old records where staff were blocked re-sending to their own creators are hidden — this no longer gets blocked.",
+      "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 함께 보여 주고 있습니다 — 지금은 이런 경우 막히지 않습니다.": "Showing {n} old records where staff were blocked re-sending to their own creators — this no longer gets blocked.",
       "제목이 저장되기 전의 툴 발송 {n}건은 빠졌습니다.": "{n} tool sends from before subjects were recorded are excluded.",
       "{n}명 이상에게 보낸 제목이 아직 없습니다.": "No subject has been sent to {n}+ creators yet.",
       "협업 시트를 제때 읽지 못해 협업 수는 {n}으로 표시됩니다.": "Couldn't read the collab sheet in time, so collab counts show {n}.",
@@ -1548,6 +1550,8 @@
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 Có {n} creator đang hợp tác (quản trị vẫn gửi được).",
       "핸들 없음 {n}명": "{n} chưa có handle",
+      "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 숨겼습니다 — 지금은 이런 경우 막히지 않습니다.": "Đã ẩn {n} bản ghi cũ khi nhân viên bị chặn gửi lại cho creator của chính mình — hiện không còn bị chặn.",
+      "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 함께 보여 주고 있습니다 — 지금은 이런 경우 막히지 않습니다.": "Đang hiện {n} bản ghi cũ khi nhân viên bị chặn gửi lại cho creator của chính mình — hiện không còn bị chặn.",
       "제목이 저장되기 전의 툴 발송 {n}건은 빠졌습니다.": "Đã loại {n} lần gửi bằng công cụ trước khi lưu tiêu đề.",
       "{n}명 이상에게 보낸 제목이 아직 없습니다.": "Chưa có tiêu đề nào gửi tới từ {n} creator.",
       "협업 시트를 제때 읽지 못해 협업 수는 {n}으로 표시됩니다.": "Không đọc kịp sheet hợp tác nên số hợp tác hiển thị {n}.",

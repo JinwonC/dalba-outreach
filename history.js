@@ -217,6 +217,39 @@ function parseRec(s) {
 // 다른 담당자 기록이 함께 있어도, 협업 리스트에 올라가 있어도 막지 않는다.
 // 확인하는 곳: ① 그 담당자 메일함의 보낸 주소록(네이버웍스에서 직접·단체·숨은참조로 보낸 것 포함)
 //             ② 발송 기록(툴 발송·메일함에서 가져온 발송) — 이메일·핸들·연결된 이메일/핸들 모두
+// 담당자별 '보낸 적 있는 상대' 색인 — SET outreach:own:<담당자> 에 "e:<이메일>" · "h:<핸들>".
+// 발송·메일함 가져오기 때마다 더하고(명령 1개), 확인은 SMISMEMBER 한 번. 예전 기록은 크론이 한 번 채운다.
+// 채우기 전(또는 저장소가 이 명령을 모르면)에는 아래 발송 기록 전체 읽기로 대신한다.
+const ownKey = me => "outreach:own:" + normEmail(me);
+const OWN_READY_KEY = "outreach:own:ready", OWN_VER = "1";
+function ownMembers(rec) {
+  const m = [];
+  const e = normEmail(rec && rec.to), h = normHandle(rec && rec.handle);
+  if (e && e.indexOf("@") > 0) m.push("e:" + e);
+  if (h) m.push("h:" + h);
+  return m;
+}
+function ownCmds(rec) {
+  const by = normEmail(rec && rec.by), m = ownMembers(rec);
+  return by && m.length ? [["SADD", ownKey(by)].concat(m)] : [];
+}
+async function ownIndexReady() {
+  if (!enabled()) return true;
+  try { return (await cmd(["GET", OWN_READY_KEY])) === OWN_VER; } catch (_) { return false; }
+}
+// 지난 발송 기록으로 색인을 한 번 채운다 (크론). 담당자별로 모아 SADD 몇 번.
+async function rebuildOwnIndex() {
+  if (!enabled() || await ownIndexReady()) return { skipped: true };
+  const recs = await recent(LOG_MAX);
+  const by = new Map();
+  recs.forEach(r => { const b = normEmail(r && r.by); if (!b) return; const m = ownMembers(r); if (!m.length) return; const set = by.get(b) || new Set(); m.forEach(x => set.add(x)); by.set(b, set); });
+  const cmds = [];
+  by.forEach((set, b) => { const list = [...set]; for (let i = 0; i < list.length; i += 1000) cmds.push(["SADD", ownKey(b)].concat(list.slice(i, i + 1000))); });
+  for (let i = 0; i < cmds.length; i += 20) await pipeline(cmds.slice(i, i + 20));
+  await cmd(["SET", OWN_READY_KEY, OWN_VER]);
+  return { staff: by.size, records: recs.length };
+}
+
 const OWN_TTL_MS = 60e3;
 const ownCache = new Map();          // 담당자 → { at, byEmail: Map, byHandle: Map } (함수 인스턴스 안에서 1분)
 async function ownLogIndex(me) {
@@ -243,13 +276,24 @@ async function ownPriors(items, me, links) {
   const emailsOf = i => [...new Set([normEmail(list[i] && (list[i].to || list[i].email))].concat((lk[i] && lk[i].emails) || []).filter(e => e && e.indexOf("@") > 0))];
   const handlesOf = i => [...new Set([normHandle(list[i] && (list[i].handle || list[i].creatorHandle))].concat((lk[i] && lk[i].handles) || []).filter(Boolean))];
   const allE = [...new Set(list.flatMap((_, i) => emailsOf(i)))];
+  const allF = [...new Set(list.flatMap((_, i) => emailsOf(i).map(e => "e:" + e).concat(handlesOf(i).map(h => "h:" + h))))];
+  // ① 내 메일함 보낸 주소록(웹메일·단체·숨은참조) ② 내 발송 색인 — 한 파이프라인으로
+  const cmds = [], bookAt = [];
+  for (let i = 0; i < allE.length; i += 400) { bookAt.push([cmds.length, allE.slice(i, i + 400)]); cmds.push(["HMGET", bookKey("sent", meN)].concat(allE.slice(i, i + 400))); }
+  const setAt = cmds.length;
+  if (allF.length) cmds.push(["SMISMEMBER", ownKey(meN)].concat(allF));
+  const readyAt = cmds.length;
+  cmds.push(["GET", OWN_READY_KEY]);
+  let res = [];
+  try { res = await pipeline(cmds); } catch (_) { res = []; }
   const book = new Map();
-  for (let i = 0; i < allE.length; i += 400) {
-    const part = allE.slice(i, i + 400);
-    let vals = [];
-    try { vals = await cmd(["HMGET", bookKey("sent", meN)].concat(part)); } catch (_) { vals = []; }
-    (vals || []).forEach((v, j) => { const b = parseRec(v); if (b) book.set(part[j], b); });
-  }
+  bookAt.forEach(([at, part]) => (res[at] || []).forEach((v, j) => { const b = parseRec(v); if (b) book.set(part[j], b); }));
+  const inSet = new Set();
+  const flags = allF.length ? res[setAt] : [];
+  const setOk = Array.isArray(flags) && flags.length === allF.length;
+  if (setOk) allF.forEach((f, j) => { if (Number(flags[j]) === 1) inSet.add(f); });
+  // 색인이 준비됐고 명령이 먹혔으면 색인만 믿는다. 아니면(채우기 전·명령 미지원) 발송 기록을 읽는다.
+  const useLog = !(setOk && res[readyAt] === OWN_VER);
   let idx = null;
   const logIdx = async () => { if (!idx) { try { idx = await ownLogIndex(meN); } catch (_) { idx = { byEmail: new Map(), byHandle: new Map() }; } } return idx; };
   const out = [];
@@ -257,6 +301,9 @@ async function ownPriors(items, me, links) {
     const es = emailsOf(i), hs = handlesOf(i);
     const b = es.map(e => [e, book.get(e)]).find(x => x[1]);
     if (b) { out.push({ to: b[0], by: meN, at: b[1].last || b[1].first || "", n: Number(b[1].n) || 1, campaign: "", source: "mailbox", own: true }); continue; }
+    const fe = es.find(e => inSet.has("e:" + e)), fh = hs.find(h => inSet.has("h:" + h));
+    if (fe || fh) { out.push({ to: fe || es[0] || "", handle: fh || undefined, by: meN, at: "", campaign: "", source: "own-index", own: true }); continue; }
+    if (!useLog) { out.push(null); continue; }
     const L = await logIdx();
     const r = es.map(e => L.byEmail.get(e)).find(Boolean) || hs.map(h => L.byHandle.get(h)).find(Boolean);
     out.push(r ? Object.assign({}, r, { own: true }) : null);
@@ -504,7 +551,8 @@ async function log(rec) {
     await pipeline([
       ["LPUSH", LOG_KEY, JSON.stringify(rec)],
       ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]
-    ].concat(linkCmds(rec && rec.to, rec && rec.handle)));   // 이메일+핸들이 함께 있으면 연결을 남긴다
+    ].concat(linkCmds(rec && rec.to, rec && rec.handle))    // 이메일+핸들이 함께 있으면 연결을 남긴다
+     .concat(ownCmds(rec)));                                  // 담당자별 '보낸 적 있는 상대' 색인
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
@@ -933,6 +981,7 @@ async function importSends(list) {
       if (dup) { res.duplicate++; return; }
       if (x.id) { batchIds.add(x.id); cmds.push(["SADD", IMPORTED_KEY, String(x.id)]); }
       cmds.push(["LPUSH", LOG_KEY, val]); logged = true;
+      ownCmds(x.rec).forEach(c => cmds.push(c));            // 담당자별 '보낸 적 있는 상대' 색인
       res.imported++; if (ttl <= 0) res.expired++;
     });
     if (logged) cmds.push(["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]);
@@ -981,7 +1030,7 @@ async function importSend(rec, dedupeId) {
   // 이미 가져온 메일이면 로그는 다시 안 쌓는다 (차단키는 위에서 이미 갱신됨)
   if (seen) return { duplicate: true, blocking: blocked };
 
-  const tail = [["LPUSH", LOG_KEY, val], ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]];
+  const tail = [["LPUSH", LOG_KEY, val], ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]].concat(ownCmds(rec));
   if (dedupeId) tail.unshift(["SADD", IMPORTED_KEY, String(dedupeId)]);
   await pipeline(tail);
 
@@ -1169,7 +1218,7 @@ module.exports = {
   storageHint,
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw, prefetchRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
-  recordReply, recordReplies, recent, ownPriors, recentBlocked, recentReplies, count,
+  recordReply, recordReplies, recent, ownPriors, rebuildOwnIndex, ownIndexReady, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,

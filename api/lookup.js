@@ -274,15 +274,6 @@ module.exports = async (req, res) => {
     // ─── POST: 여러 개 한 번에 ───────────────────────────────────
     if (req.method === "POST") {
       const body = readBody(req);
-      // 🚫 수신 거부 등록 — 로그인한 담당자 누구나 (크리에이터가 그만 보내 달라고 했을 때). 해제는 관리자만.
-      if (body.action === "dnc") {
-        const list = (Array.isArray(body.items) ? body.items : []).slice(0, 500);
-        const reason = String(body.reason || "").trim();
-        if (!list.length) { res.status(400).json({ error: "수신 거부할 이메일 또는 핸들을 입력하세요" }); return; }
-        const r = await H.addDoNotContact(list, { reason, addedBy: viewer });
-        res.status(200).json(Object.assign({ ok: true }, r));
-        return;
-      }
       const raw = Array.isArray(body.queries) ? body.queries : [];
       // 입력 순서 유지하며 정규화 기준으로 중복 제거
       const seen = new Set();

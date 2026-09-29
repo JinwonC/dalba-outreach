@@ -73,5 +73,17 @@ for (const lang of ["en","vi"]) {
   const left = await ap.evaluate(() => { const o=[]; const w=document.createTreeWalker(document.getElementById("body"),NodeFilter.SHOW_TEXT); let n; while((n=w.nextNode())){ const v=n.nodeValue.trim(); if(/[가-힣]/.test(v)) o.push(v);} return [...new Set(o)]; });
   ck(left.length === 0, lang + " untranslated: " + JSON.stringify(left));
 }
+// 본인이 이미 보냈던 크리에이터에게 막혔던 옛 기록은 기본으로 숨긴다
+await ap.evaluate(() => I18N && I18N.setLang ? I18N.setLang("ko") : null).catch(() => {});
+await ap.evaluate(() => { try { localStorage.setItem("outreach_lang","ko"); } catch(_){} });
+await ap.evaluate(() => renderBlocked({ reapproveDays: 15, rows: [
+  { to: "self@x.com", by: "luna@dalbausa.com", byName: "Luna", at: "2026-09-01T00:00:00Z", decision: "ok", origins: [{ by: "luna@dalbausa.com", at: "2026-06-01T00:00:00Z" }] },
+  { to: "other@x.com", by: "luna@dalbausa.com", byName: "Luna", at: "2026-09-01T00:00:00Z", decision: "ok", origins: [{ by: "seoyeon@dalba.com", at: "2026-06-01T00:00:00Z" }] } ] }));
+let peers = await ap.$$eval("#body tbody tr .blkchk", e => e.map(x => x.dataset.to));
+ck(JSON.stringify(peers) === '["other@x.com"]', "self row hidden by default: " + peers);
+ck(/옛 기록 1건은 숨겼습니다/.test(await ap.innerText("#body")), "hidden note");
+await ap.evaluate(() => toggleBlkSelf());
+peers = await ap.$$eval("#body tbody tr .blkchk", e => e.map(x => x.dataset.to));
+ck(peers.length === 2, "toggle shows self rows");
 console.log(`\n${ok} passed, ${bad} failed`);
 await browser.close(); process.exit(bad ? 1 : 0);

@@ -1,4 +1,4 @@
-// 화면 테스트: 🚫 수신 거부 등록 — 발송 화면 폼·중복 검사/답장 대기 줄에서 채우기, 관리자 등록 폼, 번역
+// 화면 테스트: 🚫 수신 거부 등록 — 발송 화면에는 없음(삭제), 관리자 등록 폼, 번역
 import { chromium } from "playwright";
 import { fileURLToPath } from "url";
 import fs from "fs"; import path from "path";
@@ -35,26 +35,13 @@ async function mk(lang, file) {
   return { page, posts };
 }
 {
-  const { page, posts } = await mk("ko", "index.html");
+  // 발송 화면에는 수신 거부 등록이 없다 (관리자 화면에서만)
+  const { page } = await mk("ko", "index.html");
   await page.evaluate(() => setView("check"));
-  ck(await page.isVisible("#dncPanel"), "form visible in 중복 검사");
-  await page.fill("#dncQ", "a@x.com\n@bhandle");
-  await page.fill("#dncReason", "asked");
-  await page.click("text=🚫 수신 거부 등록 >> nth=-1");
-  await page.waitForTimeout(300);
-  ck(posts.length === 1 && JSON.stringify(posts[0].items) === '["a@x.com","@bhandle"]' && posts[0].reason === "asked", "posts items + reason: " + JSON.stringify(posts));
-  ck(/등록됨 \(2명\)/.test(await page.innerText("#dncMsg")) && (await page.inputValue("#dncQ")) === "", "confirmation + cleared");
-  // 중복 검사 결과 줄에서 채우기
-  await page.fill("#checkQ", "c@x.com"); await page.evaluate(() => runCheck()); await page.waitForSelector("#checkResult .dnclink");
-  await page.click("#checkResult .dnclink");
-  ck((await page.inputValue("#dncQ")) === "c@x.com", "row link prefills the form");
-  // 답장 대기 줄에서 채우기 (대화는 열리지 않고)
-  await page.fill("#dncQ", "");
-  await page.evaluate(() => setView("unanswered")); await page.waitForSelector("#unansBody .undnc");
-  await page.click("#unansBody .undnc");
-  await page.waitForTimeout(200);
-  ck((await page.inputValue("#dncQ")) === "stop@x.com" && await page.evaluate(() => VIEW) === "check", "unanswered row link jumps to form, prefilled");
-  ck(await page.evaluate(() => document.getElementById("threadModal").style.display !== "flex"), "thread did not open");
+  await page.fill("#checkQ", "c@x.com"); await page.evaluate(() => runCheck()); await page.waitForSelector("#checkResult table");
+  ck(!(await page.$("#dncPanel")) && !(await page.$(".dnclink")), "no DNC form or row links in 중복 검사");
+  await page.evaluate(() => setView("unanswered")); await page.waitForSelector("#unansBody table");
+  ck(!(await page.$(".undnc")) && !/수신 거부 등록/.test(await page.innerText("body")), "no DNC links in 답장 대기, no button text anywhere");
   await page.close();
 }
 {
@@ -67,13 +54,7 @@ async function mk(lang, file) {
   await page.close();
 }
 for (const lang of ["en", "vi"]) {
-  let { page } = await mk(lang, "index.html");
-  await page.evaluate(() => setView("check")); await page.waitForTimeout(300);
-  let t = await page.innerText("#dncPanel");
-  let left = (t.match(/[^\n]*[가-힣][^\n]*/g) || []);
-  ck(!left.length, lang + " form untranslated: " + left.join(" | "));
-  ck(!/[가-힣]/.test(await page.getAttribute("#dncReason", "placeholder") || ""), lang + " placeholder translated");
-  await page.close();
+  let page, t, left;
   ({ page } = await mk(lang, "admin.html"));
   await page.evaluate(() => go("suppress")); await page.waitForSelector("#supAdd"); await page.waitForTimeout(300);
   t = await page.innerText("#body");

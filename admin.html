@@ -782,21 +782,24 @@ function decLabel(dec, n){
   return dec === "inhouse" ? "🤝 협업 중" : dec === "replied" ? "🔴 회신 옴" : dec === "recent" ? "🟠 최근 "+n+"일 내 발송" : dec === "ok" ? "🔵 "+n+"일 지남" : "⚪ 발송일 모름";
 }
 function setBlkFilter(f){ BLK_FILTER = f; if(BLK_DATA) renderBlocked(BLK_DATA); }
+let BLK_SHOW_SELF = false;
+function toggleBlkSelf(){ BLK_SHOW_SELF = !BLK_SHOW_SELF; if(BLK_DATA) renderBlocked(BLK_DATA); }
 function renderBlocked(d){
   BLK_DATA = d;
   const N = d.reapproveDays || 15;
-  const allRows = d.rows||[];
-  const cnt = k => allRows.filter(r => r.decision === k).length;
-  // 🤝 협업 중은 따로 뺀다 — '전체'에도 넣지 않고 전용 필터에서만 본다
-  const mainRows = allRows.filter(r => r.decision !== "inhouse");
-  const rows = BLK_FILTER === "all" ? mainRows : allRows.filter(r => r.decision === BLK_FILTER);
-  // 본인 재시도(원래 보낸 사람 == 시도한 사람)와 다른 담당자와의 겹침을 구분한다.
-  // 본인 재시도는 규칙 변경(본인 재발송 허용) **이전**에 막혔던 과거 기록 — 지금은 그냥 발송된다.
+  // 본인 재시도(원래 보낸 사람 == 시도한 사람)는 규칙 변경(본인 발송 이력이 있으면 통과) **이전**에 막혔던
+  // 옛 기록이다 — 지금은 이런 경우 막히지 않으므로 기본으로 숨긴다 (승인할 것도 없다).
   const isSelf = r => {
     const list = (r.origins && r.origins.length) ? r.origins : (r.prior ? [r.prior] : []);
     return list.some(o => o.by && r.by && String(o.by).toLowerCase() === String(r.by).toLowerCase());
   };
-  const selfCount = rows.filter(isSelf).length;
+  const everyRow = d.rows||[];
+  const hiddenSelf = everyRow.filter(isSelf).length;
+  const allRows = BLK_SHOW_SELF ? everyRow : everyRow.filter(r => !isSelf(r));
+  const cnt = k => allRows.filter(r => r.decision === k).length;
+  // 🤝 협업 중은 따로 뺀다 — '전체'에도 넣지 않고 전용 필터에서만 본다
+  const mainRows = allRows.filter(r => r.decision !== "inhouse");
+  const rows = BLK_FILTER === "all" ? mainRows : allRows.filter(r => r.decision === BLK_FILTER);
   const originsCell = r => {
     const to = r.to || "";
     const list = r.origins || [];
@@ -858,7 +861,9 @@ function renderBlocked(d){
     '<div class="note">이미 발송된 크리에이터라서 <b>발송되지 않은</b> 시도입니다. ' +
     '<b>다른 담당자와 겹친 것</b>이 명단 배분을 조정할 신호입니다. ' +
     '<span class="muted">오른쪽 "원래 발송"에 그 크리에이터에게 간 발송을 전부 표시합니다.</span>' +
-    (selfCount ? '<br /><span class="muted">"본인 발송 있음" ' + selfCount + '건은 시도한 담당자 본인이 이미 보냈던 기록이 있는 경우입니다.</span>' : '') +
+    (hiddenSelf ? '<br /><span class="muted">본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 ' + hiddenSelf + '건은 ' +
+      (BLK_SHOW_SELF ? '함께 보여 주고 있습니다' : '숨겼습니다') + ' — 지금은 이런 경우 막히지 않습니다.</span> ' +
+      '<a href="javascript:void 0" onclick="toggleBlkSelf()">' + (BLK_SHOW_SELF ? '숨기기' : '보기') + '</a>' : '') +
     '</div>' +
     '<div class="filters" style="margin-bottom:10px;flex-wrap:wrap">' +
       (rows.length ? '<button class="btn" onclick="approveSelectedBlocked()">☑︎ 선택 → 승인 (담당자가 직접 보냄)</button>' +

@@ -29,9 +29,10 @@ function run1(a) {
     case "INCRBY": { const v = (Number(kv.get(k)) || 0) + Number(a[2]); kv.set(k, String(v)); return v; }
     case "HGETALL": { const h = hashes.get(k); const out = []; if (h) h.forEach((v, f) => out.push(f, v)); return out; }
     case "HDEL": { const h = hashes.get(k); let n = 0; if (h) for (let i = 2; i < a.length; i++) if (h.delete(a[i])) n++; return n; }
-    case "SADD": { const s = sets.get(k) || new Set(); s.add(a[2]); sets.set(k, s); return 1; }
+    case "SADD": { const s = sets.get(k) || new Set(); let n = 0; for (let i = 2; i < a.length; i++) if (!s.has(a[i])) { s.add(a[i]); n++; } sets.set(k, s); return n; }
     case "SMEMBERS": return [...(sets.get(k) || [])];
     case "SISMEMBER": return (sets.get(k) || new Set()).has(a[2]) ? 1 : 0;
+    case "SMISMEMBER": { const s = sets.get(k) || new Set(); return a.slice(2).map(x => s.has(x) ? 1 : 0); }
     case "LPUSH": { const l = lists.get(k) || []; l.unshift(a[2]); lists.set(k, l); return l.length; }
     case "LTRIM": { const l = lists.get(k) || []; lists.set(k, l.slice(Number(a[2]), Number(a[3]) + 1)); return "OK"; }
     case "LRANGE": { const l = lists.get(k) || []; const e = Number(a[3]); return l.slice(Number(a[2]), e < 0 ? undefined : e + 1); }
@@ -137,5 +138,42 @@ const day = d => new Date(Date.now() - d * 86400e3).toISOString();
   A.currentUser = () => ({ email: J, name: "Jinwon" });
   const lr2 = await call(lookup, { method: "POST", body: { queries: ["shared@x.com"] } });
   ck(lr2.body.results[0].mine === false, "🔎 mine false for other viewer");
+  // ── 본인 발송 색인 (outreach:own:<담당자>) ──
+  // 새 발송은 바로 색인에 들어간다
+  ck(sets.get("outreach:own:" + L) && sets.get("outreach:own:" + L).has("e:shared@x.com") && sets.get("outreach:own:" + L).has("h:sharedh"), "H.log adds to own index");
+  // 크론이 예전 기록으로 채운다
+  lists.set("outreach:log", lists.get("outreach:log").concat([JSON.stringify({ to: "legacy@x.com", handle: "legacyh", at: day(200), by: L })]));
+  kv.delete("outreach:own:ready");
+  const rb = await H.rebuildOwnIndex();
+  ck(rb.staff >= 2 && kv.get("outreach:own:ready") === "1" && sets.get("outreach:own:" + L).has("e:legacy@x.com"), "rebuild fills index from log: " + JSON.stringify(rb));
+  ck((await H.rebuildOwnIndex()).skipped, "rebuild runs once");
+  // 발송 기록에서 밀려난(잘린) 옛 발송도 색인이 있으면 본인으로 인정 — 발송 기록을 읽지 않는다
+  lists.set("outreach:log", []);
+  const realFetch = global.fetch; let lranges = 0;
+  global.fetch = async (u, o) => { const b = JSON.parse(o.body); (String(u).endsWith("/pipeline") ? b : [b]).forEach(c => { if (String(c[0]).toUpperCase() === "LRANGE") lranges++; }); return realFetch(u, o); };
+  await H.reserve({ to: "legacy@x.com" }, { by: S }, true);   // 다른 담당자가 자리를 잡아 둠
+  const [lp] = await H.ownPriors([{ to: "legacy@x.com" }], L);
+  ck(lp && lp.own && lp.source === "own-index", "own index finds legacy send not in log: " + JSON.stringify(lp));
+  let rv2 = await H.reserve({ to: "legacy@x.com" }, { by: L }, false);
+  ck(rv2.ok === true && rv2.own, "legacy own send → not blocked");
+  const [hp] = await H.ownPriors([{ to: "brandnew@x.com", handle: "legacyh" }], L);
+  ck(hp && hp.own, "own index matches by handle too");
+  ck(lranges === 0, "no full log read once the index is ready (" + lranges + " LRANGE)");
+  const [np] = await H.ownPriors([{ to: "never@x.com" }], L);
+  ck(np === null, "never-sent creator is not own");
+  // 저장소가 SMISMEMBER 를 모르면 발송 기록 읽기로 대신
+  global.fetch = async (u, o) => {
+    const b = JSON.parse(o.body);
+    if (String(u).endsWith("/pipeline") && b.some(c => c[0] === "SMISMEMBER")) {
+      const r = await realFetch(u, { body: JSON.stringify(b.map(c => c[0] === "SMISMEMBER" ? ["ECHO", "x"] : c)) });
+      const arr = await r.json(); return { json: async () => arr.map((x, i) => b[i][0] === "SMISMEMBER" ? { error: "ERR unknown command" } : x) };
+    }
+    return realFetch(u, o);
+  };
+  lists.set("outreach:log", [JSON.stringify({ to: "fallback@x.com", at: day(3), by: L })]);
+  H.log({ to: "zzz@x.com", by: "nobody@x.com" });   // 캐시 비우기용 (다른 담당자)
+  const [fp] = await H.ownPriors([{ to: "fallback@x.com" }], L);
+  ck(fp && fp.own, "falls back to the log when SMISMEMBER is unavailable");
+  global.fetch = realFetch;
   console.log(`\n${ok} passed, ${bad} failed`); process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("THREW", e && e.stack || e); process.exit(1); });
