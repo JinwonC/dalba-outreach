@@ -70,12 +70,20 @@ async function kvFetch(url, body) {
   } finally { clearTimeout(timer); }
 }
 
+// 저장소(Upstash) 오류를 사람이 알아볼 수 있게 — 화면 어디에 떠도 무엇을 하면 되는지 보이도록
+function storageHint(err) {
+  const e = String(err || "");
+  if (/max requests limit|max daily request|limit exceeded/i.test(e)) return " — Upstash 요청 한도 초과: Vercel → Storage → 해당 DB 에서 요금제(Pay as You Go)·예산을 확인하세요";
+  if (/max (data|storage) size|OOM|maxmemory/i.test(e)) return " — Upstash 저장 용량 초과: 요금제를 확인하세요";
+  if (/unauthori[sz]ed|WRONGPASS|invalid token/i.test(e)) return " — 저장소 토큰이 맞지 않습니다: Vercel 환경변수(KV_REST_API_TOKEN)를 확인하세요";
+  return "";
+}
 async function cmd(args) {
   const c = conf();
   if (!c) return null;
   const r = await kvFetch(c.url, args);
   const d = await r.json();
-  if (d && d.error) throw new Error("이력 저장소 오류: " + d.error);
+  if (d && d.error) throw new Error("이력 저장소 오류: " + d.error + storageHint(d.error));
   return d ? d.result : null;
 }
 
@@ -84,7 +92,7 @@ async function pipeline(cmds) {
   if (!c || !cmds.length) return [];
   const r = await kvFetch(c.url + "/pipeline", cmds);
   const d = await r.json();
-  if (!Array.isArray(d)) throw new Error("이력 저장소 오류: " + ((d && d.error) || "예상 밖 응답"));
+  if (!Array.isArray(d)) throw new Error("이력 저장소 오류: " + ((d && d.error) || "예상 밖 응답") + storageHint(d && d.error));
   return d.map(x => (x && x.error ? null : x && x.result));
 }
 
@@ -624,6 +632,13 @@ async function syncInfo(acct) {
   if (!enabled()) return null;
   try { return parseRec(await cmd(["GET", syncInfoKey(acct)])); } catch (_) { return null; }
 }
+// 여러 메일함의 동기화 상태를 한 번에 (MGET = 명령 1개)
+async function syncInfoMany(accts) {
+  const list = (accts || []).map(normEmail).filter(Boolean);
+  if (!enabled() || !list.length) return new Map();
+  const vals = await cmd(["MGET"].concat(list.map(syncInfoKey)));
+  return new Map(list.map((a, i) => [a, parseRec(vals && vals[i])]));
+}
 async function bookAll(dir, acct) {
   if (!enabled()) return [];
   const flat = await cmd(["HGETALL", bookKey(dir, acct)]);
@@ -1151,6 +1166,7 @@ async function allSchedules() {
 async function deleteSchedule(id) { if (enabled()) await cmd(["HDEL", SCHED_KEY, String(id)]); }
 
 module.exports = {
+  storageHint,
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw, prefetchRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
   recordReply, recordReplies, recent, ownPriors, recentBlocked, recentReplies, count,
@@ -1158,6 +1174,6 @@ module.exports = {
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
   normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, addDoNotContact, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
-  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
+  bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, syncInfoMany, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

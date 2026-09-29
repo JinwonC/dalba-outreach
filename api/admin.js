@@ -18,6 +18,7 @@
 const A = require("../auth.js");
 const H = require("../history.js");
 const U = require("../unanswered-lib.js");
+const HL = require("../health-lib.js");
 const IH = require("../inhouse.js");
 const { groupPipeline } = require("../pipeline-lib.js");
 
@@ -429,6 +430,19 @@ module.exports = async (req, res) => {
       }
       return rawJson(obj);
     };
+    // ─── 🩺 시스템 상태 — 관리자 페이지 맨 위 경고줄 (저장된 상태만, 명령 3개) ───
+    if (view === "health") {
+      const staff = roster().map(a => ({ email: String(a.email).toLowerCase(), name: a.name }));
+      const [rawCron, syncAt, info] = await Promise.all([
+        H.readRaw("outreach:cron:status"), H.readRaw("outreach:cron:syncAt"), H.syncInfoMany(staff.map(x => x.email))
+      ]);
+      let cron = null;
+      try { cron = rawCron ? JSON.parse(rawCron) : null; } catch (_) { cron = null; }
+      const r = HL.evaluate({ now: Date.now(), cron, syncAt, staff, info });
+      res.status(200).json(Object.assign({ historyEnabled: true, cronAt: (cron && cron.at) || "", syncAt: syncAt || "" }, r));
+      return;
+    }
+
     // ─── ⛔ 발송 제외 — 반송된 없는 주소 · 수신 거부 ───────────────
     if (view === "suppress") {
       const NM = nameByEmail();

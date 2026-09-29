@@ -12,6 +12,7 @@ const A = require("../auth.js");
 const H = require("../history.js");
 const { groupPipeline } = require("../pipeline-lib.js");
 const U = require("../unanswered-lib.js");
+const HL = require("../health-lib.js");
 
 function matches(r, q) {
   if (!q) return true;
@@ -52,7 +53,9 @@ module.exports = async (req, res) => {
       const mine = String(me.email || "").toLowerCase();
       const rows = await U.unansweredFor(mine, await U.loadShared(), { days: Math.max(1, Math.min(Number(q.days) || 60, 365)) });
       const info = (await H.syncInfo(mine)) || {};
-      res.status(200).json({ loginEnabled: true, historyEnabled: true, me: A.publicUser(me), rows, syncedAt: info.at || "", syncError: info.error || "" });
+      // 내 메일함 동기화가 실패 중이면 무엇을 하면 되는지도 같이 (발송 화면 맨 위 알림)
+      res.status(200).json({ loginEnabled: true, historyEnabled: true, me: A.publicUser(me), rows, syncedAt: info.at || "",
+        syncError: info.error || "", syncHint: info.error ? HL.hint(info.error) : "" });
       return;
     }
     const days = Number(q.days) || 0;

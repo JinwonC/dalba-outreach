@@ -137,6 +137,7 @@
 
   <div id="msg"></div>
 
+  <div id="health"></div>
   <div class="tabs">
     <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
@@ -424,12 +425,48 @@ function renderUnanswered(d){
   return rows.length + "건";
 }
 
+/* 🩺 시스템 상태 — 크론 멈춤·메일함 동기화 실패·저장소 오류를 맨 위에 띄운다. 페이지를 열 때 한 번. */
+let HEALTH = null, HEALTH_OPEN = false;
+async function loadHealth(){
+  const box = $("health"); if(!box) return;
+  try {
+    HEALTH = await fetchJson("/api/admin?view=health");
+    renderHealth();
+  } catch(e){
+    box.innerHTML = '<div class="err" style="margin:0 0 12px"><b>🩺 시스템 점검 실패</b> — '+esc(String(e.message||e))+'</div>';
+  }
+}
+// 담당자 이름은 번역하지 않고, 내용만 따로 (번역 사전에 한 번만 등록하면 되게)
+function healthLine(i){ return (i.name ? '<b>'+esc(i.name)+'</b> — ' : '') + '<span>'+esc(i.msg || i.text || "")+'</span>'; }
+function renderHealth(){
+  const box = $("health"), d = HEALTH || {};
+  const items = d.items || [];
+  const bad = items.filter(i => i.level !== "info"), info = items.filter(i => i.level === "info");
+  if(!bad.length){
+    box.innerHTML = '<div class="muted" style="font-size:12.5px;margin:0 0 10px">✅ <span>시스템 정상</span>' +
+      (d.cronAt ? ' · <span>마지막 자동 실행</span> '+esc(fmt(d.cronAt)) : '') +
+      (info.length ? ' · <a href="javascript:void 0" onclick="HEALTH_OPEN=!HEALTH_OPEN;renderHealth()">ℹ️ <span>참고 '+info.length+'건</span></a>' : '') + '</div>' +
+      (HEALTH_OPEN ? '<div class="note" style="margin:0 0 10px">'+info.map(i => '<div>'+healthLine(i)+'</div>').join("")+'</div>' : '');
+    return;
+  }
+  const hasErr = bad.some(i => i.level === "error");
+  const shown = HEALTH_OPEN ? bad : bad.slice(0, 4);
+  box.innerHTML = '<div class="'+(hasErr ? "err" : "hold")+'" style="margin:0 0 12px;line-height:1.7">' +
+    '<b>🩺 <span>확인이 필요합니다</span> ('+bad.length+')</b>' +
+    shown.map(i => '<div>'+(i.level === "error" ? "🔴" : "🟠")+' '+healthLine(i) +
+      (i.hint ? '<div class="muted" style="font-size:12px;margin-left:22px"><span>'+esc(i.hint)+'</span></div>' : '') +
+      (i.detail ? '<div class="mono muted" style="font-size:11px;margin-left:22px;word-break:break-all">'+esc(String(i.detail).slice(0, 200))+'</div>' : '') + '</div>').join("") +
+    (bad.length > shown.length ? '<a href="javascript:void 0" onclick="HEALTH_OPEN=true;renderHealth()"><span>더 보기</span> ('+(bad.length - shown.length)+')</a>' : '') +
+    ' <a href="javascript:void 0" onclick="loadHealth()" style="margin-left:8px">🔄 <span>다시 확인</span></a>' +
+    '</div>';
+}
+
 /* 기록이 하나도 없을 때. 동기화는 자동으로 돌지 않으므로, 빈 표만 보여주면
    "고장인가" 와 "아직 안 눌렀나" 를 구분할 수 없다. 무엇을 하면 되는지 같이 띄운다. */
 /* 자동 동기화가 마지막으로 언제 돌았는지. 숫자가 낡았는지 화면에서 바로 알아야 한다 */
 function cronNote(d){
   const c = d.cron;
-  if(!c) return '자동 동기화(매일 07:00 KST)가 아직 돈 기록이 없습니다. ' +
+  if(!c) return '자동 실행(15분마다)이 아직 돈 기록이 없습니다. ' +
            '눌러서 <b>2026-05-01 이후</b> 발송·회신을 지금 바로 가져오세요.';
   const when = fmt(c.at);
   const rem = c.reminders;
@@ -438,13 +475,13 @@ function cronNote(d){
     (c.totals && c.totals.failed ? ' <span style="color:#a23b2e">· 실패 '+c.totals.failed+'명</span>' : '') +
     (rem && (rem.sent || rem.replied) ? ' <span class="muted">· 리마인드 '+(rem.sent||0)+'건 발송'+
       (rem.replied ? ', 회신 도착으로 '+rem.replied+'건 종료' : '')+'</span>' : '') +
-    ' <span class="muted">· 매일 07:00(KST) 자동 실행</span>';
+    ' <span class="muted">· 15분마다 자동 실행 (메일함 동기화는 1시간마다)</span>';
 }
 
 function emptyNote(d){
   if((d.totals && d.totals.sent) || (d.rows && d.rows.length)) return "";
   return '<div class="note"><b>아직 기록이 없습니다.</b><br />' +
-    '자동 동기화는 <b>매일 07:00(KST)</b>에 돕니다. 아직 한 번도 안 돌았다면, 담당자별 탭의 ' +
+    '자동 동기화는 <b>1시간마다</b> 돕니다. 아직 한 번도 안 돌았다면, 담당자별 탭의 ' +
     '<b>[🔄 메일함에서 동기화]</b> 로 <b>2026-05-01 이후</b> 발송·회신을 지금 바로 가져올 수 있습니다.<br />' +
     '<span class="muted">담당자 수에 따라 몇 분 걸립니다. 이 도구로 새로 보내는 메일은 기다리지 않아도 바로 잡힙니다.</span></div>';
 }
@@ -1291,6 +1328,7 @@ async function boot(){
     // 이름은 사람마다 다르므로 번역 대상에서 분리한다 — "· 관리자" 만 사전에 있으면 된다
     $("who").innerHTML = ME ? esc(ME.name || ME.email) + ' <span>· 관리자</span>' : "";
     fillStaffPicker(d.accounts);
+    if(d.historyEnabled !== false) loadHealth();   // 🩺 시스템 상태 (크론·동기화·저장소)
     // 저장소 미연결은 본문에서 설명하므로 위에 빨간 띠를 겹쳐 띄우지 않는다
     if(d.error && d.historyEnabled !== false){ $("msg").innerHTML = '<div class="err">'+esc(d.error)+'</div>'; }
     go("summary");

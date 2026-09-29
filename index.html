@@ -277,6 +277,7 @@
   </div>
 
   <!-- 화면 전환 — 발송 / Mail Pipeline / 중복 검사. 이력 저장소가 있을 때만 뜬다 -->
+  <div id="myHealth"></div>
   <div class="viewtabs" id="viewTabs" style="display:none">
     <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
     <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')" style="display:none">🗂 Mail Pipeline</div>
@@ -2230,6 +2231,16 @@ async function loadPipeline(){
    크리에이터가 회신했는데 내가 아직 답하지 않은 대화 (내 메일함 기준, 최근 60일). 오래 기다린 순.
    3일↑ 주황, 7일↑ 빨강. 줄을 누르면 대화가 열린다. 네이버웍스에서 직접 답한 건 다음 동기화 뒤에 빠진다. */
 let UNANS = null;
+/* 내 메일함 동기화가 실패 중이면 맨 위에 알린다 — 회신·답장 대기·중복 확인이 늦어지므로 */
+function paintMyHealth(){
+  const d = UNANS || {};
+  $("myHealth").innerHTML = d.syncError
+    ? '<div class="err" style="margin:10px 0"><b>⚠ <span>내 메일함 동기화가 실패하고 있습니다</span></b>' +
+      (d.syncHint ? '<div>'+esc(d.syncHint)+'</div>' : '') +
+      '<div class="muted" style="font-size:12px"><span>회신·답장 대기·중복 확인이 늦어질 수 있습니다. 관리자에게 알려 주세요.</span></div>' +
+      '<div class="mono muted" style="font-size:11px;word-break:break-all">'+esc(String(d.syncError).slice(0, 200))+'</div></div>'
+    : "";
+}
 function paintUnansBadge(){
   const n = (UNANS && UNANS.rows || []).length;
   $("unansBadge").textContent = n ? String(n) : "";
@@ -2242,7 +2253,7 @@ async function loadUnanswered(quiet){
     if(r.status === 401){ if(!quiet) showGate("다시 로그인해 주세요."); return; }
     const d = await parseSend(r);
     if(d.error) throw new Error(d.error);
-    UNANS = d; paintUnansBadge();
+    UNANS = d; paintUnansBadge(); paintMyHealth();
     if(!quiet || VIEW === "unanswered") renderUnanswered();
   } catch(e){
     if(!quiet){ $("unansBody").innerHTML = '<div class="err" style="margin:0">'+esc(String(e.message||e))+'</div>'; $("unansMsg").textContent = ""; }
