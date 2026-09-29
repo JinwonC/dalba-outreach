@@ -575,6 +575,23 @@ Outlook 데스크톱(Word 엔진)은 `max-width` 를 무시해 본문이 창 너
 
 ---
 
+## 🧪 테스트
+
+실제 네이버웍스·Upstash 에 붙지 않고, 가짜 저장소(메모리)와 가짜 메일 서버로 돈다. 비밀값도 필요 없다.
+
+```bash
+npm test          # 서버 테스트 (test/*.test.js) — 설치 없이 바로 돈다
+npm run test:ui   # 화면 테스트 (test/ui/*.test.mjs) — playwright + chromium 필요
+```
+
+- 화면 테스트는 `npm install --no-save playwright && npx playwright install chromium` 뒤에 돌린다.
+  Chromium 을 따로 깔아 뒀으면 `CHROMIUM_PATH=<경로>` 로 지정할 수 있다.
+- GitHub 에 올리면 **자동으로 둘 다 돈다** (`.github/workflows/test.yml`). 실패하면 GitHub 의 Actions 탭에 빨간 X 가 뜬다.
+- 테스트 파일은 배포에서 빠진다 (`.vercelignore`).
+- 기능을 고치면 해당 테스트도 같이 고치고, 새 기능엔 테스트를 더한다.
+
+---
+
 ## 관련 프로젝트
 
 매출·광고·회신 트래커 대시보드는 별도 레포(`dalba-email`)와 별도 Vercel 프로젝트에 있다.

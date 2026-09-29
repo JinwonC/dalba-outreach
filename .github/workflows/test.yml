@@ -1,0 +1,23 @@
+# 푸시·PR 마다 자동 테스트 — 서버(가짜 저장소·가짜 메일 서버)와 화면(Chromium) 테스트.
+# 실제 네이버웍스·Upstash 에는 붙지 않는다. 비밀값도 쓰지 않는다.
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 서버 테스트
+        run: npm test
+      - name: 화면 테스트 준비 (Playwright + Chromium)
+        run: |
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: 화면 테스트
+        run: npm run test:ui
