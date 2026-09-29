@@ -142,6 +142,7 @@
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
     <button class="tab" data-v="weekly" onclick="go('weekly')">📅 주차별</button>
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
+    <button class="tab" data-v="unanswered" onclick="go('unanswered')">📥 답장 대기</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
     <button class="tab" data-v="book" onclick="go('book')">📒 주소록</button>
     <button class="tab" data-v="blocked" onclick="go('blocked')">⏸ 중복 시도</button>
@@ -292,6 +293,11 @@ async function loadAdmin(){
   if($("by").value) qs.set("by", $("by").value);
   // 서버 기록은 UTC 다. 한국 아침 8시 발송은 UTC 로 전날이라, 시차를 넘겨야 날짜가 안 밀린다.
   if(VIEW === "daily" || VIEW === "weekly") qs.set("tz", String(new Date().getTimezoneOffset()));
+  if(VIEW === "unanswered"){
+    // 담당자 선택 = staff, 기간 선택이 '전체'면 서버 기본(60일)
+    qs.delete("by"); qs.delete("q");
+    if($("by").value) qs.set("staff", $("by").value);
+  }
   if(VIEW === "book"){
     // 담당자·기간·검색·방향이 바뀌면 첫 페이지로
     const sig = [BOOK_DIR, $("by").value, $("days").value, $("q").value.trim()].join("|");
@@ -312,7 +318,50 @@ async function loadAdmin(){
   if(VIEW === "conversations") return renderConversations(d);
   if(VIEW === "book")     return renderBook(d);
   if(VIEW === "pipeline") return renderPipeline(d);
+  if(VIEW === "unanswered") return renderUnanswered(d);
   return "";
+}
+
+/* 📥 답장 대기 — 크리에이터가 회신했는데 담당자가 아직 답하지 않은 대화.
+   오래 기다린 순. 3일 넘으면 주황, 7일 넘으면 빨강. 줄을 누르면 그 대화가 열린다(열 수 있는 메일함만). */
+function waitStyle(dd){ return dd >= 7 ? "background:#fdecea;box-shadow:inset 4px 0 0 #d93025" : dd >= 3 ? "background:#fff4e0;box-shadow:inset 4px 0 0 #e8890c" : ""; }
+function waitTag(dd){
+  const c = dd >= 7 ? ["#fbd3cf","#a1251b"] : dd >= 3 ? ["#ffe2b3","#8a4b00"] : ["#e3f4e8","#1f7a44"];
+  return '<span class="tag" style="background:'+c[0]+';color:'+c[1]+';font-weight:600">'+(dd ? dd+'일째 대기' : '오늘 도착')+'</span>';
+}
+function renderUnanswered(d){
+  const staff = d.staff || [];
+  const needle = $("q").value.trim().toLowerCase();
+  const all = [];
+  staff.forEach(s => (s.rows||[]).forEach(r => all.push(Object.assign({ staff: s.email, staffName: s.name }, r))));
+  const rows = all.filter(r => !needle || [r.email, r.name, r.handle, r.subject].join(" ").toLowerCase().includes(needle))
+    .sort((a,b) => b.waitingDays - a.waitingDays);
+  const many = staff.length > 1;
+  const cards = many ? '<div class="filters" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">' + staff
+      .map(s => ({ s, n: (s.rows||[]).length, old: Math.max(0, ...(s.rows||[]).map(r => r.waitingDays)) }))
+      .sort((a,b) => b.n - a.n)
+      .map(x => '<span class="tag" style="background:'+(x.n ? '#fff4e0' : '#f1f1f1')+';color:#333;padding:4px 10px;cursor:pointer" onclick="$(\'by\').value=\''+esc(x.s.email)+'\';load()">' +
+        '<b>'+esc(x.s.name)+'</b> '+x.n+'건'+(x.n ? ' <span class="muted">· 최장 '+x.old+'일</span>' : '')+
+        (x.s.syncError ? ' <span style="color:#a23b2e" title="'+esc(x.s.syncError)+'">⚠ 동기화 오류</span>' : '')+'</span>').join("") + '</div>' : '';
+  const synced = staff.map(s => s.syncedAt).filter(Boolean).sort()[0];
+  $("body").innerHTML =
+    '<div class="note" style="line-height:1.8"><b>답장 대기</b> — <span>크리에이터가 회신했는데 담당자가 아직 답하지 않은 대화입니다 (최근 '+esc(d.days)+'일).</span> ' +
+      '<span class="muted">오래 기다린 순 · 3일↑ 주황, 7일↑ 빨강 · 줄을 누르면 대화가 열립니다.</span>' +
+      '<div class="muted" style="font-size:12px"><span>네이버웍스에서 직접 답한 메일은 다음 동기화(1시간마다) 뒤에 목록에서 빠집니다.</span>' +
+      (synced ? ' <span>가장 오래된 동기화:</span> '+esc(fmt(synced)) : '') + '</div>' +
+      (d.hidden ? '<div class="muted" style="font-size:12px"><span>다른 관리자 메일함 '+d.hidden+'개는 본인만 볼 수 있어 뺐습니다.</span></div>' : '') +
+    '</div>' + cards +
+    (rows.length
+      ? '<div class="scroll"><table><thead><tr><th>대기</th>'+(many?'<th>담당자</th>':'')+'<th>크리에이터</th><th>회신 도착</th><th>제목</th><th>우리 마지막 발송</th></tr></thead><tbody>' +
+        rows.map(r => '<tr style="'+waitStyle(r.waitingDays)+'"><td style="white-space:nowrap">'+waitTag(r.waitingDays)+'</td>' +
+          (many ? '<td>'+esc(r.staffName||r.staff)+'</td>' : '') +
+          threadCell(r.staff, r.email, r.name, "", r.handle) +
+          '<td class="mono muted">'+esc(fmt(r.lastIn))+(r.inCount > 1 ? '<div style="font-size:11px">받은 메일 '+r.inCount+'통</div>' : '')+'</td>' +
+          '<td>'+(canOpen(r.staff) ? esc(r.subject||"") : '<span class="muted">—</span>')+'</td>' +
+          '<td class="mono muted">'+esc(r.lastOut ? fmt(r.lastOut) : "—")+'</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="muted" style="padding:20px 0">답장을 기다리는 대화가 없습니다. 👍</div>');
+  return rows.length + "건";
 }
 
 /* 기록이 하나도 없을 때. 동기화는 자동으로 돌지 않으므로, 빈 표만 보여주면

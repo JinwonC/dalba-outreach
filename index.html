@@ -50,6 +50,7 @@
 
   /* 화면 전환 탭 (발송 / Mail Pipeline) — 좌측 상단 */
   .viewtabs { display:flex; gap:6px; margin:16px 0 0; flex-wrap:wrap; }
+  .vbadge { display:none; background:#d93025; color:#fff; border-radius:999px; font-size:11px; font-weight:700; padding:1px 7px; margin-left:4px; }
   .vtab { border:1px solid #e2e2de; background:#fff; color:#555; border-radius:10px; padding:8px 18px;
           cursor:pointer; font:600 13px/1.3 inherit; display:inline-flex; align-items:center; gap:7px; }
   .vtab.active { background:#B78A22; color:#fff; border-color:#B78A22; }
@@ -279,6 +280,7 @@
   <div class="viewtabs" id="viewTabs" style="display:none">
     <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
     <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')" style="display:none">🗂 Mail Pipeline</div>
+    <div class="vtab" id="vtabUnans" onclick="setView('unanswered')" style="display:none">📥 답장 대기 <span class="vbadge" id="unansBadge"></span></div>
     <div class="vtab" id="vtabCheck" onclick="setView('check')" style="display:none">🔎 중복 검사</div>
     <div class="vtab" id="vtabInhouse" onclick="setView('inhouse')" style="display:none">🤝 협업 리스트</div>
   </div>
@@ -577,6 +579,15 @@
       <span class="muted" id="pipeMsg"></span>
     </div>
     <div id="pipeBody"></div>
+  </div>
+
+  <!-- 📥 답장 대기 — 크리에이터가 회신했는데 내가 아직 답하지 않은 대화 -->
+  <div id="unansView" style="display:none">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 12px">
+      <button class="btn" onclick="loadUnanswered()">🔄 새로고침</button>
+      <span class="muted" id="unansMsg"></span>
+    </div>
+    <div id="unansBody"></div>
   </div>
 
   <!-- 중복 검사 — 핸들/이메일로 전 담당자(관리자 포함) 발송 이력을 조회 -->
@@ -1786,13 +1797,16 @@ function setView(v){
   VIEW = v;
   $("vtabSend").classList.toggle("active", v==="send");
   $("vtabPipeline").classList.toggle("active", v==="pipeline");
+  $("vtabUnans").classList.toggle("active", v==="unanswered");
   $("vtabCheck").classList.toggle("active", v==="check");
   $("vtabInhouse").classList.toggle("active", v==="inhouse");
   $("sendView").style.display = v==="send" ? "" : "none";
   $("pipelineView").style.display = v==="pipeline" ? "" : "none";
+  $("unansView").style.display = v==="unanswered" ? "" : "none";
   $("checkView").style.display = v==="check" ? "" : "none";
   $("inhouseView").style.display = v==="inhouse" ? "" : "none";
   if(v==="pipeline" && !PIPE_LOADED) loadPipeline();
+  if(v==="unanswered") loadUnanswered();
   if(v==="check"){ $("checkQ").focus(); paintCheckCount(); }
   if(v==="inhouse" && INHOUSE_DATA===null) loadInhouse();
 }
@@ -2145,6 +2159,55 @@ async function loadPipeline(){
   }
 }
 
+/* ── 📥 답장 대기 ──
+   크리에이터가 회신했는데 내가 아직 답하지 않은 대화 (내 메일함 기준, 최근 60일). 오래 기다린 순.
+   3일↑ 주황, 7일↑ 빨강. 줄을 누르면 대화가 열린다. 네이버웍스에서 직접 답한 건 다음 동기화 뒤에 빠진다. */
+let UNANS = null;
+function paintUnansBadge(){
+  const n = (UNANS && UNANS.rows || []).length;
+  $("unansBadge").textContent = n ? String(n) : "";
+  $("unansBadge").style.display = n ? "inline-block" : "none";
+}
+async function loadUnanswered(quiet){
+  if(!quiet) $("unansMsg").textContent = "불러오는 중…";
+  try {
+    const r = await fetch("/api/pipeline?view=unanswered", { cache:"no-store", headers: authHeaders() });
+    if(r.status === 401){ if(!quiet) showGate("다시 로그인해 주세요."); return; }
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error);
+    UNANS = d; paintUnansBadge();
+    if(!quiet || VIEW === "unanswered") renderUnanswered();
+  } catch(e){
+    if(!quiet){ $("unansBody").innerHTML = '<div class="err" style="margin:0">'+esc(String(e.message||e))+'</div>'; $("unansMsg").textContent = ""; }
+  }
+}
+function renderUnanswered(){
+  const d = UNANS || {}, rows = d.rows || [];
+  const tag = dd => {
+    const c = dd >= 7 ? ["#fbd3cf","#a1251b"] : dd >= 3 ? ["#ffe2b3","#8a4b00"] : ["#e3f4e8","#1f7a44"];
+    return '<span class="tag" style="background:'+c[0]+';color:'+c[1]+';font-weight:600">'+(dd ? dd+'일째 대기' : '오늘 도착')+'</span>';
+  };
+  const bg = dd => dd >= 7 ? "background:#fdecea;box-shadow:inset 4px 0 0 #d93025" : dd >= 3 ? "background:#fff4e0;box-shadow:inset 4px 0 0 #e8890c" : "";
+  $("unansMsg").innerHTML = (d.syncedAt ? '<span>메일함 동기화 기준:</span> ' + esc(fmtAt(d.syncedAt)) : "");
+  $("unansBody").innerHTML =
+    (d.syncError ? '<div class="err" style="margin:0 0 10px"><span>내 메일함 동기화 오류</span> — '+esc(d.syncError)+'</div>' : '') +
+    '<div class="hint" style="margin:0 0 10px"><span>크리에이터가 회신했는데 아직 답하지 않은 대화입니다 (최근 60일, 오래 기다린 순).</span> ' +
+      '<span class="muted">네이버웍스에서 직접 답한 메일은 다음 동기화(1시간마다) 뒤에 목록에서 빠집니다.</span></div>' +
+    (rows.length
+      ? '<div class="scroll" style="max-height:560px"><table class="rcp"><thead><tr><th>대기</th><th>크리에이터</th><th>회신 도착</th><th>제목</th><th>내 마지막 발송</th></tr></thead><tbody>' +
+        rows.slice().sort((a,b) => b.waitingDays - a.waitingDays).map(r =>
+          '<tr class="unrow" data-peer="'+esc(r.email)+'" data-name="'+esc(r.name||"")+'" data-handle="'+esc(r.handle||"")+'" style="cursor:pointer;'+bg(r.waitingDays)+'" title="대화 보기">' +
+          '<td style="white-space:nowrap">'+tag(r.waitingDays)+'</td>' +
+          '<td><b>'+esc(r.name||r.email)+'</b>'+(r.name ? '<div class="muted">'+esc(r.email)+'</div>' : '')+(r.handle ? '<div class="muted">@'+esc(r.handle)+'</div>' : '')+'</td>' +
+          '<td class="muted">'+esc(fmtAt(r.lastIn))+(r.inCount > 1 ? '<div style="font-size:11px">받은 메일 '+r.inCount+'통</div>' : '')+'</td>' +
+          '<td>'+esc(r.subject||"")+'</td>' +
+          '<td class="muted">'+esc(r.lastOut ? fmtAt(r.lastOut) : "—")+'</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="muted" style="padding:14px 0">답장을 기다리는 대화가 없습니다. 👍</div>');
+  [...$("unansBody").querySelectorAll(".unrow")].forEach(el =>
+    el.addEventListener("click", () => openThread(el.dataset.peer, el.dataset.name, el.dataset.handle)));
+}
+
 /* 협상 스레드 — 본인 메일함을 그때그때 읽어 보여준다 */
 async function openThread(peer, name, handle){
   const staff = (acct() && acct().email) || (ME && ME.email) || "";
@@ -2303,10 +2366,13 @@ async function boot(){
   // 인하우스 협업 리스트는 로그인한 사람이면 누구나 볼 수 있다 (열람용)
   const canInhouse = authed && (AUTH_MODE === "accounts" ? Boolean(ME) : true);
   $("vtabPipeline").style.display = canPipe ? "" : "none";
+  $("vtabUnans").style.display = canPipe ? "" : "none";
+  if(canPipe && UNANS === null) loadUnanswered(true);   // 탭 배지(건수)용으로 한 번
   $("vtabCheck").style.display = canCheck ? "" : "none";
   $("vtabInhouse").style.display = canInhouse ? "" : "none";
   $("viewTabs").style.display = (canPipe || canCheck || canInhouse) ? "flex" : "none";
   if(!canPipe && VIEW === "pipeline") setView("send");
+  if(!canPipe && VIEW === "unanswered") setView("send");
   if(!canCheck && VIEW === "check") setView("send");
   if(!canInhouse && VIEW === "inhouse") setView("send");
   // 발송 화면 사전 경고용으로 인하우스 핸들을 미리 한 번 불러 둔다 (조용히 실패해도 됨)

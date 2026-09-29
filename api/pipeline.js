@@ -5,11 +5,13 @@
 // 다른 사람 것은 절대 주지 않는다: target 은 항상 토큰의 본인 이메일로 고정한다.
 //
 //   GET /api/pipeline            → 본인 파이프라인 (단계별 크리에이터)
+//   GET /api/pipeline?view=unanswered → 💬 답장 대기 (크리에이터가 회신했는데 본인이 아직 답하지 않은 대화)
 //   공통 파라미터: q(주소·이름·핸들·캠페인 검색), days(최근 N일)
 
 const A = require("../auth.js");
 const H = require("../history.js");
 const { groupPipeline } = require("../pipeline-lib.js");
+const U = require("../unanswered-lib.js");
 
 function matches(r, q) {
   if (!q) return true;
@@ -46,6 +48,13 @@ module.exports = async (req, res) => {
     }
 
     const q = req.query || {};
+    if (q.view === "unanswered") {
+      const mine = String(me.email || "").toLowerCase();
+      const rows = await U.unansweredFor(mine, await U.loadShared(), { days: Math.max(1, Math.min(Number(q.days) || 60, 365)) });
+      const info = (await H.syncInfo(mine)) || {};
+      res.status(200).json({ loginEnabled: true, historyEnabled: true, me: A.publicUser(me), rows, syncedAt: info.at || "", syncError: info.error || "" });
+      return;
+    }
     const days = Number(q.days) || 0;
     const needle = String(q.q || "").trim().toLowerCase();
 

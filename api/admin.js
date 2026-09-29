@@ -17,6 +17,7 @@
 
 const A = require("../auth.js");
 const H = require("../history.js");
+const U = require("../unanswered-lib.js");
 const IH = require("../inhouse.js");
 const { groupPipeline } = require("../pipeline-lib.js");
 
@@ -413,6 +414,29 @@ module.exports = async (req, res) => {
       }
       return rawJson(obj);
     };
+    // ─── 💬 답장 대기 — 크리에이터가 회신했는데 아직 답하지 않은 대화 (담당자별) ───
+    // 무거운 공통 읽기(아래) 전에 따로 처리한다. 관리자 메일함은 본인만 (A.canViewMailbox).
+    if (view === "unanswered") {
+      const staffQ = String(q.staff || "").trim().toLowerCase();
+      const days = Math.max(1, Math.min(Number(q.days) || 60, 365));
+      const list = roster().filter(a => !staffQ || a.email.toLowerCase() === staffQ);
+      const shared = await U.loadShared();
+      const staff = [];
+      let hidden = 0;
+      for (const a of list) {
+        if (!A.canViewMailbox(me, a.email)) { hidden++; continue; }
+        const rows = await U.unansweredFor(a.email, shared, { days });
+        const info = (await H.syncInfo(a.email)) || {};
+        staff.push({ email: a.email.toLowerCase(), name: a.name, rows, syncedAt: info.at || "", syncError: info.error || "" });
+      }
+      res.status(200).json({
+        historyEnabled: true, me: A.publicUser(me), accounts: roster(),
+        hiddenMailboxes: A.adminEmails().filter(e => e !== meEmail),
+        days, staff, hidden
+      });
+      return;
+    }
+
     const displayLimit = Math.max(1, Math.min(Number(q.limit) || 1000, H.LOG_MAX));
     const days = Number(q.days) || 0;
     const needle = String(q.q || "").trim().toLowerCase();
