@@ -21,11 +21,11 @@ function run1(a) {
     case "GET": return kv.has(k) ? kv.get(k) : null;
     case "MGET": return a.slice(1).map(x => kv.has(x) ? kv.get(x) : null);
     case "DEL": { const had = kv.delete(k) || hashes.delete(k) || sets.delete(k) || lists.delete(k); return had ? 1 : 0; }
-    case "HSET": { const h = hashes.get(k) || new Map(); h.set(a[2], a[3]); hashes.set(k, h); return 1; }
+    case "HSET": { const h = hashes.get(k) || new Map(); let n = 0; for (let i = 2; i + 1 < a.length; i += 2) { if (!h.has(a[i])) n++; h.set(a[i], a[i + 1]); } hashes.set(k, h); return n; }
     case "HGET": { const h = hashes.get(k); return h && h.has(a[2]) ? h.get(a[2]) : null; }
     case "HMGET": { const h = hashes.get(k); return a.slice(2).map(f => (h && h.has(f)) ? h.get(f) : null); }
     case "HGETALL": { const h = hashes.get(k); const out = []; if (h) h.forEach((v, f) => out.push(f, v)); return out; }
-    case "HDEL": { const h = hashes.get(k); return h && h.delete(a[2]) ? 1 : 0; }
+    case "HDEL": { const h = hashes.get(k); let n = 0; if (h) for (let i = 2; i < a.length; i++) if (h.delete(a[i])) n++; return n; }
     case "SADD": { const s = sets.get(k) || new Set(); s.add(a[2]); sets.set(k, s); return 1; }
     case "SMEMBERS": return [...(sets.get(k) || [])];
     case "SISMEMBER": return (sets.get(k) || new Set()).has(a[2]) ? 1 : 0;

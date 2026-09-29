@@ -778,6 +778,38 @@ async function suppressAdd(items) {
   if (args.length) await cmd(["HSET", SUP_KEY].concat(args));
   return args.length / 2;
 }
+// 수신 거부 등록 — 입력(이메일·핸들)과 **연결된** 이메일·핸들까지 함께 막는다 (크리에이터 단위).
+// raw: ["a@x.com", "@handle", "https://tiktok.com/@h", …], meta: { reason, addedBy }
+async function addDoNotContact(raw, meta) {
+  const EM = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const items = [];
+  (raw || []).forEach(v => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s) return;
+    if (EM.test(s)) items.push({ to: normEmail(s) }); else { const h = normHandle(s); if (h) items.push({ handle: h }); }
+  });
+  if (!items.length) return { added: 0, targets: 0 };
+  let links = [];
+  try { links = await bridge(items); } catch (_) { links = items.map(() => ({ emails: [], handles: [] })); }
+  // 두 번째 고리: 이메일 → 연결된 핸들 → 그 핸들의 다른 이메일 (같은 크리에이터의 다른 주소)
+  try {
+    const hop = [];
+    items.forEach((it, i) => ((links[i] && links[i].handles) || []).forEach(h => hop.push({ i, h })));
+    if (hop.length) {
+      const more = await bridge(hop.map(x => ({ handle: x.h })));
+      hop.forEach((x, j) => { links[x.i].emails = [...new Set((links[x.i].emails || []).concat((more[j] && more[j].emails) || []))]; });
+    }
+  } catch (_) { /* 연결을 못 읽어도 입력한 값은 막는다 */ }
+  const recs = [];
+  const base = { type: "dnc", reason: String((meta && meta.reason) || "").slice(0, 200), addedBy: (meta && meta.addedBy) || "", source: "manual" };
+  items.forEach((it, i) => {
+    if (it.to) recs.push(Object.assign({ email: it.to }, base));
+    if (it.handle) recs.push(Object.assign({ handle: it.handle }, base));
+    ((links[i] && links[i].emails) || []).forEach(e => recs.push(Object.assign({ email: e }, base)));
+    ((links[i] && links[i].handles) || []).forEach(h => recs.push(Object.assign({ handle: h }, base)));
+  });
+  return { added: await suppressAdd(recs), targets: items.length };
+}
 async function suppressRemove(fields) {
   const list = (fields || []).filter(f => /^[eh]:./.test(String(f)));
   if (!enabled() || !list.length) return 0;
@@ -1125,7 +1157,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
+  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, addDoNotContact, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

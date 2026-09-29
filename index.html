@@ -608,6 +608,21 @@
       </div>
       <div id="checkResult" style="margin-top:14px"></div>
     </div>
+
+    <!-- 🚫 수신 거부 등록 — 크리에이터가 그만 보내 달라고 했을 때. 누구도 다시 보낼 수 없게 된다 (해제는 관리자) -->
+    <div class="panel" id="dncPanel" style="margin-top:16px;max-width:760px">
+      <h2>🚫 수신 거부 등록</h2>
+      <div class="hint">
+        <div>크리에이터가 그만 보내 달라고 하면 여기 등록하세요. 이메일·핸들 어느 쪽이든 되고, 연결된 이메일·핸들까지 함께 막힙니다.</div>
+        <div>등록하면 누구도(관리자 포함) 다시 보낼 수 없습니다. 잘못 등록했으면 관리자에게 해제를 요청하세요.</div>
+      </div>
+      <textarea id="dncQ" rows="3" placeholder="creator@example.com&#10;@handle" style="width:100%"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <input id="dncReason" placeholder="사유 (예: 메일로 수신 거부 요청)" style="flex:1;min-width:220px;margin:0" />
+        <button class="btn dark" onclick="addDnc()">🚫 수신 거부 등록</button>
+        <span class="muted" id="dncMsg"></span>
+      </div>
+    </div>
   </div>
 
   <div id="inhouseView" style="display:none">
@@ -2010,6 +2025,31 @@ function chkLabel(dec, n){
 // 발송 제외(반송 주소·수신 거부)는 누구도 보낼 수 없으므로 항상 뺀다
 const chkSendable = r => !r.suppressed && (r.mine || r.decision === "clean" || r.decision === "ok");
 
+/* 🚫 수신 거부 등록 — 발송 제외(수신 거부)로 넣는다. 이후 누구도 보낼 수 없다. */
+function prefillDnc(v){
+  setView("check");
+  const q = $("dncQ"); q.value = (q.value.trim() ? q.value.trim() + "\n" : "") + v;
+  $("dncPanel").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("dncReason").focus();
+}
+async function addDnc(){
+  const items = parseChecks($("dncQ").value);
+  if(!items.length){ $("dncMsg").textContent = "이메일 또는 핸들을 입력하세요"; return; }
+  $("dncMsg").textContent = "등록 중…";
+  try {
+    const r = await fetch("/api/lookup", { method:"POST", cache:"no-store",
+      headers: Object.assign({ "content-type":"application/json" }, authHeaders()),
+      body: JSON.stringify({ action: "dnc", items, reason: $("dncReason").value.trim() }) });
+    if(r.status === 401){ showGate("다시 로그인해 주세요."); return; }
+    const d = await parseSend(r);
+    if(d.error) throw new Error(d.error);
+    $("dncMsg").textContent = "등록됨 ("+(d.targets||items.length)+"명)";
+    $("dncQ").value = ""; $("dncReason").value = "";
+    DUP_CACHE = new Map();                         // 발송 화면 사전 확인도 새로
+    if(CHECK_DATA && $("checkQ").value.trim()) runCheck();
+  } catch(e){ $("dncMsg").textContent = String(e.message||e); }
+}
+
 async function copyChecks(kind){
   const rows = (CHECK_DATA && CHECK_DATA.results) || [];
   const pick = kind === "send" ? rows.filter(chkSendable)
@@ -2102,6 +2142,7 @@ function renderChecks(){
     const tags = ['<span class="tag" style="background:'+st.tagBg+';color:'+st.tagFg+';font-weight:600">'+chkLabel(r.decision, N)+'</span>'];
     if(r.inhouse) tags.push('<div style="margin-top:3px">'+ihTag(r.inhouseHandle, r.inhouseVia)+'</div>');
     if(r.suppressed) tags.push('<div style="margin-top:3px">'+supTag(r.suppressed)+'</div>');
+    else tags.push('<div style="margin-top:3px"><a href="javascript:void 0" class="muted dnclink" style="font-size:11px" data-q="'+esc(r.query)+'">🚫 수신 거부 등록</a></div>');
     if(r.mine && !r.suppressed) tags.push('<div style="margin-top:3px"><span class="tag" style="background:#e3f4e8;color:#1f7a44;font-weight:600" title="본인이 이전에 보낸 크리에이터 — 다른 담당자 기록이 있어도 막히지 않습니다">✉️ 본인 발송 이력 — 계속 보낼 수 있음</span></div>');
     if(r.daysSinceSent != null) tags.push('<div class="muted" style="font-size:11px;margin-top:3px">마지막 발송 '+r.daysSinceSent+'일 전</div>');
     if(r.forced) tags.push(' <span class="holdtag">강제</span>');
@@ -2126,6 +2167,7 @@ function renderChecks(){
     (list.length > CAP ? '<div class="muted" style="margin-top:6px">표는 '+CAP+'개까지만 표시 — 전체는 복사 버튼으로 받으세요.</div>' : '') +
     (list.length ? '' : '<div class="muted" style="padding:14px 0">해당하는 항목이 없습니다.</div>');
   $("checkResult").innerHTML = h;
+  [...$("checkResult").querySelectorAll(".dnclink")].forEach(a => a.addEventListener("click", () => prefillDnc(a.dataset.q)));
 }
 
 const PIPE_STAGES = [
@@ -2226,9 +2268,11 @@ function renderUnanswered(){
           '<td><b>'+esc(r.name||r.email)+'</b>'+(r.name ? '<div class="muted">'+esc(r.email)+'</div>' : '')+(r.handle ? '<div class="muted">@'+esc(r.handle)+'</div>' : '')+'</td>' +
           '<td class="muted">'+esc(fmtAt(r.lastIn))+(r.inCount > 1 ? '<div style="font-size:11px">받은 메일 '+r.inCount+'통</div>' : '')+'</td>' +
           '<td>'+esc(r.subject||"")+'</td>' +
-          '<td class="muted">'+esc(r.lastOut ? fmtAt(r.lastOut) : "—")+'</td></tr>').join("") +
+          '<td class="muted">'+esc(r.lastOut ? fmtAt(r.lastOut) : "—")+
+            '<div><a href="javascript:void 0" class="muted undnc" style="font-size:11px" data-q="'+esc(r.email)+'">🚫 수신 거부 등록</a></div></td></tr>').join("") +
         '</tbody></table></div>'
       : '<div class="muted" style="padding:14px 0">답장을 기다리는 대화가 없습니다. 👍</div>');
+  [...$("unansBody").querySelectorAll(".undnc")].forEach(a => a.addEventListener("click", e => { e.stopPropagation(); prefillDnc(a.dataset.q); }));
   [...$("unansBody").querySelectorAll(".unrow")].forEach(el =>
     el.addEventListener("click", () => openThread(el.dataset.peer, el.dataset.name, el.dataset.handle)));
 }

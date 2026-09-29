@@ -395,6 +395,14 @@ module.exports = async (req, res) => {
         res.status(200).json({ approved: done, skipped });
         return;
       }
+      // 🚫 수신 거부 등록 (관리자 화면에서)
+      if (body.action === "dnc") {
+        const list = (Array.isArray(body.items) ? body.items : []).slice(0, 2000);
+        if (!list.length) { res.status(400).json({ error: "수신 거부할 이메일 또는 핸들을 입력하세요" }); return; }
+        const r = await H.addDoNotContact(list, { reason: String(body.reason || "").trim(), addedBy: meEmail });
+        res.status(200).json(Object.assign({ ok: true }, r));
+        return;
+      }
       // 발송 제외에서 지우기 (잘못 들어간 반송 주소, 해제된 수신 거부)
       if (body.action === "unsuppress") {
         const fields = (Array.isArray(body.fields) ? body.fields : []).map(String).filter(f => /^[eh]:./.test(f)).slice(0, 2000);
