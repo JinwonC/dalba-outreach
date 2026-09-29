@@ -19,6 +19,7 @@ const A = require("../auth.js");
 const H = require("../history.js");
 const U = require("../unanswered-lib.js");
 const HL = require("../health-lib.js");
+const F = require("../funnel-lib.js");
 const IH = require("../inhouse.js");
 const { groupPipeline } = require("../pipeline-lib.js");
 
@@ -481,7 +482,7 @@ module.exports = async (req, res) => {
 
     // 집계(요약·담당자별·일별)는 전부 읽어야 정확하다 — 일부만 읽으면 건수가 실제보다 적게 잡힌다.
     // 목록 뷰(발송 이력·중복·회신)만 표시 개수로 제한한다. 읽기는 청크라 실제 데이터만큼만 받는다.
-    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline" || view === "repliers" || view === "book";
+    const countView = view === "summary" || view === "daily" || view === "weekly" || view === "people" || view === "conversations" || view === "pipeline" || view === "repliers" || view === "book" || view === "performance";
     const readN = countView ? H.LOG_MAX : displayLimit;
 
     let cronStatus = null;
@@ -525,6 +526,15 @@ module.exports = async (req, res) => {
       truncated: !countView && sentAll.length >= displayLimit
     };
 
+    // ─── 📈 성과 — 발송 → 회신 → 협업 전환 (담당자별 · 캠페인별) ───
+    // 기간·담당자·검색은 '발송'에 건다. 회신은 기간과 무관하게 첫 발송 이후 온 것이면 센다.
+    if (view === "performance") {
+      const IHm = require("../inhouse.js");
+      const match = await Promise.race([IHm.matcher().catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))]);
+      const out = F.funnel({ sent, allSent: sentAll, replies: replyAll, match, names: nameByEmail() });
+      res.status(200).json(Object.assign(base, out));
+      return;
+    }
     if (view === "daily") {
       // tz 는 브라우저의 getTimezoneOffset() (KST 는 -540). 없으면 UTC 기준이 된다.
       const tzMin = Number.isFinite(Number(q.tz)) ? Number(q.tz) : 0;

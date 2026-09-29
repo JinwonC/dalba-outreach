@@ -142,6 +142,7 @@
     <button class="tab active" data-v="summary" onclick="go('summary')">담당자별</button>
     <button class="tab" data-v="daily" onclick="go('daily')">📈 일별</button>
     <button class="tab" data-v="weekly" onclick="go('weekly')">📅 주차별</button>
+    <button class="tab" data-v="performance" onclick="go('performance')">📈 성과</button>
     <button class="tab" data-v="pipeline" onclick="go('pipeline')">🗂 내 파이프라인</button>
     <button class="tab" data-v="unanswered" onclick="go('unanswered')">📥 답장 대기</button>
     <button class="tab" data-v="conversations" onclick="go('conversations')">💬 대화</button>
@@ -322,7 +323,39 @@ async function loadAdmin(){
   if(VIEW === "pipeline") return renderPipeline(d);
   if(VIEW === "unanswered") return renderUnanswered(d);
   if(VIEW === "suppress") return renderSuppress(d);
+  if(VIEW === "performance") return renderPerformance(d);
   return "";
+}
+
+/* 📈 성과 — 발송 → 회신 → 협업 전환. 크리에이터 1명 = 이메일 1개. 기간·담당자는 '발송' 기준. */
+function pct(a, b){ return b ? Math.round(a / b * 1000) / 10 + "%" : "—"; }
+function rateBar(a, b, color){
+  const w = b ? Math.min(100, a / b * 100) : 0;
+  return '<div style="display:flex;align-items:center;gap:6px"><span class="mono" style="min-width:44px">'+pct(a, b)+'</span>' +
+    '<span style="flex:1;min-width:60px;height:6px;background:#f0f0f0;border-radius:3px;overflow:hidden"><span style="display:block;height:100%;width:'+w.toFixed(1)+'%;background:'+color+'"></span></span></div>';
+}
+function funnelTable(rows, keyHead, keyCell){
+  return '<div class="scroll"><table><thead><tr><th>'+keyHead+'</th><th>보낸 크리에이터</th><th>회신</th><th>회신율</th><th>협업</th><th>협업 전환율</th></tr></thead><tbody>' +
+    rows.map(r => '<tr><td>'+keyCell(r)+'</td><td class="mono">'+r.contacted+'</td><td class="mono">'+r.replied+'</td><td>'+rateBar(r.replied, r.contacted, "#1a73e8")+'</td>' +
+      '<td class="mono">'+r.collab+'</td><td>'+rateBar(r.collab, r.contacted, "#8e24aa")+'</td></tr>').join("") +
+    '</tbody></table></div>';
+}
+function renderPerformance(d){
+  const t = d.totals || { contacted: 0, replied: 0, collab: 0 };
+  const card = (label, v, sub) => '<div class="card" style="flex:1;min-width:150px;border:1px solid #eee;border-radius:10px;padding:12px 14px">' +
+    '<div class="muted" style="font-size:12px">'+label+'</div><div style="font-size:24px;font-weight:700">'+v+'</div>'+(sub ? '<div class="muted" style="font-size:12px">'+sub+'</div>' : '')+'</div>';
+  $("body").innerHTML =
+    '<div class="note" style="line-height:1.8"><b>발송 → 회신 → 협업</b> — <span>크리에이터 1명 = 이메일 1개. 기간·담당자 선택은 발송 기준이고, 회신은 첫 발송 이후 온 것을 셉니다.</span>' +
+      '<div class="muted" style="font-size:12px"><span>협업은 지금 협업(인하우스) 시트에 있는지로 봅니다 — 예전부터 협업하던 크리에이터가 섞일 수 있습니다.</span></div>' +
+      (d.inhouseChecked ? '' : '<div style="color:#a23b2e;font-size:12px"><span>협업 시트를 제때 읽지 못해 협업 수는 0으로 표시됩니다.</span></div>') + '</div>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+      card("보낸 크리에이터", t.contacted) + card("회신", t.replied, '<span>회신율</span> '+pct(t.replied, t.contacted)) + card("협업", t.collab, '<span>협업 전환율</span> '+pct(t.collab, t.contacted)) +
+    '</div>' +
+    '<h3 style="margin:6px 0 8px">담당자별</h3>' +
+    ((d.staff||[]).length ? funnelTable(d.staff, "담당자", r => esc(r.name || r.staff)) : '<div class="muted">기록이 없습니다.</div>') +
+    '<h3 style="margin:18px 0 8px">캠페인별</h3>' +
+    ((d.campaigns||[]).length ? funnelTable(d.campaigns, "캠페인", r => esc(r.campaign)) : '<div class="muted">기록이 없습니다.</div>');
+  return t.contacted + "명";
 }
 
 /* ⛔ 발송 제외 — 반송된 없는 주소(자동) · 수신 거부(담당자 등록). 여기 있으면 누구도 보낼 수 없다.
