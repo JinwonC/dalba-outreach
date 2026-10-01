@@ -54,6 +54,8 @@
   .vtab { border:1px solid #e2e2de; background:#fff; color:#555; border-radius:10px; padding:8px 18px;
           cursor:pointer; font:600 13px/1.3 inherit; display:inline-flex; align-items:center; gap:7px; }
   .vtab.active { background:#B78A22; color:#fff; border-color:#B78A22; }
+  .vtab.veg.active { background:#6aa632; border-color:#6aa632; }
+  .brandnote { display:none; margin:12px 0 0; padding:9px 14px; border-radius:10px; font-size:13px; background:#eef6e1; border:1px solid #cfe3b0; color:#2f4d14; }
 
   /* 파이프라인 (칸반) — admin.html 과 같은 모양 */
   .kan { display:flex; gap:14px; overflow-x:auto; padding-bottom:8px; align-items:flex-start; }
@@ -279,7 +281,8 @@
   <!-- 화면 전환 — 발송 / Mail Pipeline / 중복 검사. 이력 저장소가 있을 때만 뜬다 -->
   <div id="myHealth"></div>
   <div class="viewtabs" id="viewTabs" style="display:none">
-    <div class="vtab active" id="vtabSend" onclick="setView('send')">✉️ 발송</div>
+    <div class="vtab active" id="vtabSend" onclick="setTheme('dalba');setView('send')">✉️ 발송</div>
+    <div class="vtab veg" id="vtabVeganery" onclick="setTheme('veganery');setView('send')">🌿 Veganery 발송</div>
     <div class="vtab" id="vtabPipeline" onclick="setView('pipeline')" style="display:none">🗂 Mail Pipeline</div>
     <div class="vtab" id="vtabUnans" onclick="setView('unanswered')" style="display:none">📥 답장 대기 <span class="vbadge" id="unansBadge"></span></div>
     <div class="vtab" id="vtabCheck" onclick="setView('check')" style="display:none">🔎 중복 검사</div>
@@ -287,6 +290,7 @@
   </div>
 
   <div id="sendView">
+  <div class="brandnote" id="brandNote">🌿 <b>Veganery by d'Alba</b> <span>메일로 보냅니다 — 로고·색상이 비거너리로 바뀌고, 이 탭의 작성 내용은 따로 저장됩니다.</span></div>
   <div class="tabs">
     <div class="tab active" id="tabSingle" onclick="setMode('single')">1명에게 보내기</div>
     <div class="tab" id="tabBulk" onclick="setMode('bulk')">명단으로 여러 명</div>
@@ -1164,7 +1168,8 @@ function campaign(){
     steps: ["s1","s2","s3","s4"].map(val).filter(Boolean),
     applyUrl: val("applyUrl"), applyLabel: val("applyLabel"), notes: val("notes"),
     senderName: a.name || "", senderEmail: a.email || "", senderTitle: a.title || "",
-    logoUrl: (CFG && CFG.logoUrl) || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
+    theme: THEME,                          // 브랜드(테마) — 로고·색상 (dalba | veganery)
+    logoUrl: (CFG && CFG.logos && CFG.logos[THEME]) || (CFG && CFG.logoUrl) || "",   // 미리보기가 실제 발송과 같은 로고를 쓰도록
     followup: {                            // 회신 없을 때 자동 팔로업 (며칠마다 · 회차별 문구)
       enabled: !!$("remindOn").checked,    // ※ 템플릿의 d.reminder(불리언)와 이름이 겹치지 않게 followup 로 둔다
       intervalDays: Math.max(1, Math.min(Number(val("remindEvery"))||3, 60)),
@@ -1227,7 +1232,7 @@ function paintImgUp(){
 }
 function setImgData(dataUrl){
   PRODUCT_IMG_DATA = dataUrl || "";
-  try { PRODUCT_IMG_DATA ? localStorage.setItem("outreach_prodimg", PRODUCT_IMG_DATA) : localStorage.removeItem("outreach_prodimg"); } catch(e){}
+  try { PRODUCT_IMG_DATA ? localStorage.setItem(imgKey(), PRODUCT_IMG_DATA) : localStorage.removeItem(imgKey()); } catch(e){}
   paintImgUp();
   renderPreview();
 }
@@ -1296,22 +1301,53 @@ function renderPreview(){
 }
 
 /* ── 초안 저장/복원 ── */
+/* ── 브랜드(테마): ✉️ 발송 = d'Alba(노랑) · 🌿 Veganery 발송 = 비거너리(연두) ──
+   탭을 바꾸면 메일 로고·색상이 바뀌고, 작성 중인 내용(초안)도 브랜드별로 따로 저장·복원한다. */
+let THEME = "dalba";
+try { if(localStorage.getItem("outreach_theme") === "veganery") THEME = "veganery"; } catch(e){}
+const draftKey = () => THEME === "veganery" ? "outreach_draft_veganery" : "outreach_draft";
+const imgKey = () => THEME === "veganery" ? "outreach_prodimg_veganery" : "outreach_prodimg";   // 첨부 제품 이미지도 브랜드별
+// 확인창 맨 위 — 어느 브랜드 메일로 나가는지 (잘못 보내지 않게)
+function brandLine(){
+  return THEME === "veganery"
+    ? '<div class="brandnote" style="display:block;margin:0 0 10px">🌿 <b>Veganery</b> <span>메일 (비거너리 로고·연두 색상)</span></div>'
+    : '<div style="margin:0 0 10px;color:#8a6d1f">💛 <b>d\'Alba</b> <span>메일</span></div>';
+}
+function paintTheme(){
+  if($("brandNote")) $("brandNote").style.display = THEME === "veganery" ? "block" : "none";
+  if($("vtabSend")) $("vtabSend").classList.toggle("active", VIEW === "send" && THEME === "dalba");
+  if($("vtabVeganery")) $("vtabVeganery").classList.toggle("active", VIEW === "send" && THEME === "veganery");
+}
+function setTheme(t){
+  t = t === "veganery" ? "veganery" : "dalba";
+  if(t === THEME){ paintTheme(); return; }
+  saveDraft();                       // 지금 브랜드의 작성 내용을 저장하고
+  THEME = t;
+  try { localStorage.setItem("outreach_theme", t); } catch(e){}
+  FIELDS.forEach(f => { if(PER_RECIPIENT.indexOf(f) === -1 && $(f)) $(f).value = ""; });
+  loadDraft();                       // 바꾼 브랜드의 초안을 불러온다 (처음이면 기본값)
+  try { PRODUCT_IMG_DATA = localStorage.getItem(imgKey()) || ""; } catch(e){ PRODUCT_IMG_DATA = ""; }
+  if(typeof paintImgUp === "function") paintImgUp();
+  if(typeof syncPid === "function") syncPid();
+  paintTheme();
+  renderPreview();
+}
 function saveDraft(){
   const o = {};
   FIELDS.forEach(f => { if(PER_RECIPIENT.indexOf(f) === -1 && $(f)) o[f] = $(f).value; });
-  localStorage.setItem("outreach_draft", JSON.stringify(o));
+  localStorage.setItem(draftKey(), JSON.stringify(o));
 }
 function loadDraft(){
   let o = {};
-  try { o = JSON.parse(localStorage.getItem("outreach_draft")||"{}"); } catch(e){}
+  try { o = JSON.parse(localStorage.getItem(draftKey())||"{}"); } catch(e){}
   FIELDS.forEach(f => { if($(f) && o[f] != null) $(f).value = o[f]; });
-  // 예전에 저장해 둔 초안에 초록 하트가 남아 있으면 브랜드 노랑 하트로 바꿔 준다
-  if($("subject") && /💚/.test($("subject").value)){
+  // 예전에 저장해 둔 d'Alba 초안에 초록 하트가 남아 있으면 브랜드 노랑 하트로 바꿔 준다 (비거너리는 초록 하트가 맞다)
+  if(THEME === "dalba" && $("subject") && /💚/.test($("subject").value)){
     $("subject").value = $("subject").value.replace(/💚/g, "💛");
     saveDraft();
   }
-  if(!val("subject")) $("subject").value = T.DEFAULT_SUBJECT;
-  if(!val("brand")) $("brand").value = "d'Alba";
+  if(!val("subject")) $("subject").value = T.defaultSubject ? T.defaultSubject(THEME) : T.DEFAULT_SUBJECT;
+  if(!val("brand")) $("brand").value = THEME === "veganery" ? "Veganery" : "d'Alba";
   // Next steps 는 처음 열 때만 기본 문구를 채운다 (지운 상태는 그대로 존중)
   if(o.stepsIntro == null && o.s1 == null){
     $("stepsIntro").value = T.DEFAULT_STEPS_INTRO;
@@ -1665,7 +1701,7 @@ function startSend(){
     const rel = isFinite(at) ? fromNow(at) : "";
     // 지금으로부터 너무 뒤(12시간+)면 시간대를 잘못 골랐을 수 있으니 눈에 띄게 경고
     const farOff = isFinite(at) && (at - Date.now()) > 12*3600e3;
-    $("confirmBody").innerHTML =
+    $("confirmBody").innerHTML = brandLine() +
       '<b>' + esc(a.email) + '</b> 에서 <b>' + list.length + '명</b> 에게 <b>예약 발송</b>합니다.' +
       '<br /><br /><span style="color:#999">발송 시각 (현지)</span><br />' +
       '<b>' + esc(val("schedDate") + " " + val("schedTime")) + '</b> · <span class="tzl">' + esc(tzLabel) + '</span>' +
@@ -1690,7 +1726,7 @@ function startSend(){
   const inh = CFG.admin ? [] : list.filter(r => inhouseOf(r));
   const noH = list.filter(r => !String(r.handle||"").trim()).length;   // 핸들 없이 보내는 인원
 
-  $("confirmBody").innerHTML =
+  $("confirmBody").innerHTML = brandLine() +
     '<b>' + esc(a.email) + '</b> 에서 <b>' + going + '명</b> 에게 보냅니다.' +
     (held.length ? ' <span style="color:#a8801f">(다른 담당자가 보낸 '+held.length+'명 보류)</span>' : '') +
     (sup.length ? '<br /><span style="color:#a23b2e">⛔ 발송 제외 '+sup.length+'명은 보내지 않습니다 (반송된 없는 주소 · 수신 거부).</span>' : '') +
@@ -1819,7 +1855,8 @@ function fmtAt(s){
 
 function setView(v){
   VIEW = v;
-  $("vtabSend").classList.toggle("active", v==="send");
+  $("vtabSend").classList.toggle("active", v==="send" && THEME === "dalba");
+  $("vtabVeganery").classList.toggle("active", v==="send" && THEME === "veganery");
   $("vtabPipeline").classList.toggle("active", v==="pipeline");
   $("vtabUnans").classList.toggle("active", v==="unanswered");
   $("vtabCheck").classList.toggle("active", v==="check");
@@ -2323,7 +2360,7 @@ async function boot(){
     }
     loadDraft();
     syncPid();                 // 저장된 제품 링크에서 상품 ID 를 되찾는다
-    try { PRODUCT_IMG_DATA = localStorage.getItem("outreach_prodimg") || ""; } catch(e){}
+    try { PRODUCT_IMG_DATA = localStorage.getItem(imgKey()) || ""; } catch(e){}
     paintImgUp();              // 저장해 둔 첨부 이미지 복원
     setPvWidth(localStorage.getItem("outreach_pvw") || "pc");
     FIELDS.forEach(f => { if($(f)) $(f).addEventListener("input", schedulePreview); });
@@ -2407,7 +2444,8 @@ async function boot(){
   if(canPipe && UNANS === null) loadUnanswered(true);   // 탭 배지(건수)용으로 한 번
   $("vtabCheck").style.display = canCheck ? "" : "none";
   $("vtabInhouse").style.display = canInhouse ? "" : "none";
-  $("viewTabs").style.display = (canPipe || canCheck || canInhouse) ? "flex" : "none";
+  $("viewTabs").style.display = authed ? "flex" : "none";   // 🌿 Veganery 발송 탭은 항상 있다
+  paintTheme();
   if(!canPipe && VIEW === "pipeline") setView("send");
   if(!canPipe && VIEW === "unanswered") setView("send");
   if(!canCheck && VIEW === "check") setView("send");

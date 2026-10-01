@@ -19,9 +19,12 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  // ─── 디자인 토큰 ────────────────────────────────────────────────
-  // 브랜드 배너의 노랑→크림 그라데이션(위 노랑, 아래 크림)과 검정 로고에서 뽑았다.
-  const C = {
+  // ─── 디자인 토큰 (브랜드별 테마) ────────────────────────────────
+  // dalba: 브랜드 배너의 노랑→크림 그라데이션(위 노랑, 아래 크림)과 검정 로고에서 뽑았다.
+  // veganery: 비거너리 by d'Alba — 연두와 초록 사이(옐로그린) 배너 → 연한 연두 바탕, 검정 로고.
+  // 캠페인의 theme 값("dalba"|"veganery")으로 고른다. 없으면 dalba.
+  const THEMES = {};
+  THEMES.dalba = {
     page: "#f6efdd",      // 바깥 배경 (배너 아래쪽 크림)
     card: "#ffffff",      // 본문 카드
     dark: "#171717",      // CTA 버튼 · 검정 로고
@@ -38,8 +41,32 @@
     heroBot: "#fbf1d3",
     heroFallback: "#f4c842",
     ink: "#171717",       // 노랑 위 검정 텍스트 (로고·제목)
-    inkSoft: "#6b551d"    // 노랑 위 보조 텍스트 (배지·부제) — 노랑에서도 읽히는 짙은 갈색
+    inkSoft: "#6b551d",   // 노랑 위 보조 텍스트 (배지·부제) — 노랑에서도 읽히는 짙은 갈색
+    logoH: 46,            // 로고 이미지 높이(px)
+    heart: "💛"
   };
+  THEMES.veganery = {
+    page: "#eef5e4",      // 바깥 배경 (배너 아래쪽 연한 연두)
+    card: "#ffffff",
+    dark: "#171717",      // CTA 버튼 · 검정 로고 (로고가 검정이라 버튼도 검정)
+    onDark: "#ffffff",
+    gold: "#4a7f1c",      // 강조 — 흰 카드 위에서 읽히는 짙은 초록 (대비 4.5:1 이상)
+    box: "#f2f8ea",       // 안내 박스 배경
+    boxLine: "#cfe3b0",   // 안내 박스 테두리
+    text: "#1d1d1f",
+    muted: "#6b6b6b",
+    line: "#ececec",
+    heroTop: "#a6d45f",   // 연두
+    heroMid: "#8cc63f",   // 연두와 초록 사이 (옐로그린)
+    heroBot: "#eef6e1",
+    heroFallback: "#8cc63f",
+    ink: "#171717",
+    inkSoft: "#2f4d14",   // 옐로그린 위 보조 텍스트 — 짙은 초록
+    logoH: 58,            // 두 줄 로고(Veganery / by d'Alba)라 조금 크게
+    heart: "💚"
+  };
+  let C = THEMES.dalba;   // buildHtml 이 그때그때 테마로 바꾼다 (동기 실행이라 섞이지 않는다)
+  function themeOf(t) { return THEMES[t] ? t : "dalba"; }
   const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
   const WIDTH = 600;
 
@@ -394,6 +421,7 @@
   // ─── 메일 전체 ─────────────────────────────────────────────────
   function buildHtml(d) {
     d = resolve(d);
+    C = THEMES[themeOf(d.theme)];
     const creator = has(d.creatorName) ? d.creatorName : (has(d.handle) ? "@" + String(d.handle).replace(/^@/, "") : "there");
     const brand = has(d.brand) ? d.brand : "d'Alba";
     const title = has(d.campaignTitle) ? d.campaignTitle : "Paid Collab Invitation";
@@ -414,8 +442,8 @@
     // (이미지가 뜨면 이 글꼴 스타일은 이미지에 가려 안 보이고, 막히면 alt 가 이 스타일로 뜬다.)
     const logoBlock = '<div style="padding:0 0 18px;">' + (logoUrl
       ? '<img src="' + logoUrl + '" alt="' + esc(brand) +
-        '" height="46" style="height:46px;max-width:70%;width:auto;border:0;outline:none;display:inline-block;' +
-        "font:400 30px/46px " + SERIF + ";color:" + C.ink + ';" />'
+        '" height="' + C.logoH + '" style="height:' + C.logoH + 'px;max-width:70%;width:auto;border:0;outline:none;display:inline-block;' +
+        "font:400 30px/" + C.logoH + "px " + SERIF + ";color:" + C.ink + ';" />'
       : wordmark) + "</div>";
 
     let body = "";
@@ -694,6 +722,10 @@
     DEFAULT_SUBJECT: DEFAULT_SUBJECT,
     DEFAULT_STEPS_INTRO: DEFAULT_STEPS_INTRO,
     DEFAULT_STEPS: DEFAULT_STEPS,
-    COLORS: C
+    COLORS: THEMES.dalba,
+    THEMES: THEMES,
+    themeOf: themeOf,
+    // 테마별 기본 제목 — 비거너리는 초록 하트
+    defaultSubject: function (t) { return DEFAULT_SUBJECT.replace("💛", THEMES[themeOf(t)].heart); }
   };
 });

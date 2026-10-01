@@ -24,30 +24,12 @@ const SEND_GAP_MS = 1100;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ─── 로고 인라인 첨부 ─────────────────────────────────────────────
-// 외부 URL 은 배포 보호 등으로 깨질 수 있어 파일을 메일 안에 담는다(cid).
-// LOGO_URL 을 명시한 배포는 그 뜻을 존중해 인라인을 쓰지 않는다.
-const LOGO_CID = "dalbalogo@dalba";
-let logoBuf;   // undefined=아직 안 읽음, null=없음, Buffer=성공
-function logoBuffer() {
-  if (logoBuf !== undefined) return logoBuf;
-  if (process.env.LOGO_URL) { logoBuf = null; return logoBuf; }
-  try { logoBuf = fs.readFileSync(path.join(__dirname, "logo-black.png")); }
-  catch (_) { logoBuf = null; }
-  return logoBuf;
-}
-function logoDataUrl() {
-  const b = logoBuffer();
-  return b ? "data:image/png;base64," + b.toString("base64") : "";
-}
-function logoAttachment() {
-  const b = logoBuffer();
-  return b ? { filename: "logo.png", content: b, contentType: "image/png", cid: LOGO_CID, contentDisposition: "inline" } : null;
-}
-function logoUrl() {
-  if (process.env.LOGO_URL) return process.env.LOGO_URL;
-  const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  return host ? "https://" + host + "/logo-black.png" : "";
-}
+// 브랜드(테마)별 로고는 logos.js 한 곳에서 — 캠페인의 theme("dalba"|"veganery")로 고른다.
+const LG = require("./logos.js");
+const LOGO_CID = LG.CID.dalba;
+function logoDataUrl(theme) { return LG.logoDataUrl(theme); }
+function logoAttachment(theme) { return LG.logoAttachment(theme); }
+function logoUrl(theme) { return LG.logoUrl(theme); }
 
 // 업로드한 제품 이미지(data URL) → 인라인 첨부. 5MB 상한, base64 전체 검사.
 const INLINE_IMG_CID = "productimg@dalba";
@@ -96,11 +78,13 @@ function composerFor(account, campaign, opts) {
   const o = opts || {};
   const inlineImg = o.inlineImg;
   const useLogoCid = Boolean(o.logoAtt);
+  const theme = LG.themeOf(campaign && campaign.theme);
   return r => Object.assign({}, campaign, r, {
     senderName: account ? account.name : (campaign.senderName || ""),
     senderEmail: account ? account.email : (campaign.senderEmail || ""),
     senderTitle: (account && account.title) || campaign.senderTitle || "",
-    logoUrl: useLogoCid ? ("cid:" + LOGO_CID) : (logoDataUrl() || campaign.logoUrl || logoUrl()),
+    theme,
+    logoUrl: useLogoCid ? ("cid:" + LG.CID[theme]) : (logoDataUrl(theme) || campaign.logoUrl || logoUrl(theme)),
     productImageCid: (inlineImg && o.real) ? INLINE_IMG_CID : ""
   });
 }
@@ -129,7 +113,7 @@ async function sendBatch(opts) {
   const followup = parseFollowup(campaign);
   const remindOn = followup.enabled && H.enabled();
 
-  const logoAtt = logoAttachment();
+  const logoAtt = logoAttachment(campaign.theme);   // 브랜드(테마)별 로고
   const attachments = [];
   if (logoAtt) attachments.push(logoAtt);
   if (inlineImg) attachments.push({
@@ -271,6 +255,7 @@ async function sendBatch(opts) {
         campaign: d.campaignTitle || "", subject: cleanHeader(built.subject).slice(0, 200),
         // 제목 틀({{name}} 등 치환 전) — 📈 성과의 제목별 회신율을 버전별로 정확히 묶으려고
         subjectTpl: String(d.subject || "").trim() ? cleanHeader(d.subject).slice(0, 200) : "(기본 제목)",
+        theme: LG.themeOf(campaign.theme) === "dalba" ? undefined : LG.themeOf(campaign.theme),   // 비거너리 등 다른 브랜드
         forced: force || undefined
       });
       // 회신이 없으면 정한 주기로 팔로업을 보내도록 예약해 둔다 (크론이 처리)
@@ -280,7 +265,7 @@ async function sendBatch(opts) {
           await H.scheduleReminder({
             to, creatorName: d.creatorName || "", handle: d.handle || "",
             by: account.email, byName: account.name, senderTitle: account.title || "",
-            brand: d.brand || "", campaignTitle: d.campaignTitle || "",
+            brand: d.brand || "", campaignTitle: d.campaignTitle || "", theme: LG.themeOf(campaign.theme),
             subject: built.subject, applyUrl: d.applyUrl || "", applyLabel: d.applyLabel || "",
             cc: ccList,   // 첫 메일의 참조가 리마인드에도 그대로 실리게
             intervalDays: followup.intervalDays, maxCount: followup.maxCount,

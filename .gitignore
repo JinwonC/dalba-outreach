@@ -7,5 +7,6 @@ tokens.json
 ads_tokens.json
 *.png
 !logo-black.png
+!logo-veganery.png
 *.txt
 !requirements*.txt

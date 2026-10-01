@@ -111,6 +111,8 @@ module.exports = async (req, res) => {
         admin: isAdmin(me),          // 관리자 화면 버튼을 띄울지
         // 미리보기도 외부 요청 없이 로고를 그리도록 data URL 로 준다 (없으면 URL 폴백)
         logoUrl: C.logoDataUrl() || C.logoUrl(),
+        // 브랜드(테마)별 로고 — 🌿 Veganery 탭 미리보기용
+        logos: { dalba: C.logoDataUrl("dalba") || C.logoUrl("dalba"), veganery: C.logoDataUrl("veganery") || C.logoUrl("veganery") },
         me: A.publicUser(me)     // 로그인 상태면 누구인지, 아니면 null
       });
       return;

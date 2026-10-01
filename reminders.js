@@ -9,8 +9,6 @@
 // 이 함수를 부르므로 회신 데이터가 최신이다.
 
 const nodemailer = require("nodemailer");
-const fs = require("fs");
-const path = require("path");
 const T = require("./email-template.js");
 const A = require("./auth.js");
 const H = require("./history.js");
@@ -18,25 +16,13 @@ const H = require("./history.js");
 const SMTP_HOST = process.env.NW_SMTP_HOST || "smtp.worksmobile.com";
 const SMTP_PORT = Number(process.env.NW_SMTP_PORT || 465);
 const SEND_GAP_MS = 1100;                 // 유량 제한(60/min) 회피
-const LOGO_CID = "dalbalogo@dalba";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function cleanHeader(s) { return String(s == null ? "" : s).replace(/[\r\n]+/g, " ").trim(); }
 
-// 로고를 메일에 인라인(cid)으로 박는다 (외부 URL 은 배포 보호 등으로 깨질 때가 있다).
-// LOGO_URL 을 명시한 배포는 그 URL 을 그대로 쓴다.
-let logoBuf;
-function logoAttachment() {
-  if (process.env.LOGO_URL) return null;
-  if (logoBuf === undefined) {
-    try { logoBuf = fs.readFileSync(path.join(__dirname, "logo-black.png")); } catch (_) { logoBuf = null; }
-  }
-  return logoBuf ? { filename: "logo.png", content: logoBuf, contentType: "image/png", cid: LOGO_CID, contentDisposition: "inline" } : null;
-}
-function logoUrl() {
-  if (process.env.LOGO_URL) return process.env.LOGO_URL;
-  return logoAttachment() ? "cid:" + LOGO_CID : "";
-}
+// 로고를 메일에 인라인(cid)으로 박는다 — 브랜드(테마)별 로고는 logos.js 에서.
+// 리마인드는 첫 메일의 테마(plan.theme)를 그대로 따른다 (비거너리로 보낸 건 비거너리로).
+const LG = require("./logos.js");
 
 function transporterFor(account) {
   return nodemailer.createTransport({
@@ -67,8 +53,6 @@ async function sendDue(opts) {
 
   const [plans, replies] = await Promise.all([H.allReminders(), H.recentReplies(H.REPLY_MAX)]);
   const replied = repliedKeys(replies);
-  const logo = logoAttachment();
-  const attachments = logo ? [logo] : undefined;
 
   const transports = new Map();
   const getT = account => {
@@ -111,8 +95,11 @@ async function sendDue(opts) {
         subject: plan.subject || "", reminderNote: roundNote,
         applyUrl: plan.applyUrl || "", applyLabel: plan.applyLabel || "",
         senderName: account.name, senderEmail: account.email, senderTitle: account.title || "",
-        logoUrl: logoUrl()
+        theme: LG.themeOf(plan.theme),
+        logoUrl: (LG.logoAttachment(plan.theme) ? "cid:" + LG.CID[LG.themeOf(plan.theme)] : LG.logoUrl(plan.theme))
       };
+      const logo = LG.logoAttachment(plan.theme);
+      const attachments = logo ? [logo] : undefined;
       const built = T.build(data);
       const to = cleanHeader(plan.to);
       const toName = cleanHeader(plan.creatorName || "");
