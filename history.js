@@ -237,17 +237,27 @@ async function ownIndexReady() {
   if (!enabled()) return true;
   try { return (await cmd(["GET", OWN_READY_KEY])) === OWN_VER; } catch (_) { return false; }
 }
-// 지난 발송 기록으로 색인을 한 번 채운다 (크론). 담당자별로 모아 SADD 몇 번.
-async function rebuildOwnIndex() {
+// 지난 발송 기록으로 색인을 채운다 (크론). 기록을 3000건씩 읽어 담당자별로 모아 SADD — 시간 예산 안에서
+// 하고, 다 못 하면 어디까지 했는지 남겨 다음 실행이 이어서 한다 (한 번에 다 읽다 끊기면 영영 안 끝나므로).
+const OWN_PROGRESS_KEY = "outreach:own:progress";
+async function rebuildOwnIndex(o) {
   if (!enabled() || await ownIndexReady()) return { skipped: true };
-  const recs = await recent(LOG_MAX);
-  const by = new Map();
-  recs.forEach(r => { const b = normEmail(r && r.by); if (!b) return; const m = ownMembers(r); if (!m.length) return; const set = by.get(b) || new Set(); m.forEach(x => set.add(x)); by.set(b, set); });
-  const cmds = [];
-  by.forEach((set, b) => { const list = [...set]; for (let i = 0; i < list.length; i += 1000) cmds.push(["SADD", ownKey(b)].concat(list.slice(i, i + 1000))); });
-  for (let i = 0; i < cmds.length; i += 20) await pipeline(cmds.slice(i, i + 20));
-  await cmd(["SET", OWN_READY_KEY, OWN_VER]);
-  return { staff: by.size, records: recs.length };
+  const until = Date.now() + Math.max(2000, Number(o && o.budgetMs) || 15000);
+  let start = Number(await cmd(["GET", OWN_PROGRESS_KEY])) || 0;
+  let records = 0, done = false;
+  while (Date.now() < until) {
+    const chunk = (await cmd(["LRANGE", LOG_KEY, String(start), String(start + READ_CHUNK - 1)])) || [];
+    const by = new Map();
+    chunk.forEach(v => { const r = parseRec(v); const b = normEmail(r && r.by); if (!b) return; const m = ownMembers(r); if (!m.length) return; const set = by.get(b) || new Set(); m.forEach(x => set.add(x)); by.set(b, set); });
+    const cmds = [];
+    by.forEach((set, b) => { const list = [...set]; for (let i = 0; i < list.length; i += 1000) cmds.push(["SADD", ownKey(b)].concat(list.slice(i, i + 1000))); });
+    if (cmds.length) await pipeline(cmds);
+    records += chunk.length; start += chunk.length;
+    if (chunk.length < READ_CHUNK || start >= LOG_MAX) { done = true; break; }
+    await cmd(["SET", OWN_PROGRESS_KEY, String(start)]);
+  }
+  if (done) await pipeline([["SET", OWN_READY_KEY, OWN_VER], ["DEL", OWN_PROGRESS_KEY]]);
+  return { records, done, at: start };
 }
 
 const OWN_TTL_MS = 60e3;
@@ -295,7 +305,15 @@ async function ownPriors(items, me, links) {
   // 색인이 준비됐고 명령이 먹혔으면 색인만 믿는다. 아니면(채우기 전·명령 미지원) 발송 기록을 읽는다.
   const useLog = !(setOk && res[readyAt] === OWN_VER);
   let idx = null;
-  const logIdx = async () => { if (!idx) { try { idx = await ownLogIndex(meN); } catch (_) { idx = { byEmail: new Map(), byHandle: new Map() }; } } return idx; };
+  // 색인 준비 전 대안(발송 기록 전체 읽기)은 최대 8초 — 발송 요청이 이것 때문에 시간 초과되지 않게
+  const empty = { byEmail: new Map(), byHandle: new Map() };
+  const logIdx = async () => {
+    if (!idx) {
+      try { idx = (await Promise.race([ownLogIndex(meN), new Promise(r => setTimeout(() => r(null), 8000))])) || empty; }
+      catch (_) { idx = empty; }
+    }
+    return idx;
+  };
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const es = emailsOf(i), hs = handlesOf(i);
@@ -309,6 +327,47 @@ async function ownPriors(items, me, links) {
     out.push(r ? Object.assign({}, r, { own: true }) : null);
   }
   return out;
+}
+
+// ─── 방금 보냄 (같은 담당자 → 같은 크리에이터, 30분) ──────────────
+// 발송이 시간 초과로 끊기면 화면엔 '실패'로 보여도 일부는 이미 나갔을 수 있다. 다시 누르면 본인 발송
+// 이력 덕에 통과해 **같은 메일이 두 번** 나간다. 성공한 발송마다 짧은 표시를 남겨, 30분 안에 같은
+// 담당자가 같은 크리에이터에게 다시 보내면 건너뛴다. (관리자 강제 발송은 예외)
+const RECENT_SEC = Math.max(60, Number(process.env.RECENT_RESEND_SEC) || 1800);
+const recentKey = (by, to) => "outreach:recent:" + normEmail(by) + ":" + normEmail(to);
+function isRecentAt(at) { const t = Date.parse(at || ""); return isFinite(t) && Date.now() - t < RECENT_SEC * 1000; }
+function recentCmds(rec) {
+  const by = normEmail(rec && rec.by), to = normEmail(rec && rec.to);
+  const at = String((rec && rec.at) || new Date().toISOString());
+  if (!by || !to || to.indexOf("@") < 1 || !isRecentAt(at)) return [];   // 지금 보낸 것만 (옛 기록 가져오기는 아님)
+  return [["SET", recentKey(by, to), at, "EX", String(RECENT_SEC)]];
+}
+
+// ─── 발송 묶음 사전 조회 ─────────────────────────────────────────
+// 보내기 전에 묶음 전체를 한꺼번에 조회한다 (사람마다 따로 물으면 왕복이 수십 번 → 시간 초과).
+// → 같은 순서로 [{ br, own, bp, sup, recent }]  — reserve(…, pre) 와 발송 제외·방금 보냄 판단에 쓴다.
+async function precheckBatch(list, me) {
+  const items = Array.isArray(list) ? list : [];
+  if (!enabled() || !items.length) return items.map(() => ({}));
+  const meN = normEmail(me || "");
+  let links = [];
+  try { links = await bridge(items); } catch (_) { links = items.map(() => ({ handles: [], emails: [] })); }
+  const emailsOf = i => [normEmail(items[i] && (items[i].to || items[i].email))].concat((links[i] && links[i].emails) || []).filter(Boolean);
+  const allEmails = [...new Set(items.flatMap((_, i) => emailsOf(i)))];
+  const safe = (p, fb) => Promise.resolve(p).catch(() => fb);
+  const [sups, owns, bpAll, recentVals] = await Promise.all([
+    safe(suppressCheck(items, links), null),
+    meN ? safe(ownPriors(items, meN, links), null) : Promise.resolve(items.map(() => null)),
+    safe(bookSentPriors(allEmails), null),
+    meN ? safe(cmd(["MGET"].concat(items.map(r => recentKey(meN, (r && (r.to || r.email)) || "-")))), null) : Promise.resolve(null)
+  ]);
+  return items.map((r, i) => {
+    const o = { br: links[i] || { handles: [], emails: [] }, sup: sups ? sups[i] : undefined };
+    if (owns) o.own = owns[i];                       // 못 읽었으면 reserve 가 직접 다시 묻는다
+    if (bpAll) { const m = new Map(); emailsOf(i).forEach(e => { if (bpAll.has(e)) m.set(e, bpAll.get(e)); }); o.bp = m; }
+    o.recent = recentVals && recentVals[i] && isRecentAt(String(recentVals[i])) ? String(recentVals[i]) : "";
+    return o;
+  });
 }
 
 // ─── 조회 ────────────────────────────────────────────────────────
@@ -359,7 +418,9 @@ async function lookup(list, me, linksIn) {
 // ─── 자리 잡기 ───────────────────────────────────────────────────
 // 성공하면 { ok:true }, 이미 누가 가져갔으면 { ok:false, prior }.
 // force 면 기존 기록을 덮어쓰고 보낸다 (기록에 forced 표시가 남는다).
-async function reserve(r, meta, force) {
+// pre: 발송 묶음 전체를 미리 한 번에 조회한 결과 (precheckBatch) — { br, own, bp } 가 있으면 다시 묻지 않는다.
+// 담당자 수·발송 수가 많을수록 왕복 한 번이 아쉽다 (함수는 싱가포르, 저장소는 미국 동부라 왕복이 길다).
+async function reserve(r, meta, force, pre) {
   if (!enabled()) return { ok: true, skipped: true };
 
   const keys = keysOf(r);
@@ -398,20 +459,17 @@ async function reserve(r, meta, force) {
   // 예: 예전에 이메일 A 로만 보냈던 크리에이터(핸들 X 와 연결됨)에게 지금 이메일 B + 핸들 X 로
   // 보내면, 자기 키(B·X)에는 기록이 없어도 연결된 A 키에 다른 담당자 기록이 있다 → 막는다.
   // 연결 키에는 자리를 잡지 않는다(보내는 주소가 아니므로) — 실패 시 반납할 것도 없다.
-  const br = (await bridge([r]))[0] || { handles: [], emails: [] };
+  const br = (pre && pre.br) || (await bridge([r]))[0] || { handles: [], emails: [] };
 
   // ── 본인이 이전에 보낸 크리에이터면 무조건 통과 (다른 담당자 기록이 있어도) ──
   // 빈 자리만 새로 잡고(NX), 다른 담당자가 잡은 자리는 건드리지 않는다. 본인 자리는 새로 고친다.
   if (me) {
-    const own = (await ownPriors([r], me, [br]))[0];
+    const own = (pre && "own" in pre) ? pre.own : (await ownPriors([r], me, [br]))[0];
     if (own) {
-      const res = await pipeline(keys.map(k => ["SET", k, val, "NX", "EX", String(TTL_SEC)]));
-      const taken = keys.filter((k, i) => !res[i]);
-      if (taken.length) {
-        const cur = await pipeline(taken.map(k => ["GET", k]));
-        const mineKeys = taken.filter((k, i) => { const p = parseRec(cur[i]); return p && normEmail(p.by) === me; });
-        if (mineKeys.length) await pipeline(mineKeys.map(k => ["SET", k, val, "EX", String(TTL_SEC)]));
-      }
+      // 자리 잡기와 현재 주인 읽기를 한 번에 (키마다 SET NX → GET)
+      const res = await pipeline([].concat(...keys.map(k => [["SET", k, val, "NX", "EX", String(TTL_SEC)], ["GET", k]])));
+      const mineKeys = keys.filter((k, i) => { if (res[2 * i]) return false; const p = parseRec(res[2 * i + 1]); return p && normEmail(p.by) === me; });
+      if (mineKeys.length) await pipeline(mineKeys.map(k => ["SET", k, val, "EX", String(TTL_SEC)]));
       return { ok: true, record: rec, resent: true, own: true };
     }
   }
@@ -433,7 +491,7 @@ async function reserve(r, meta, force) {
   // ── 다른 담당자 보낸편지함(주소록) 대조 — 단체·참조·숨은참조로 이미 보낸 상대도 막는다 ──
   const bookEmails = [normEmail(r && (r.to || r.email))].concat(br.emails || []).filter(Boolean);
   if (bookEmails.length) {
-    const bp = await bookSentPriors(bookEmails);
+    const bp = (pre && pre.bp) || await bookSentPriors(bookEmails);
     const priors = [].concat(...bookEmails.map(x => bp.get(x) || []));
     for (const p of priors) {
       if (isIgnoredSender(p.by)) continue;
@@ -446,11 +504,13 @@ async function reserve(r, meta, force) {
     }
   }
 
+  // 자리 잡기(SET NX)와 현재 주인 읽기(GET)를 모든 키에 대해 **한 번에** — 키마다 오가지 않는다
+  const claim = await pipeline([].concat(...keys.map(k => [["SET", k, val, "NX", "EX", String(TTL_SEC)], ["GET", k]])));
   for (let i = 0; i < keys.length; i++) {
-    const got = await cmd(["SET", keys[i], val, "NX", "EX", String(TTL_SEC)]);
+    const got = claim[2 * i];
     if (got) { created.push(keys[i]); continue; }
 
-    const prior = parseRec(await cmd(["GET", keys[i]]));
+    const prior = parseRec(claim[2 * i + 1]);
     // 제외 발신자(예: minju)가 잡아 둔 자리, 또는 본인이 잡은 자리면 발송 허용 —
     // 덮어써서 새 발신자가 주인이 되게 하고 계속한다 (이후 진짜 중복은 이 발신자 기준으로 막힌다).
     if (prior && (isIgnoredSender(prior.by) || (me && normEmail(prior.by) === me))) {
@@ -552,7 +612,8 @@ async function log(rec) {
       ["LPUSH", LOG_KEY, JSON.stringify(rec)],
       ["LTRIM", LOG_KEY, "0", String(LOG_MAX - 1)]
     ].concat(linkCmds(rec && rec.to, rec && rec.handle))    // 이메일+핸들이 함께 있으면 연결을 남긴다
-     .concat(ownCmds(rec)));                                  // 담당자별 '보낸 적 있는 상대' 색인
+     .concat(ownCmds(rec))                                    // 담당자별 '보낸 적 있는 상대' 색인
+     .concat(recentCmds(rec)));                               // 방금 보냄 표시 (30분 — 재시도 중복 방지)
   } catch (_) { /* 기록 실패가 발송을 막지는 않는다 */ }
 }
 
@@ -1218,7 +1279,7 @@ module.exports = {
   storageHint,
   enabled, lookup, reserve, release, log, logBlocked, importSend, readRaw, writeRaw, prefetchRaw,
   approveSend, isApproved, revokeApproval, approvalsIndex, allApprovals, approvalFieldsOf,
-  recordReply, recordReplies, recent, ownPriors, rebuildOwnIndex, ownIndexReady, recentBlocked, recentReplies, count,
+  recordReply, recordReplies, recent, ownPriors, precheckBatch, RECENT_SEC, rebuildOwnIndex, ownIndexReady, recentBlocked, recentReplies, count,
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,

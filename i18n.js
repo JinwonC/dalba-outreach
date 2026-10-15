@@ -83,6 +83,7 @@
       "🔎 중복 검사": "🔎 Duplicate check",
       "🤝 협업 리스트": "🤝 Collab list",
       "🤝 협업 중": "🤝 Collaborating",
+      "서버가 시간 안에 처리하지 못했습니다 — 잠시 후 다시 [발송]을 누르세요 (이미 나간 사람은 건너뜁니다)": "The server couldn't finish in time — press [Send] again shortly (people already emailed are skipped)",
       "🌿 Veganery 발송": "🌿 Veganery Send",
       "메일로 보냅니다 — 로고·색상이 비거너리로 바뀌고, 이 탭의 작성 내용은 따로 저장됩니다.": "email — the logo and colors switch to Veganery, and this tab keeps its own draft.",
       "메일 (비거너리 로고·연두 색상)": "email (Veganery logo · green colors)",
@@ -755,6 +756,7 @@
       "🔎 중복 검사": "🔎 Kiểm tra trùng",
       "🤝 협업 리스트": "🤝 DS hợp tác",
       "🤝 협업 중": "🤝 Đang hợp tác",
+      "서버가 시간 안에 처리하지 못했습니다 — 잠시 후 다시 [발송]을 누르세요 (이미 나간 사람은 건너뜁니다)": "Máy chủ không xử lý kịp — bấm [Gửi] lại sau (người đã nhận sẽ được bỏ qua)",
       "🌿 Veganery 발송": "🌿 Gửi Veganery",
       "메일로 보냅니다 — 로고·색상이 비거너리로 바뀌고, 이 탭의 작성 내용은 따로 저장됩니다.": "email — logo và màu đổi sang Veganery, tab này lưu bản nháp riêng.",
       "메일 (비거너리 로고·연두 색상)": "email (logo Veganery · màu xanh lá)",
@@ -1432,6 +1434,7 @@
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 {n} collab creators included (admins can send).",
       "핸들 없음 {n}명": "{n} without handle",
+      "방금({n}분 전) 이 크리에이터에게 이미 보냈습니다 — 같은 메일이 두 번 나가지 않게 건너뜀": "Already sent to this creator {n} min ago — skipped so the same email doesn't go out twice",
       "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 숨겼습니다 — 지금은 이런 경우 막히지 않습니다.": "{n} old records where staff were blocked re-sending to their own creators are hidden — this no longer gets blocked.",
       "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 함께 보여 주고 있습니다 — 지금은 이런 경우 막히지 않습니다.": "Showing {n} old records where staff were blocked re-sending to their own creators — this no longer gets blocked.",
       "제목이 저장되기 전의 툴 발송 {n}건은 빠졌습니다.": "{n} tool sends from before subjects were recorded are excluded.",
@@ -1558,6 +1561,7 @@
       "🤝 협업 중인 크리에이터 {n}명이 포함돼 있습니다 (관리자는 발송 가능).":
         "🤝 Có {n} creator đang hợp tác (quản trị vẫn gửi được).",
       "핸들 없음 {n}명": "{n} chưa có handle",
+      "방금({n}분 전) 이 크리에이터에게 이미 보냈습니다 — 같은 메일이 두 번 나가지 않게 건너뜀": "Đã gửi cho creator này {n} phút trước — bỏ qua để không gửi trùng",
       "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 숨겼습니다 — 지금은 이런 경우 막히지 않습니다.": "Đã ẩn {n} bản ghi cũ khi nhân viên bị chặn gửi lại cho creator của chính mình — hiện không còn bị chặn.",
       "본인이 이미 보냈던 크리에이터에게 다시 보내려다 막혔던 옛 기록 {n}건은 함께 보여 주고 있습니다 — 지금은 이런 경우 막히지 않습니다.": "Đang hiện {n} bản ghi cũ khi nhân viên bị chặn gửi lại cho creator của chính mình — hiện không còn bị chặn.",
       "제목이 저장되기 전의 툴 발송 {n}건은 빠졌습니다.": "Đã loại {n} lần gửi bằng công cụ trước khi lưu tiêu đề.",

@@ -85,7 +85,12 @@ function readBody(req) {
   return b;
 }
 
+// 한 요청의 발송 예산 — Vercel 함수 제한(60초)보다 넉넉히 앞에서 멈추고, 못 보낸 사람은 leftover 로
+// 돌려줘 화면이 다음 요청으로 이어 보낸다. (예전엔 25명을 끝까지 보내려다 60초를 넘겨 통째로 끊겼다)
+const SEND_BUDGET_MS = Math.max(10e3, Number(process.env.SEND_BUDGET_MS) || 40e3);
+
 module.exports = async (req, res) => {
+  const t0 = Date.now();
   try {
     // ─── 접근 보호 ───────────────────────────────────────────────
     // 이 엔드포인트는 **실제로 메일을 보낸다**.
@@ -163,7 +168,8 @@ module.exports = async (req, res) => {
 
     // ─── 실제 발송 — 공용 발송 코어 ──────────────────────────────
     // 인하우스(협업 중) 크리에이터 차단은 관리자 제외 — 관리자면 admin:true 로 건너뛴다.
-    const out = await C.sendBatch({ account, campaign, recipients, force, admin: isAdmin(me) });
+    const out = await C.sendBatch({ account, campaign, recipients, force, admin: isAdmin(me),
+      budgetMs: Math.max(5e3, SEND_BUDGET_MS - (Date.now() - t0)) });
     if (out.smtpError) {
       res.status(502).json({ error: out.smtpError, hint: out.hint });
       return;
@@ -173,8 +179,12 @@ module.exports = async (req, res) => {
     res.status(200).json({
       sentAt: new Date().toISOString(),
       sender: { name: account.name, email: account.email },
-      totals: { requested: recipients.length, sent: out.sent, held: out.held, failed: recipients.length - out.sent - out.held },
-      results: out.results
+      totals: { requested: recipients.length, sent: out.sent, held: out.held,
+        leftover: (out.leftover || []).length,
+        failed: recipients.length - out.sent - out.held - (out.leftover || []).length },
+      results: out.results,
+      // 시간 안에 못 보낸 사람 — 화면이 바로 다음 요청으로 이어 보낸다 (아직 아무것도 안 나감)
+      leftover: out.leftover || []
     });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e) });

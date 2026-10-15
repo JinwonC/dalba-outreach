@@ -145,7 +145,7 @@ const day = d => new Date(Date.now() - d * 86400e3).toISOString();
   lists.set("outreach:log", lists.get("outreach:log").concat([JSON.stringify({ to: "legacy@x.com", handle: "legacyh", at: day(200), by: L })]));
   kv.delete("outreach:own:ready");
   const rb = await H.rebuildOwnIndex();
-  ck(rb.staff >= 2 && kv.get("outreach:own:ready") === "1" && sets.get("outreach:own:" + L).has("e:legacy@x.com"), "rebuild fills index from log: " + JSON.stringify(rb));
+  ck(rb.done && kv.get("outreach:own:ready") === "1" && sets.get("outreach:own:" + L).has("e:legacy@x.com"), "rebuild fills index from log: " + JSON.stringify(rb));
   ck((await H.rebuildOwnIndex()).skipped, "rebuild runs once");
   // 발송 기록에서 밀려난(잘린) 옛 발송도 색인이 있으면 본인으로 인정 — 발송 기록을 읽지 않는다
   lists.set("outreach:log", []);

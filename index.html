@@ -1750,7 +1750,7 @@ async function parseSend(r){
   try { return JSON.parse(text); }
   catch(_){
     const snippet = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
-    const hint = r.status === 504 ? "발송이 제한시간을 넘겼습니다 — 한 번에 보내는 인원을 줄이거나 잠시 후 다시 시도하세요"
+    const hint = r.status === 504 ? "발송이 제한시간을 넘겼습니다 — 일부는 이미 나갔을 수 있습니다. 다시 [발송]을 누르면 30분 안에 이미 나간 사람은 자동으로 건너뜁니다"
       : r.status === 413 ? "요청이 너무 큽니다 — 제품 이미지를 더 작게 하거나 URL 방식으로 바꿔보세요"
       : (r.status >= 500 ? "서버 함수 오류 — 잠시 후 다시 시도하세요" : "");
     return { error: "서버 오류 (HTTP " + r.status + ")" + (snippet ? ": " + snippet : ""), hint };
@@ -1769,8 +1769,11 @@ async function doSend(list){
   $("progWrap").style.display = "";
   $("progFill").style.width = "0%";
 
-  for(let i=0; i<list.length; i+=chunkSize){
-    const chunk = list.slice(i, i+chunkSize);
+  // 묶음씩 보낸다. 서버가 시간 안에 못 보낸 사람(leftover)을 돌려주면 맨 앞에 다시 넣어 이어 보낸다.
+  const queue = list.slice();
+  let stalls = 0;
+  while(queue.length){
+    const chunk = queue.splice(0, chunkSize);
     try {
       const r = await fetch("/api/outreach-send", {
         method: "POST",
@@ -1791,11 +1794,21 @@ async function doSend(list){
         chunk.forEach(c => all.push({ to:c.to, ok:false, error:data.error + (data.hint ? " — " + data.hint : "") }));
       } else {
         (data.results||[]).forEach(x => all.push(x));
+        const left = Array.isArray(data.leftover) ? data.leftover : [];
+        if(left.length){
+          // 한 명도 처리 못 하고 그대로 돌아오기를 두 번 하면 멈춘다 (무한 반복 방지)
+          stalls = (data.results||[]).length ? 0 : stalls + 1;
+          if(stalls >= 2){
+            left.forEach(c => all.push({ to:c.to, ok:false, error:"서버가 시간 안에 처리하지 못했습니다 — 잠시 후 다시 [발송]을 누르세요 (이미 나간 사람은 건너뜁니다)" }));
+          } else {
+            queue.unshift(...left);
+          }
+        } else stalls = 0;
       }
     } catch(e){
       chunk.forEach(c => all.push({ to:c.to, ok:false, error:String(e.message||e) }));
     }
-    done += chunk.length;
+    done = list.length - queue.length;
     $("progFill").style.width = Math.round(done/list.length*100) + "%";
     paintResults(all, list.length);
   }

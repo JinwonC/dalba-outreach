@@ -150,24 +150,42 @@ async function sendBatch(opts) {
   const leftover = [];
   let lastAt = 0;
 
+  // ─── 묶음 전체를 미리 한 번에 조회 ─────────────────────────────
+  // 연결(브리지)·발송 제외·본인 발송 이력·보낸 주소록·방금 보냄 — 사람마다 따로 물으면 왕복이 수십 번이라
+  // (함수 싱가포르 ↔ 저장소 미국 동부) 25명 묶음이 60초를 넘겨 끊겼다. 여기서 몇 번에 끝낸다.
+  const composed = recipients.map(r => compose(r));
+  let pres = composed.map(() => ({}));
+  try { pres = await H.precheckBatch(composed, account.email); } catch (_) { /* 못 읽으면 사람마다 직접 묻는다 */ }
+
   for (let i = 0; i < recipients.length; i++) {
-    // 예산이 다 됐으면 남은 수신자는 다음 실행(크론)이 이어받는다
+    // 예산이 다 됐으면 남은 수신자는 다음 요청(화면)·다음 실행(크론)이 이어받는다
     if (deadline && Date.now() > deadline) { leftover.push(...recipients.slice(i)); break; }
 
-    const d = compose(recipients[i]);
+    const d = composed[i];
     const to = cleanHeader(d.to);
+    const pre = pres[i] || {};
 
     const errs = T.validate(d);
     if (errs.length) { results.push({ to, ok: false, error: errs.join(" / ") }); continue; }
 
     // 이메일↔핸들 연결(브리지) — 핸들을 비워 보냈어도 예전 기록으로 핸들을 찾는다
-    let linked = { handles: [], emails: [] };
-    try { linked = (await H.bridge([d]))[0] || linked; } catch (_) {}
+    let linked = pre.br || null;
+    if (!linked) { linked = { handles: [], emails: [] }; try { linked = (await H.bridge([d]))[0] || linked; } catch (_) {} }
+
+    // ─── 방금 보냄 — 같은 담당자가 30분 안에 같은 크리에이터에게 이미 보냈으면 건너뛴다 ──
+    // (시간 초과 뒤 다시 눌러도 같은 메일이 두 번 나가지 않게. 관리자 강제 발송은 예외)
+    if (pre.recent && !force) {
+      const mins = Math.max(0, Math.round((Date.now() - Date.parse(pre.recent)) / 60000));
+      results.push({ to, ok: false, held: true, recent: true, recentAt: pre.recent,
+        error: "방금(" + (isFinite(mins) ? mins + "분 전" : "조금 전") + ") 이 크리에이터에게 이미 보냈습니다 — 같은 메일이 두 번 나가지 않게 건너뜀" });
+      continue;
+    }
 
     // ─── 발송 제외 (반송된 없는 주소 · 수신 거부) — 누구도(관리자·강제 발송 포함) 보낼 수 없다 ──
     // 잘못 들어간 주소는 관리자 페이지 [⛔ 발송 제외] 에서 지운다. 저장소를 못 읽으면 아래 중복 확인이 막는다.
     let sup = null;
-    try { sup = (await H.suppressCheck([d], [linked]))[0]; } catch (_) { sup = null; }
+    if (pre.sup !== undefined) sup = pre.sup;
+    else { try { sup = (await H.suppressCheck([d], [linked]))[0]; } catch (_) { sup = null; } }
     if (sup) {
       results.push({
         to, ok: false, held: true, suppressed: sup.type, suppressReason: sup.reason || "",
@@ -182,7 +200,7 @@ async function sendBatch(opts) {
     // 이미 협업 중인 크리에이터에게는 담당자가 보낼 수 없다. 관리자와, 본인이 이전에 보낸 적 있는 담당자만 예외.
     let ih = inhouseMatch ? inhouseMatch(d, linked.handles) : null;
     // 본인이 이전에 보낸 적 있는 크리에이터면 협업 중이어도 계속 소통할 수 있다
-    if (ih) { try { if ((await H.ownPriors([d], account.email, [linked]))[0]) ih = null; } catch (_) {} }
+    if (ih) { try { if ("own" in pre ? pre.own : (await H.ownPriors([d], account.email, [linked]))[0]) ih = null; } catch (_) {} }
     if (ih) {
       results.push({
         to, ok: false, held: true, inhouse: true, inhouseHandle: ih.handle, inhouseVia: ih.via,
@@ -199,7 +217,7 @@ async function sendBatch(opts) {
     try {
       const rv = await H.reserve(d, {
         by: account.email, byName: account.name, campaign: d.campaignTitle || ""
-      }, force);
+      }, force, Object.assign({}, pre, { br: linked }));
       if (!rv.ok) {
         results.push({ to, ok: false, held: true, prior: rv.prior || null, error: heldReason(rv.prior) });
         H.logBlocked({
@@ -222,7 +240,7 @@ async function sendBatch(opts) {
         const msg = "이력 저장소에 연결하지 못해 보내지 않았습니다 (중복 방지). 잠시 후 다시 [발송] 을 " +
                     "누르면 남은 사람만 나갑니다 — " + String((e && e.message) || e);
         for (let k = i; k < recipients.length; k++) {
-          results.push({ to: cleanHeader(compose(recipients[k]).to), ok: false, error: msg });
+          results.push({ to: cleanHeader(composed[k].to), ok: false, error: msg });
         }
         break;
       }

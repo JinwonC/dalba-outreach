@@ -88,7 +88,8 @@ module.exports = async (req, res) => {
     // ─── 담당자별 '보낸 적 있는 상대' 색인 1회 채우기 ───────────────
     // 본인이 예전에 보낸 크리에이터를 막지 않으려고 쓰는 색인. 다 채우면 표시가 남아 다음부터 건너뛴다.
     let ownIndex = null;
-    try { if (!(await H.ownIndexReady())) ownIndex = await H.rebuildOwnIndex(); } catch (e) { ownIndex = { error: String((e && e.message) || e) }; }
+    try { if (!(await H.ownIndexReady())) ownIndex = await H.rebuildOwnIndex({ budgetMs: Math.min(15e3, Math.max(3e3, deadline - Date.now() - 25e3)) }); }
+    catch (e) { ownIndex = { error: String((e && e.message) || e) }; }
 
     // ─── 메일함 동기화는 **한 시간에 한 번**만 돈다 ──────────────
     // 크론은 예약·리마인드 때문에 15분마다 돌지만, 담당자 메일함 20개를 여는 무거운 동기화를
