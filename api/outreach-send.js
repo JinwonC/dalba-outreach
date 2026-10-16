@@ -113,6 +113,8 @@ module.exports = async (req, res) => {
         protected: Boolean(PW) || A.enabled(),
         bcc: Boolean(process.env.NW_BCC),
         history: { enabled: H.enabled(), windowDays: H.WINDOW_DAYS },
+        // 담당자끼리 중복 차단 여부 (기본 꺼짐 — 🤝 협업 중만 막는다). 화면이 '보류' 표시를 이걸로 정한다
+        dedupAcrossStaff: H.dedupAcrossStaff(),
         admin: isAdmin(me),          // 관리자 화면 버튼을 띄울지
         // 미리보기도 외부 요청 없이 로고를 그리도록 data URL 로 준다 (없으면 URL 폴백)
         logoUrl: C.logoDataUrl() || C.logoUrl(),

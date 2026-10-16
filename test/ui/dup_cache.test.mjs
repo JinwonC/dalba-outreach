@@ -29,11 +29,16 @@ await page.evaluate(() => setMode("bulk"));
 await page.evaluate(() => { document.getElementById("bulkText").value = "old@x.com\tOld\nnew1@x.com\tN1\nnew2@x.com\tN2"; });
 await page.evaluate(() => checkDup()); await page.waitForTimeout(200);
 ck(asked.length === 1 && asked[0].length === 3, "first check asks all 3");
-ck(await page.evaluate(() => Boolean(heldPriorOf("old@x.com"))), "old@x.com shown as held");
+ck(await page.evaluate(() => Boolean(overlapPriorOf("old@x.com")) && !heldPriorOf("old@x.com")), "old@x.com shown as overlap, not held (cross-staff dedup off)");
+ck(/막지 않고 그대로 발송됩니다/.test(await page.innerText("#dupInfo")) && !/보류/.test(await page.innerText("#dupInfo")), "info note instead of hold");
+ck(/ℹ️ 다른 담당자 발송 있음/.test(await page.innerText("#bulkTable")) && !/⏸ 보류/.test(await page.innerText("#bulkTable")), "bulk table soft tag");
+await page.evaluate(() => { CFG.dedupAcrossStaff = true; paintDup(); renderBulkTable(); });
+ck(/보류/.test(await page.innerText("#dupInfo")), "switch on → held again");
+await page.evaluate(() => { CFG.dedupAcrossStaff = false; paintDup(); renderBulkTable(); });
 // typing in the pitch → re-check → nothing new to ask
 await page.evaluate(() => checkDup()); await page.evaluate(() => checkDup()); await page.waitForTimeout(200);
 ck(asked.length === 1, "editing other fields does not re-ask (cached): " + asked.length);
-ck(await page.evaluate(() => Boolean(heldPriorOf("old@x.com"))), "held state kept from cache");
+ck(await page.evaluate(() => Boolean(overlapPriorOf("old@x.com"))), "prior kept from cache");
 // add one recipient → only that one asked
 await page.evaluate(() => { document.getElementById("bulkText").value += "\nnew3@x.com\tN3"; });
 await page.evaluate(() => checkDup()); await page.waitForTimeout(200);

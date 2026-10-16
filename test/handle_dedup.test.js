@@ -1,5 +1,6 @@
 // 테스트: 핸들만으로도 중복 차단되는지
 require("./helpers/stubs");
+process.env.DEDUP_ACROSS_STAFF = "1";   // 담당자끼리 중복 차단을 켠 상태의 동작을 검사한다 (기본은 꺼짐)
 // Prove dedup blocks by HANDLE (not just email), and pin down the real coverage gap.
 process.env.KV_REST_API_URL = "https://stub.local";
 process.env.KV_REST_API_TOKEN = "stub";

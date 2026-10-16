@@ -1,5 +1,6 @@
 // 테스트: 네이버웍스 단체·숨은참조 발송도 중복으로 잡는지 (보낸 주소록 대조, 1년 창)
 require("./helpers/stubs");
+process.env.DEDUP_ACROSS_STAFF = "1";   // 담당자끼리 중복 차단을 켠 상태의 동작을 검사한다 (기본은 꺼짐)
 process.env.KV_REST_API_URL = "https://stub.local";
 process.env.KV_REST_API_TOKEN = "stub";
 process.env.NW_ACCOUNTS = JSON.stringify([

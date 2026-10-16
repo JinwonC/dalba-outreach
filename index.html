@@ -1136,6 +1136,7 @@ function renderBulkTable(){
     h += '<tr'+(x ? ' style="background:#fdecea"' : p ? ' style="background:#fffaf0"' : '')+'><td>'+(i+1)+'</td><td>'+esc(r.to)+
          (x ? ' '+supTag(x) : '') +
          (p ? ' <span class="holdtag" title="'+esc(priorText(p))+'">⏸ 보류</span>' : '') +
+         (!x && !p && overlapPriorOf(r.to) ? ' <span class="muted" style="font-size:11px" title="'+esc(priorText(overlapPriorOf(r.to)))+'">ℹ️ 다른 담당자 발송 있음</span>' : '') +
          '</td><td>'+esc(r.creatorName||'')+'</td><td>'+esc(r.handle||'')+
          '</td><td>'+esc(r.amount||'')+'</td><td>'+esc(r.commission||'')+'</td><td>'+esc((r.whyYou||'').slice(0,40))+'</td></tr>';
   });
@@ -1404,11 +1405,14 @@ function priorOf(to){ return DUP[dupKey(to)] || null; }
 function myEmail(){ const a = acct(); return a && a.email ? String(a.email).toLowerCase() : ""; }
 /* 보류 대상인가 — **다른 담당자**가 이미 보낸 경우만. 본인 재발송은 서버가 그대로 보내므로
    보류가 아니다 (미리보기가 "보류"라고 잘못 겁주지 않도록 여기서도 본인 것은 뺀다). */
-function heldPriorOf(to){
+function otherPriorOf(to){
   const p = priorOf(to);
   if(!p) return null;
   return String(p.by || "").toLowerCase() === myEmail() ? null : p;
 }
+/* 담당자끼리 중복 차단은 기본 꺼짐 (🤝 협업 중만 막는다) — 꺼져 있으면 '보류'가 아니라 참고 표시만 한다 */
+function heldPriorOf(to){ return (CFG && CFG.dedupAcrossStaff) ? otherPriorOf(to) : null; }
+function overlapPriorOf(to){ return (CFG && CFG.dedupAcrossStaff) ? null : otherPriorOf(to); }
 
 function scheduleDupCheck(){
   if(!(CFG.history && CFG.history.enabled)) return;
@@ -1487,11 +1491,20 @@ function supHtml(list){
     sup.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td>'+supTag(supOf(r))+'</td></tr>').join("") +
     '</tbody></table></div>';
 }
+/* 다른 담당자가 이미 보낸 사람 — 막지 않고 알려만 준다 (담당자끼리 중복 차단이 꺼져 있을 때) */
+function overlapHtml(list){
+  const ov = list.filter(r => !supOf(r) && !inhouseOf(r) && overlapPriorOf(r.to));
+  if(!ov.length) return "";
+  return '<div class="hint" style="margin-top:10px">ℹ️ <span>다른 담당자가 이미 보낸 '+ov.length+'명 — 막지 않고 그대로 발송됩니다 (참고)</span></div>' +
+    '<div class="scroll"><table class="rcp"><thead><tr><th>수신자</th><th>이전 발송</th></tr></thead><tbody>' +
+    ov.slice(0,50).map(r => '<tr><td>'+esc(r.to)+'</td><td class="muted">'+esc(priorText(overlapPriorOf(r.to)))+'</td></tr>').join("") +
+    '</tbody></table></div>';
+}
 function paintDup(){
   const list = recipients();
   const held = list.filter(r => !supOf(r) && heldPriorOf(r.to));   // 다른 담당자가 보낸 경우만 보류
   const inh = list.filter(r => !supOf(r) && inhouseOf(r));         // 협업 리스트 (핸들·이메일)
-  const supH = supHtml(list);
+  const supH = supHtml(list) + overlapHtml(list);
   if(!held.length && !inh.length){ $("dupInfo").innerHTML = supH; return; }
   const forced = $("forceSend").checked;
   const inhHtml = !inh.length ? "" :

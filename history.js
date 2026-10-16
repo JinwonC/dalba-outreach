@@ -418,6 +418,12 @@ async function lookup(list, me, linksIn) {
 // ─── 자리 잡기 ───────────────────────────────────────────────────
 // 성공하면 { ok:true }, 이미 누가 가져갔으면 { ok:false, prior }.
 // force 면 기존 기록을 덮어쓰고 보낸다 (기록에 forced 표시가 남는다).
+// ─── 담당자끼리 중복 차단 (기본 꺼짐) ─────────────────────────────
+// 다른 담당자가 이미 보낸 크리에이터여도 막지 않는다 — 막는 건 🤝 협업 중(send-core)·발송 제외(반송·수신 거부)·
+// 같은 담당자의 30분 안 재발송뿐. 예전처럼 담당자끼리도 막으려면 환경변수 DEDUP_ACROSS_STAFF=1.
+// (끈 상태에서도 발송 기록·차단 키는 계속 남겨, 🔎 중복 검사·관리자 화면의 '누가 언제 보냈나'는 그대로 보인다)
+function dedupAcrossStaff() { return /^(1|true|on|yes)$/i.test(String(process.env.DEDUP_ACROSS_STAFF || "").trim()); }
+
 // pre: 발송 묶음 전체를 미리 한 번에 조회한 결과 (precheckBatch) — { br, own, bp } 가 있으면 다시 묻지 않는다.
 // 담당자 수·발송 수가 많을수록 왕복 한 번이 아쉽다 (함수는 싱가포르, 저장소는 미국 동부라 왕복이 길다).
 async function reserve(r, meta, force, pre) {
@@ -464,13 +470,15 @@ async function reserve(r, meta, force, pre) {
   // ── 본인이 이전에 보낸 크리에이터면 무조건 통과 (다른 담당자 기록이 있어도) ──
   // 빈 자리만 새로 잡고(NX), 다른 담당자가 잡은 자리는 건드리지 않는다. 본인 자리는 새로 고친다.
   if (me) {
-    const own = (pre && "own" in pre) ? pre.own : (await ownPriors([r], me, [br]))[0];
+    const across = dedupAcrossStaff();
+    const own = !across ? true : ((pre && "own" in pre) ? pre.own : (await ownPriors([r], me, [br]))[0]);
     if (own) {
+      // 담당자끼리 중복 차단이 꺼져 있으면(기본) 누구든 여기로 — 빈 자리만 잡고 본인 자리는 새로 고친 뒤 통과
       // 자리 잡기와 현재 주인 읽기를 한 번에 (키마다 SET NX → GET)
       const res = await pipeline([].concat(...keys.map(k => [["SET", k, val, "NX", "EX", String(TTL_SEC)], ["GET", k]])));
       const mineKeys = keys.filter((k, i) => { if (res[2 * i]) return false; const p = parseRec(res[2 * i + 1]); return p && normEmail(p.by) === me; });
       if (mineKeys.length) await pipeline(mineKeys.map(k => ["SET", k, val, "EX", String(TTL_SEC)]));
-      return { ok: true, record: rec, resent: true, own: true };
+      return { ok: true, record: rec, resent: true, own: across ? true : undefined, free: !across || undefined };
     }
   }
   const aliasKeys = aliasKeysOf(br).filter(k => keys.indexOf(k) < 0);
@@ -1283,7 +1291,7 @@ module.exports = {
   scheduleReminder, allReminders, saveReminder, cancelReminder, logReminderSent, recentReminders, reminderKey,
   saveSchedule, allSchedules, deleteSchedule,
   LOG_KEY, BLOCK_KEY, REPLY_KEY, REMIND_LOG_KEY,
-  normEmail, normHandle, isIgnoredSender, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, addDoNotContact, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
+  normEmail, normHandle, isIgnoredSender, dedupAcrossStaff, importSends, bookSentPriors, bookOwners, bookGetMany, suppressAdd, addDoNotContact, suppressRemove, suppressCheck, suppressAll, supFieldsOf,
   bridge, rebuildBridge, bridgeReady, addSentTo, sentToSet, bookMerge, bookAll, bookCount, saveSyncInfo, syncInfo, syncInfoMany, storeMessages, messageCount, messageUsage, messagesWith, outMessagesFor,
   WINDOW_DAYS, LOG_MAX, BLOCK_MAX, REPLY_MAX
 };

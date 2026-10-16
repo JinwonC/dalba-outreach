@@ -1,5 +1,6 @@
 // 테스트: 핸들 URL 정규화, 브리지, 이메일로 협업 리스트 대조, send-core 차단
 require("./helpers/stubs");
+process.env.DEDUP_ACROSS_STAFF = "1";   // 담당자끼리 중복 차단을 켠 상태의 동작을 검사한다 (기본은 꺼짐)
 process.env.KV_REST_API_URL = "https://stub.local";
 process.env.KV_REST_API_TOKEN = "stub";
 process.env.NW_ACCOUNTS = JSON.stringify([

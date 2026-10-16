@@ -1,5 +1,6 @@
 // 테스트: 본인이 이전에 보낸 크리에이터는 막히지 않는지 (다른 담당자 기록·협업 중이어도)
 require("./helpers/stubs");
+process.env.DEDUP_ACROSS_STAFF = "1";   // 담당자끼리 중복 차단을 켠 상태의 동작을 검사한다 (기본은 꺼짐)
 process.env.KV_REST_API_URL = "https://stub.local";
 process.env.KV_REST_API_TOKEN = "stub";
 process.env.NW_ACCOUNTS = JSON.stringify([

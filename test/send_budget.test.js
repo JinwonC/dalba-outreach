@@ -99,7 +99,7 @@ const R = n => Array.from({ length: n }, (_, i) => ({ to: "b" + i + "@gmail.com"
   kv.set("outreach:own:ready", "1");
   out = await SC.sendBatch({ account: { email: L, name: "Luna", password: "x" }, campaign: camp, recipients: [{ to: "mine@gmail.com", creatorName: "M" }, { to: "theirs@gmail.com", creatorName: "T" }], admin: false });
   ck(out.results[0].ok === true, "own creator still goes out (batch precheck)");
-  ck(out.results[1].ok === false && out.results[1].held && out.results[1].prior && out.results[1].prior.by === J, "other staff's creator still held");
+  ck(out.results[1].ok === true, "other staff's creator goes out (cross-staff dedup off by default)");
 
   // ── API: 예산 전달 + leftover 응답 ──
   process.env.SEND_BUDGET_MS = "10000";
